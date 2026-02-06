@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         undo_shortcut.setContext(Qt.ApplicationShortcut)
         undo_shortcut.activated.connect(self._undo)
     
-    # === Data Loading (SIMPLE) ===
+    # === Data Loading ===
     
     def _load_data(self):
         """Load decomposition and EMG data."""
@@ -268,7 +268,7 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # Load data using simple interface
+            # Load data 
             self.data.load(Path(decomp_file), Path(emg_file))
             
             # Reset state

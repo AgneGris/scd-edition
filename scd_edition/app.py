@@ -21,7 +21,7 @@ def main():
     font.setPointSize(12)
     app.setFont(font)
     
-    # Load custom fonts (optional)
+    # Load custom fonts 
     load_fonts("Figtree")
     
     # Create and show window

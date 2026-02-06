@@ -4,6 +4,7 @@ import scd
 # === Settings ===
 input_file = "emg.mat"
 config_name = "surface"
+config_file=Path("configs.json")
 
 # === Paths ===
 input_path = Path("data/input") / input_file
@@ -12,7 +13,7 @@ output_path.parent.mkdir(parents=True, exist_ok=True)
 
 # === Run ===
 print(f"Running decomposition: {input_file}")
-dictionary, timestamps = scd.train(input_path, config_name=config_name)
+dictionary, timestamps = scd.train(input_path, config_name=config_name, config_file=config_file)
 
 # === Save ===
 scd.save_results(output_path, dictionary)
