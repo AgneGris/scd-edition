@@ -144,7 +144,7 @@ class DecompositionWorker(QThread):
         notch_freq = self._parse_notch(params["notch_filter"])
         if notch_freq is None:
             return None
-        return (notch_freq, 2.0, params["notch_harmonics"])  # (frequency, bandwidth, harmonics)
+        return (notch_freq, 2.0, params["notch_harmonics"])
 
     def _create_scd_config(self, params: dict) -> Config:
         """Create SCD Config object from GUI parameters."""
@@ -159,25 +159,24 @@ class DecompositionWorker(QThread):
             max_iterations=params["iterations"],
             extension_factor=params["extension_factor"],
             
-            # Filter parameters (corrected names)
+            # Filter parameters
             low_pass_cutoff=params["lowpass_hz"],
             high_pass_cutoff=params["highpass_hz"],
-            notch_params=self._create_notch_params(params),  # Must be tuple (freq, bandwidth, harmonics)
+            notch_params=self._create_notch_params(params),
             
             # Algorithm parameters
             clamp_percentile=params["clamp"],
             use_coeff_var_fitness=(params["fitness"] == "CoV"),
             
-            # Additional parameters that exist in Config
+            # Additional parameters
             peel_off=params["peel_off"],
             peel_off_window_size_ms=20,
             peel_off_repeats=params.get("peel_off_repeats", True),
-
             swarm=params["swarm"],
             fixed_exponent=params["fixed_exponent"],
-
             bad_channels=None,
-            remove_bad_fr=False)
+            remove_bad_fr=False
+        )
 
     def _parse_notch(self, notch_str: str) -> Optional[float]:
         """Parse notch filter string to frequency."""
@@ -189,37 +188,77 @@ class DecompositionWorker(QThread):
 
     def _decompose_grid(self, grid_data: torch.Tensor, config: Config, grid_idx: int) -> Tuple:
         """Run SCD decomposition on a single grid."""
-        # Ensure data is on correct device
         grid_data = grid_data.to(device=config.device, dtype=torch.float32)
         
-        # Create callback function
         def on_source_found(source, timestamps, iteration, silhouette):
             """Callback when SCD finds a source - emit signal to GUI"""
             self.source_found.emit(source, timestamps, iteration, silhouette)
         
-        # Run SCD with callback
         model = SwarmContrastiveDecomposition()
         timestamps, dictionary = model.run(
             grid_data, 
             config,
-            source_callback=on_source_found 
+            source_callback=on_source_found
         )
         
         return dictionary, timestamps
 
     def _save_results(self, results: dict):
-        """Save decomposition results to file."""
+        """Save decomposition results to file with all necessary reconstruction data."""
+        
+        # 1. Get channel counts and info per port
+        chans_per_electrode = []
+        electrodes = []
+        
+        for port_name in results["ports"]:
+            if port_name in self.grid_configs:
+                cfg = self.grid_configs[port_name]
+                chans_per_electrode.append(len(cfg.get('channels', [])))
+                electrodes.append(None) 
+            else:
+                chans_per_electrode.append(64)
+                electrodes.append(None)
+
+        # 2. Convert Data to Numpy - ALWAYS save as (channels, samples) for Edition tab
+        if torch.is_tensor(self.emg_data):
+            data_np = self.emg_data.detach().cpu().numpy()
+        else:
+            data_np = self.emg_data
+        
+        # Ensure (channels, samples) orientation
+        if data_np.shape[0] > data_np.shape[1]:
+            data_np = data_np.T
+
+        # 3. Create the dictionary structure
         save_dict = {
+            "version": 1.0,
+            # Results
             "pulse_trains": results["pulse_trains"],
             "discharge_times": results["discharge_times"],
             "mu_filters": results["mu_filters"],
             "ports": results["ports"],
+            
+            # Metadata & Raw Data
             "sampling_rate": self.sampling_rate,
-            "plateau_coords": self.plateau_coords.tolist(),
+            "plateau_coords": self.plateau_coords.tolist() if hasattr(self.plateau_coords, 'tolist') else list(self.plateau_coords),
+            "data": data_np,  # (channels, samples)
+            "chans_per_electrode": chans_per_electrode, 
+            "emg_mask": [m.tolist() if isinstance(m, np.ndarray) else m for m in self.rejected_channels], 
+            "electrodes": electrodes
         }
         
+        # 4. Ensure directory exists
+        save_path_obj = Path(self.save_path)
+        if not save_path_obj.parent.exists():
+            try:
+                save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                print(f"Error creating directory: {e}")
+
+        # 5. Write to file
         with open(self.save_path, 'wb') as f:
             pickle.dump(save_dict, f)
+            print(f"File saved successfully: {self.save_path}")
 
     def stop(self):
         self._is_running = False
@@ -231,6 +270,9 @@ class DecompositionWorker(QThread):
 
 class DecompositionTab(QWidget):
     """Decomposition tab for EMG signal decomposition."""
+    
+    # Signal emits the decomp file path so Edition tab can load it
+    decomposition_complete = pyqtSignal(Path)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -289,7 +331,6 @@ class DecompositionTab(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(2)
         
-        # Panels
         left_widget = self._create_left_panel()
         right_widget = self._create_right_panel()
         
@@ -306,10 +347,8 @@ class DecompositionTab(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
-        # --- GRID PARAMETERS ---
         layout.addWidget(QLabel("GRID PARAMETERS", styleSheet=get_section_header_style('info')))
         
-        # Grid Selector
         sel_layout = QHBoxLayout()
         sel_layout.addWidget(QLabel("Select Grid:"))
         self.grid_selector = QComboBox()
@@ -317,13 +356,11 @@ class DecompositionTab(QWidget):
         sel_layout.addWidget(self.grid_selector)
         layout.addLayout(sel_layout)
         
-        # Parameter Stack
         self.param_stack = QStackedWidget()
         layout.addWidget(self.param_stack)
         
         layout.addStretch()
         
-        # --- DECOMPOSITION BUTTON ---
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10pt;")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -375,7 +412,6 @@ class DecompositionTab(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(5)
         
-        # File path label at top
         self.file_path_label = QLabel("No file loaded")
         self.file_path_label.setAlignment(Qt.AlignLeft)
         self.file_path_label.setStyleSheet(
@@ -384,7 +420,6 @@ class DecompositionTab(QWidget):
         )
         layout.addWidget(self.file_path_label, stretch=0)
         
-        # Canvas for visualization
         self.figure = Figure(facecolor=COLORS['background'])
         self.canvas = FigureCanvas(self.figure)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -401,10 +436,6 @@ class DecompositionTab(QWidget):
         layout.addWidget(self.canvas, stretch=1)
         return container
 
-    # =========================================================================
-    # DATA LOADING
-    # =========================================================================
-
     def _load_emg_data(self):
         """Load EMG data from file."""
         import scipy.io as sio
@@ -413,7 +444,6 @@ class DecompositionTab(QWidget):
             if self.emg_path.suffix.lower() == ".mat":
                 mat = sio.loadmat(str(self.emg_path))
                 
-                # Find data array
                 for key in ['emg', 'data', 'sig', 'signal']:
                     if key in mat:
                         data = mat[key]
@@ -432,9 +462,9 @@ class DecompositionTab(QWidget):
             else:
                 raise ValueError(f"Unsupported format: {self.emg_path.suffix}")
             
-            # Convert to tensor and ensure (samples, channels) format
             self.emg_data = torch.from_numpy(data).to(dtype=torch.float32)
             
+            # Ensure (time, channels) for decomposition processing
             if self.emg_data.shape[1] > self.emg_data.shape[0]:
                 self.emg_data = self.emg_data.T
             
@@ -461,7 +491,6 @@ class DecompositionTab(QWidget):
             if not port.enabled:
                 continue
                 
-            # Determine extension factor based on number of channels
             n_channels = len(port.electrode.channels)
             extension_factor = int(np.ceil(1000 / n_channels))
             
@@ -578,26 +607,19 @@ class DecompositionTab(QWidget):
             except (ValueError, KeyError) as e:
                 print(f"Warning: Could not sync parameter for {port_name}: {e}")
 
-    # =========================================================================
-    # PREPROCESSING
-    # =========================================================================
-
     def _manual_channel_rejection(self):
         """Show EMG channels and let user select which to remove."""
         if self.emg_data is None:
             return
         
-        # 1. Cleanup
         self._cleanup_matplotlib_widgets()
         self.figure.clf()
         
-        # 2. Setup Figure (Full Panel)
         ax = self.figure.add_axes([0.01, 0.12, 0.98, 0.86])
         ax.set_facecolor(COLORS['background'])
         self.figure.set_facecolor(COLORS['background'])
         ax.axis('off')
 
-        # 3. Instructions
         instruction_text = self.figure.text(
             0.5, 0.08,
             "Click traces to toggle: RED = Rejected | BLUE = Kept",
@@ -605,44 +627,34 @@ class DecompositionTab(QWidget):
             fontsize=11, weight='bold', color=COLORS['info'],
         )
 
-        # 4. Plot Channels
         self.rejected_channels = [] 
         plot_lines = [] 
         
         current_vertical_offset = 0
-        
-        # Calculate separation
-        # Increased to *15 to prevent overlap which causes clicking issues
         std_dev = torch.std(self.emg_data).item()
         separation = std_dev * 15 if std_dev > 0 else 1.0
-        
         max_len = 0
 
         for port_idx, (port_name, config) in enumerate(self.grid_configs.items()):
             channels = config['channels']
             n_channels = len(channels)
             
-            # Initialize mask
             if len(self.rejected_channels) <= port_idx:
                 mask = np.zeros(n_channels, dtype=int)
                 self.rejected_channels.append(mask)
             else:
                 mask = self.rejected_channels[port_idx]
 
-            # Extract data
             grid_data = self.emg_data[:, channels].numpy()
             step = max(1, grid_data.shape[0] // 4000)
             disp_data = grid_data[::step, :]
             max_len = max(max_len, disp_data.shape[0])
             
-            # Plot
             for ch in range(n_channels):
                 is_rejected = mask[ch] == 1
                 color = COLORS['error'] if is_rejected else COLORS['info']
                 alpha = 0.5 if is_rejected else 0.8
                 
-                # Logic: y_pos increases with channel index
-                # This stacks them visually bottom-to-top
                 y_pos = current_vertical_offset + (ch * separation)
                 
                 line, = ax.plot(
@@ -650,16 +662,13 @@ class DecompositionTab(QWidget):
                     color=color,
                     alpha=alpha,
                     linewidth=1.0,
-                    # Reduced tolerance to prevent clicking the neighbor
                     picker=5.0 
                 )
                 
-                # Strict metadata attachment
                 line.port_idx = port_idx
                 line.channel_idx = ch
                 plot_lines.append(line)
             
-            # Label
             grid_center_y = current_vertical_offset + (n_channels * separation / 2)
             ax.text(
                 0, grid_center_y, 
@@ -674,7 +683,6 @@ class DecompositionTab(QWidget):
         ax.set_ylim(-separation, current_vertical_offset)
         ax.margins(0)
 
-        # 5. Confirm Button
         confirm_ax = self.figure.add_axes([0.4, 0.01, 0.2, 0.05])
         confirm_btn = Button(confirm_ax, "CONFIRM", 
                             color=COLORS['success'], hovercolor='#2EA043')
@@ -682,26 +690,20 @@ class DecompositionTab(QWidget):
         confirm_btn.label.set_weight('bold')
         confirm_btn.label.set_fontsize(10)
 
-        # 6. Event Logic
         event_loop = QEventLoop()
 
         def on_pick(event):
-            """Handle click"""
             line = event.artist
-            
-            # Double check we have the metadata
             if not hasattr(line, 'port_idx') or not hasattr(line, 'channel_idx'): 
                 return
             
             p_idx = line.port_idx
             c_idx = line.channel_idx
             
-            # Toggle Logic
             current_state = self.rejected_channels[p_idx][c_idx]
             new_state = 1 - current_state
             self.rejected_channels[p_idx][c_idx] = new_state
             
-            # Update visual immediately
             if new_state == 1:
                 line.set_color(COLORS['error'])
                 line.set_alpha(0.5)
@@ -709,7 +711,6 @@ class DecompositionTab(QWidget):
                 line.set_color(COLORS['info'])
                 line.set_alpha(0.8)
             
-            # Force redraw to show change immediately
             self.canvas.draw()
 
         def on_confirm(event):
@@ -741,20 +742,15 @@ class DecompositionTab(QWidget):
         if self.emg_data is None:
             return
         
-        # Clean up previous matplotlib widgets
         self._cleanup_matplotlib_widgets()
-        
         self.figure.clf()
         
-        # Calculate constants
         total_duration = self.emg_data.shape[0] / self.sampling_rate
         time_axis = np.arange(self.emg_data.shape[0]) / self.sampling_rate
         
-        # Create plot
         ax = self.figure.add_subplot(111)
         ax.set_facecolor(COLORS['background'])
         
-        # Instructions
         instruction_text = self.figure.text(
             0.5, 0.9,
             "Click plot to restart selection OR type in boxes (Press ENTER to apply)",
@@ -762,7 +758,6 @@ class DecompositionTab(QWidget):
             fontsize=12, weight='bold', color=COLORS['info'],
         )
         
-        # Plot RMS signals
         colors = ['#4a9eff', '#a78bfa', '#48BB78', '#F6AD55', '#ff6b9d']
         for idx, (port_name, config) in enumerate(self.grid_configs.items()):
             channels = config['channels']
@@ -786,13 +781,11 @@ class DecompositionTab(QWidget):
         ax.tick_params(colors=COLORS['foreground'])
         ax.set_xlim(0, total_duration)
         
-        # Remove spines
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.spines['left'].set_color(COLORS['background_light'])
         ax.spines['bottom'].set_color(COLORS['background_light'])
         
-        # --- WIDGET SETUP ---
         start_box_ax = self.figure.add_axes([0.12, 0.955, 0.18, 0.025])
         end_box_ax = self.figure.add_axes([0.38, 0.955, 0.18, 0.025])
         clear_btn_ax = self.figure.add_axes([0.63, 0.95, 0.12, 0.035])
@@ -805,31 +798,24 @@ class DecompositionTab(QWidget):
         clear_btn = Button(clear_btn_ax, "RESET", color=COLORS['background_light'], hovercolor=COLORS['text_muted'])
         confirm_btn = Button(confirm_btn_ax, "CONFIRM", color=COLORS['success'], hovercolor="#2EA043")
         
-        # Styling
         for w in [start_box, end_box]:
             w.label.set_color(COLORS['foreground'])
             w.text_disp.set_color(COLORS['foreground'])
         confirm_btn.label.set_color("white")
 
-        # --- STATE MANAGEMENT ---
-        # We maintain explicitly two values. None means "not set".
         self.sel_start = 0.0
         self.sel_end = total_duration
-        self.selection_state = "complete" # options: "start_set", "complete"
+        self.selection_state = "complete"
 
-        # Create the two vertical lines immediately (initialized to start/end)
         self.line_start = ax.axvline(x=self.sel_start, color=COLORS['success'], linestyle="--", linewidth=2)
         self.line_end = ax.axvline(x=self.sel_end, color=COLORS['error'], linestyle="--", linewidth=2)
         
         event_loop = QEventLoop()
 
         def update_visuals():
-            """Updates lines and text boxes based on internal state"""
-            # Update Start Line
             if self.sel_start is not None:
                 self.line_start.set_xdata([self.sel_start, self.sel_start])
                 self.line_start.set_visible(True)
-                # Only update text if it differs significantly to avoid typing interference
                 try:
                     if abs(float(start_box.text) - self.sel_start) > 0.01:
                         start_box.set_val(f"{self.sel_start:.2f}")
@@ -839,7 +825,6 @@ class DecompositionTab(QWidget):
                 self.line_start.set_visible(False)
                 start_box.set_val("")
 
-            # Update End Line
             if self.sel_end is not None:
                 self.line_end.set_xdata([self.sel_end, self.sel_end])
                 self.line_end.set_visible(True)
@@ -852,7 +837,6 @@ class DecompositionTab(QWidget):
                 self.line_end.set_visible(False)
                 end_box.set_val("")
             
-            # Update Instructions
             if self.selection_state == "start_set":
                 instruction_text.set_text(f"Start: {self.sel_start:.2f}s set. Click for End point.")
                 instruction_text.set_color(COLORS['warning'])
@@ -864,21 +848,15 @@ class DecompositionTab(QWidget):
             self.canvas.draw()
 
         def on_click(event):
-            """Handle plot clicks"""
             if event.inaxes != ax: return
-            
             val = event.xdata
             
             if self.selection_state == "complete":
-                # RESET: Start a new selection from scratch
                 self.sel_start = val
                 self.sel_end = None
                 self.selection_state = "start_set"
-            
             elif self.selection_state == "start_set":
-                # FINISH: Set the end point
                 self.sel_end = val
-                # Auto-sort
                 if self.sel_end < self.sel_start:
                     self.sel_start, self.sel_end = self.sel_end, self.sel_start
                 self.selection_state = "complete"
@@ -886,46 +864,32 @@ class DecompositionTab(QWidget):
             update_visuals()
 
         def on_start_submit(text):
-            """User pressed Enter in Start Box"""
             try:
                 val = float(text)
                 self.sel_start = val
-                
-                # If we have a complete pair and start > end, swap them
                 if self.selection_state == "complete" and self.sel_end is not None:
                     if self.sel_start > self.sel_end:
                          self.sel_start, self.sel_end = self.sel_end, self.sel_start
-                
-                # If we were in the middle of clicking, let's treat manual entry as valid start
                 if self.sel_start is not None and self.sel_end is None:
                      self.selection_state = "start_set"
-                
                 update_visuals()
             except ValueError:
-                pass # Ignore non-numbers
+                pass
 
         def on_end_submit(text):
-            """User pressed Enter in End Box"""
             try:
                 val = float(text)
                 self.sel_end = val
-                
-                # If incomplete, treat this as completing it (using 0 as start if missing)
                 if self.sel_start is None:
                     self.sel_start = 0.0
-
                 self.selection_state = "complete"
-                
-                # Swap if needed
                 if self.sel_start > self.sel_end:
                      self.sel_start, self.sel_end = self.sel_end, self.sel_start
-
                 update_visuals()
             except ValueError:
                 pass
 
         def on_reset(event):
-            """Reset to full duration"""
             self.sel_start = 0.0
             self.sel_end = total_duration
             self.selection_state = "complete"
@@ -951,22 +915,18 @@ class DecompositionTab(QWidget):
                 instruction_text.set_color(COLORS['error'])
                 self.canvas.draw()
 
-        # Connect Events
         self.cid = self.canvas.mpl_connect("button_press_event", on_click)
         start_box.on_submit(on_start_submit)
         end_box.on_submit(on_end_submit)
         clear_btn.on_clicked(on_reset)
         confirm_btn.on_clicked(on_confirm)
 
-        # Cleanup refs
         self.start_time_box = start_box
         self.end_time_box = end_box
         self.clear_button = clear_btn
         self.confirm_button = confirm_btn
         
-        # Initial Draw
         update_visuals()
-        
         self.canvas.draw()
         event_loop.exec_()
         
@@ -994,23 +954,16 @@ class DecompositionTab(QWidget):
             self.confirm_button.disconnect_events()
             self.confirm_button = None
 
-    # =========================================================================
-    # DECOMPOSITION
-    # =========================================================================
-
     def _start_decomposition(self):
         if not self.config or not self.emg_path or self.emg_data is None:
             QMessageBox.warning(self, "Error", "No session loaded.")
             return
         
-        # Step 1: Sync parameters from UI
         self._sync_params_from_ui()
         
-        # Step 2: Manual channel rejection
         self.status_label.setText("Select channels to reject...")
         self._manual_channel_rejection()
         
-        # Step 3: Time window selection
         self.status_label.setText("Select time window...")
         self._select_time_window()
         
@@ -1018,7 +971,6 @@ class DecompositionTab(QWidget):
             QMessageBox.warning(self, "Error", "No time window selected.")
             return
         
-        # Clean up matplotlib
         self._cleanup_matplotlib_widgets()
         self.figure.clf()
         ax = self.figure.add_subplot(111)
@@ -1031,13 +983,12 @@ class DecompositionTab(QWidget):
         ax.axis('off')
         self.canvas.draw()
         
-        # Step 4: Start decomposition worker
         self.status_label.setText("Starting decomposition...")
         self.start_btn.setVisible(False)
         self.stop_btn.setVisible(True)
         
         save_path = Path(self.config.output_dir) if self.config.output_dir else self.emg_path.parent
-        save_path = save_path / f"{self.emg_path.stem}_decomposed.pkl"
+        save_path = save_path / f"{self.emg_path.stem}_decomp_output.pkl"
         
         self.worker = DecompositionWorker(
             self.emg_data,
@@ -1055,7 +1006,6 @@ class DecompositionTab(QWidget):
         self.worker.start()
 
     def _on_electrode_complete(self, current: int, total: int):
-        """Update progress when an electrode completes."""
         self.status_label.setText(f"Completed {current}/{total} grids...")
 
     def _stop_decomposition(self):
@@ -1067,11 +1017,10 @@ class DecompositionTab(QWidget):
 
     def _on_decomposition_finished(self, results):
         self.status_label.setText("Decomposition Complete")
-        QMessageBox.information(
-            self, "Done", 
-            f"Found {results.get('n_units', 0)} Motor Units.\n"
-            f"Saved to: {results.get('path')}"
-        )
+        
+        decomp_path = Path(results.get('path'))
+        self.decomposition_complete.emit(decomp_path)
+        
         self._reset_ui_state()
 
     def _on_decomposition_error(self, err_msg):
@@ -1080,30 +1029,21 @@ class DecompositionTab(QWidget):
         self._reset_ui_state()
 
     def _on_source_found(self, source, timestamps, iteration, silhouette):
-        """Update GUI when a source is found during decomposition"""
-        # Update status
         self.status_label.setText(
             f"Iteration {iteration}: Found MU (SIL: {silhouette:.3f})"
         )
-
         self._plot_source_realtime(source, timestamps, iteration, silhouette)
-        
-        # Force GUI update
         QApplication.processEvents()
 
     def _plot_source_realtime(self, source, timestamps, iteration, silhouette):
-        """Plot source in real-time as it's found"""
         self.figure.clf()
         ax = self.figure.add_subplot(111)
         ax.set_facecolor(COLORS['background'])
         
-        # Convert to numpy for plotting
         source_np = source.detach().cpu().numpy() if torch.is_tensor(source) else source
         timestamps_np = timestamps.detach().cpu().numpy() if torch.is_tensor(timestamps) else timestamps
         
-        # Ensure timestamps are valid integers for indexing
         if len(timestamps_np) > 0:
-            # Cast to int and ensure they are within bounds of the source array
             idx = timestamps_np.astype(int)
             idx = idx[idx < len(source_np)] 
             y_values = source_np[idx]
@@ -1111,11 +1051,8 @@ class DecompositionTab(QWidget):
             idx = []
             y_values = []
         
-        # 1. Plot source waveform in BLUE
-        # using a standard blue hex or 'tab:blue'
         ax.plot(source_np, color='#2b6cb0', linewidth=1.2, alpha=0.9) 
         
-        # 2. Plot markers in ORANGE at timestamp locations
         if len(idx) > 0:
             ax.plot(idx, y_values, 'o', color='#ed8936', markersize=4, alpha=0.9)
 
@@ -1127,7 +1064,6 @@ class DecompositionTab(QWidget):
         ax.set_ylabel("Amplitude", color=COLORS['foreground'])
         ax.tick_params(colors=COLORS['foreground'])
         
-        # Remove top/right spines for cleaner look
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.spines['left'].set_color(COLORS['foreground'])

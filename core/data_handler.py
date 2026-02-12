@@ -23,6 +23,7 @@ class MotorUnit:
     timestamps: np.ndarray  # Spike times in samples
     source: np.ndarray      # Source signal
     port_name: str          # Which port this MU belongs to
+    filter: Optional[np.ndarray] = None  # MU spatial filter (for MUAP visualization)
     
     # Quality metrics (computed)
     sil: float = 0.0
@@ -35,8 +36,27 @@ class MotorUnit:
     enabled: bool = True
     
     def __post_init__(self):
-        self.timestamps = np.asarray(self.timestamps, dtype=np.int64)
-        self.source = np.asarray(self.source).squeeze()
+        # Handle both numpy arrays and torch tensors
+        import torch
+        
+        # Timestamps
+        if isinstance(self.timestamps, torch.Tensor):
+            self.timestamps = self.timestamps.cpu().numpy().astype(np.int64)
+        else:
+            self.timestamps = np.asarray(self.timestamps, dtype=np.int64)
+        
+        # Source
+        if isinstance(self.source, torch.Tensor):
+            self.source = self.source.cpu().numpy().squeeze()
+        else:
+            self.source = np.asarray(self.source).squeeze()
+        
+        # Filter
+        if self.filter is not None:
+            if isinstance(self.filter, torch.Tensor):
+                self.filter = self.filter.cpu().numpy().squeeze()
+            else:
+                self.filter = np.asarray(self.filter).squeeze()
 
 
 @dataclass
@@ -48,6 +68,8 @@ class EditAction:
     new_timestamps: np.ndarray
     old_source: Optional[np.ndarray] = None
     new_source: Optional[np.ndarray] = None
+    old_filter: Optional[np.ndarray] = None
+    new_filter: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -159,6 +181,7 @@ class DataHandler:
         # Create motor units
         timestamps_list = data["timestamps"]
         sources = data.get("sources")
+        filters = data.get("filters")
         
         if port_name not in self.ports:
             self.ports[port_name] = PortData(name=port_name)
@@ -166,11 +189,14 @@ class DataHandler:
         motor_units = []
         for i, ts in enumerate(timestamps_list):
             source = sources[i] if sources is not None else np.zeros(1)
+            mu_filter = filters[i] if filters is not None and i < len(filters) else None
+            
             mu = MotorUnit(
                 id=i,
                 timestamps=ts,
                 source=source,
                 port_name=port_name,
+                filter=mu_filter,
             )
             motor_units.append(mu)
         
@@ -243,7 +269,9 @@ class DataHandler:
             if sources.ndim == 1:
                 sources = sources.reshape(1, -1)
         
-        return {"timestamps": timestamps, "sources": sources}
+        filters = data.get('filters', data.get('mu_filters'))
+        
+        return {"timestamps": timestamps, "sources": sources, "filters": filters}
     
     def _load_decomp_mat(self, path: Path) -> Dict[str, Any]:
         """Load decomposition from .mat file."""
@@ -263,7 +291,11 @@ class DataHandler:
                 sources = None
                 if 'sources' in f:
                     sources = np.array(f['sources'])
-                return {"timestamps": timestamps, "sources": sources}
+                filters = None
+                if 'filters' in f or 'mu_filters' in f:
+                    key = 'filters' if 'filters' in f else 'mu_filters'
+                    filters = np.array(f[key])
+                return {"timestamps": timestamps, "sources": sources, "filters": filters}
         
         # scipy.io result
         timestamps = []
@@ -280,7 +312,9 @@ class DataHandler:
                 break
         
         sources = data.get('sources', data.get('source'))
-        return {"timestamps": timestamps, "sources": sources}
+        filters = data.get('filters', data.get('mu_filters'))
+        
+        return {"timestamps": timestamps, "sources": sources, "filters": filters}
     
     # === Saving ===
     
@@ -293,10 +327,12 @@ class DataHandler:
         
         timestamps = [mu.timestamps for mu in port.motor_units if mu.enabled]
         sources = np.array([mu.source for mu in port.motor_units if mu.enabled])
+        filters = np.array([mu.filter for mu in port.motor_units if mu.enabled and mu.filter is not None])
         
         data = {
             "MUPulses": timestamps,
             "sources": sources,
+            "filters": filters if len(filters) > 0 else None,
             "fsamp": self.fsamp,
             "port_name": port_name,
         }
@@ -497,6 +533,8 @@ class DataHandler:
                     mu.timestamps = action.old_timestamps.copy()
                     if action.old_source is not None:
                         mu.source = action.old_source.copy()
+                    if action.old_filter is not None:
+                        mu.filter = action.old_filter.copy()
                     break
         
         self.redo_stack.append(action)
@@ -516,6 +554,8 @@ class DataHandler:
                     mu.timestamps = action.new_timestamps.copy()
                     if action.new_source is not None:
                         mu.source = action.new_source.copy()
+                    if action.new_filter is not None:
+                        mu.filter = action.new_filter.copy()
                     break
         
         self.undo_stack.append(action)

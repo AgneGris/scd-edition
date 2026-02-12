@@ -7,7 +7,6 @@ from typing import List, Optional, Dict, Tuple
 import numpy as np
 import scipy.io as sio
 import torch
-import pyqtgraph as pg
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -18,23 +17,17 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 
-# Import core logic
 from core.config import (
     ConfigManager, SessionConfig, ElectrodeConfig, PortConfig,
     FilterConfig, DecompositionConfig
 )
 
-# Import styling
 from gui.style.styling import (
     COLORS, FONT_SIZES, SPACING, FONT_FAMILY,
     get_section_header_style, get_label_style, 
     get_button_style
 )
 
-
-# =============================================================================
-# CHANNEL ALLOCATION BAR
-# =============================================================================
 
 class ChannelAllocationBar(QFrame):
     """Visual bar showing channel allocation across all grids."""
@@ -117,10 +110,6 @@ class ChannelAllocationBar(QFrame):
                 painter.drawText(segment_rect, Qt.AlignCenter, name)
 
 
-# =============================================================================
-# GRID CARD
-# =============================================================================
-
 class GridCard(QFrame):
     """Card widget for configuring a single electrode grid."""
     
@@ -154,49 +143,41 @@ class GridCard(QFrame):
         main_layout.setContentsMargins(8, 6, 8, 6)
         main_layout.setSpacing(10)
         
-        # Color indicator
         self.color_indicator = QLabel()
         self.color_indicator.setFixedSize(4, 20)
         self.color_indicator.setStyleSheet(f"background-color: {self.color}; border-radius: 2px;")
         main_layout.addWidget(self.color_indicator)
         
-        # Name
         self.name_edit = QLineEdit(f"Grid_{self.index}")
         self.name_edit.setPlaceholderText("e.g., Biceps")
         self.name_edit.textChanged.connect(self.changed.emit)
         main_layout.addWidget(self.name_edit, stretch=2)
         
-        # Type
         self.type_combo = QComboBox()
         self.type_combo.addItems(["Surface", "Intramuscular"])
         self.type_combo.currentTextChanged.connect(self._on_type_change)
         main_layout.addWidget(self.type_combo, stretch=2)
         
-        # Configuration
         self.config_combo = QComboBox()
         self.config_combo.currentTextChanged.connect(self._on_config_change)
         main_layout.addWidget(self.config_combo, stretch=3)
         
-        # Start Channel
         self.start_spin = QSpinBox()
         self.start_spin.setRange(0, 2048)
         self.start_spin.setValue(0)
         self.start_spin.valueChanged.connect(self.changed.emit)
         main_layout.addWidget(self.start_spin, stretch=1)
         
-        # End Channel
         self.end_spin = QSpinBox()
         self.end_spin.setRange(0, 2048)
         self.end_spin.setValue(64)
         self.end_spin.valueChanged.connect(self.changed.emit)
         main_layout.addWidget(self.end_spin, stretch=1)
         
-        # Status Label
         self.status_label = QLabel()
         self.status_label.setStyleSheet(get_label_style(size='small'))
         main_layout.addWidget(self.status_label, stretch=2)
         
-        # Remove button
         self.remove_btn = QPushButton("×")
         self.remove_btn.setFixedSize(20, 20)
         self.remove_btn.setToolTip("Remove Grid")
@@ -309,10 +290,6 @@ class GridCard(QFrame):
         self.start_spin.setValue(start)
         self.end_spin.setValue(end)
 
-
-# =============================================================================
-# CONFIG TAB
-# =============================================================================
 
 class ConfigTab(QWidget):
     """Streamlined configuration tab for EMG data loading and grid setup."""
@@ -456,7 +433,6 @@ class ConfigTab(QWidget):
         
         layout.addLayout(action_layout)
         
-        # Column headers
         headers_layout = QHBoxLayout()
         headers_layout.setContentsMargins(12, 0, 12, 0)
         headers_layout.setSpacing(10)
@@ -495,7 +471,6 @@ class ConfigTab(QWidget):
         
         layout.addLayout(headers_layout)
         
-        # Scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -706,7 +681,7 @@ class ConfigTab(QWidget):
         
         next_start = self._get_next_available_channel()
         card.set_start_channel(next_start)
-        card.set_end_channel(next_start + 64)
+        card.set_end_channel(next_start + 63)  # 0-63 = 64 channels total
         
         card.remove_requested.connect(self._remove_grid)
         card.changed.connect(self._update_summary)
@@ -730,16 +705,9 @@ class ConfigTab(QWidget):
     def _remove_grid(self, card: GridCard):
         """Removes a specific grid card and refreshes the layout."""
         if card in self.grid_cards:
-            # 1. Remove from the internal tracking list
             self.grid_cards.remove(card)
-            
-            # 2. Remove from the actual UI layout
             self.grids_layout.removeWidget(card)
-            
-            # 3. Schedule for deletion (cleanup memory)
             card.deleteLater()
-            
-            # 4. Refresh UI numbering and summary bar
             self._renumber_grids()
             self._update_summary()
     
@@ -761,7 +729,6 @@ class ConfigTab(QWidget):
         for i, card in enumerate(self.grid_cards):
             new_index = i + 1
             card.update_index(new_index)
-            # Optional: Reset color to match new index
             color_idx = i % len(GridCard.GRID_COLORS)
             card.color = GridCard.GRID_COLORS[color_idx]
             card.color_indicator.setStyleSheet(
@@ -875,10 +842,4 @@ class ConfigTab(QWidget):
                     config.ports.append(port)
         
         self.config_applied.emit(config, self.emg_path)
-        
-        QMessageBox.information(
-            self,
-            "Configuration Applied",
-            f"Session configured with {len(self.grid_cards)} grid(s)\n"
-            f"Ready to proceed to Decomposition"
-        )
+    
