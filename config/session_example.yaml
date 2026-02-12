@@ -1,0 +1,67 @@
+# SCD Suite Session Configuration
+# This file configures electrode arrays and decomposition parameters for each port.
+
+name: "biceps_experiment"
+sampling_frequency: 10240
+
+# Directory paths
+input_dir: "data/input"
+output_dir: "data/output"
+
+# Edition settings
+auto_save: true
+undo_levels: 20
+
+# Duplicate detection thresholds
+roa_threshold: 0.3      # Rate of Agreement threshold
+subset_threshold: 0.8   # Subset detection threshold
+
+# Port configurations
+ports:
+  - name: "proximal"
+    enabled: true
+    electrode:
+      preset: GR04MM1305   # Use predefined electrode
+      channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64]
+    filter:
+      highpass_hz: 10
+      lowpass_hz: 4400
+      order: 4
+      notch_hz: 50        # Optional: 50Hz or 60Hz
+    decomposition:
+      acceptance_sil: 0.85
+      max_iterations: 200
+      use_cv_fitness: true
+      remove_bad_fr: true
+      min_fr_hz: 2.0
+      max_fr_hz: 100.0
+
+  - name: "distal"
+    enabled: true
+    electrode:
+      preset: GR04MM1305
+      channels: [65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129]
+    filter:
+      highpass_hz: 10
+      lowpass_hz: 4400
+      order: 4
+    decomposition:
+      acceptance_sil: 0.85
+      max_iterations: 200
+
+  - name: "thin_film"
+    enabled: false  # Disabled by default
+    electrode:
+      name: "custom_thin_film"
+      type: thin_film
+      channels: [130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193]
+      rows: 8
+      cols: 8
+      spacing_mm: 2.0
+    filter:
+      highpass_hz: 100    # Higher for thin-film
+      lowpass_hz: 4400
+      order: 4
+    decomposition:
+      acceptance_sil: 0.80  # Lower threshold for thin-film
+      use_cv_fitness: false # Different firing patterns
