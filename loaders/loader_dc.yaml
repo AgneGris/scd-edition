@@ -1,0 +1,19 @@
+# Loader DC — Novecento HDF5 recording
+# EMG: 70 channels (64 EMG + 6 quaternion), stored at /emg/data
+# Aux:  2 force channels at /aux/data
+# Timestamps: per-sample at /timestamps
+
+name: "Loader DC"
+format: h5
+
+fields:
+  emg:
+    path: "emg/data"               # HDF5 dataset path
+    channels: [0, 64]              # slice rows 0..63, skip quaternion channels
+    orientation: channels_first    # (channels, samples)
+  force:
+    path: "aux/data"
+    channels: [0, 2]               # both force channels
+    orientation: channels_first
+  timestamps:
+    path: "timestamps"

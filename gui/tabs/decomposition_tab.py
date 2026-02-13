@@ -437,39 +437,19 @@ class DecompositionTab(QWidget):
         return container
 
     def _load_emg_data(self):
-        """Load EMG data from file."""
-        import scipy.io as sio
-        
+        """Load EMG data using the layout from config."""
+        from core.data_loader import load_field
+
         try:
-            if self.emg_path.suffix.lower() == ".mat":
-                mat = sio.loadmat(str(self.emg_path))
-                
-                for key in ['emg', 'data', 'sig', 'signal']:
-                    if key in mat:
-                        data = mat[key]
-                        break
-                else:
-                    for k, v in mat.items():
-                        if isinstance(v, np.ndarray) and v.ndim == 2:
-                            data = v
-                            break
-                    else:
-                        raise ValueError(f"No suitable data array found in {self.emg_path}")
-            
-            elif self.emg_path.suffix.lower() == ".npy":
-                data = np.load(str(self.emg_path))
-            
-            else:
-                raise ValueError(f"Unsupported format: {self.emg_path.suffix}")
-            
-            self.emg_data = torch.from_numpy(data).to(dtype=torch.float32)
-            
-            # Ensure (time, channels) for decomposition processing
-            if self.emg_data.shape[1] > self.emg_data.shape[0]:
-                self.emg_data = self.emg_data.T
-            
+            layout = getattr(self.config, 'data_layout', None)
+            if layout is None:
+                raise ValueError("No data layout configured — select a Data Format in Configuration tab")
+
+            emg = load_field(self.emg_path, layout, "emg")
+            # load_field returns (samples, channels) as torch.Tensor
+            self.emg_data = emg
             print(f"✓ Loaded EMG data: {self.emg_data.shape}")
-            
+
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to load EMG data:\n{str(e)}")
             print(f"Error loading EMG data: {e}")

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 import numpy as np
 import scipy.io as sio
+from core.data_loader import load_layout, load_field, load_all_fields
 import torch
 
 from PyQt5.QtWidgets import (
@@ -341,23 +342,18 @@ class ConfigTab(QWidget):
         
         layout = QVBoxLayout(group)
         layout.setSpacing(8)
-        
-        file_layout = QHBoxLayout()
-        
-        self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("Select an EMG data file (.mat, .npy, .csv)...")
-        self.path_edit.setReadOnly(True)
-        
-        browse_btn = QPushButton("Browse...")
-        browse_btn.setFixedWidth(100)
-        browse_btn.clicked.connect(self._browse_file)
-        browse_btn.setStyleSheet(get_button_style(bg_color='accent', padding=8))
-        
-        file_layout.addWidget(self.path_edit)
-        file_layout.addWidget(browse_btn)
-        
-        layout.addLayout(file_layout)
-        
+
+        loader_layout = QHBoxLayout()
+        loader_label = QLabel("Data Format:")
+        loader_label.setStyleSheet(get_label_style(size='normal'))
+        self.loader_combo = QComboBox()
+        self._populate_loader_presets()
+        self.loader_combo.currentTextChanged.connect(self._on_loader_changed)
+        loader_layout.addWidget(loader_label)
+        loader_layout.addWidget(self.loader_combo, stretch=1)
+        loader_layout.addStretch()
+        layout.addLayout(loader_layout)
+
         self.file_info_label = QLabel()
         self.file_info_label.setStyleSheet(get_label_style(size='small', color='text_dim'))
         layout.addWidget(self.file_info_label)
@@ -378,9 +374,47 @@ class ConfigTab(QWidget):
         fs_layout.addStretch()
         
         layout.addLayout(fs_layout)
-        
-        return group
     
+        file_layout = QHBoxLayout()
+        
+        self.path_edit = QLineEdit()
+        self.path_edit.setPlaceholderText("Select an EMG data file (.mat, .npy, .csv)...")
+        self.path_edit.setReadOnly(True)
+        
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setFixedWidth(100)
+        browse_btn.clicked.connect(self._browse_file)
+        browse_btn.setStyleSheet(get_button_style(bg_color='accent', padding=8))
+        
+        file_layout.addWidget(self.path_edit)
+        file_layout.addWidget(browse_btn)
+        
+        layout.addLayout(file_layout)
+
+        return group
+
+    def _populate_loader_presets(self):
+        """Scan presets folder for loader YAML files."""
+        presets_dir = Path(__file__).parent.parent.parent / "loaders"
+        self.loader_combo.clear()
+        self._loader_layouts = {}
+        if presets_dir.exists():
+            for yaml_file in sorted(presets_dir.glob("loader_*.yaml")):
+                try:
+                    layout = load_layout(yaml_file)
+                    name = layout["name"]
+                    self._loader_layouts[name] = layout
+                    self.loader_combo.addItem(name)
+                except Exception as e:
+                    print(f"Warning: Could not load preset {yaml_file.name}: {e}")
+
+    def _on_loader_changed(self):
+        if self.emg_path:
+            self._update_file_info()
+
+    def _get_current_layout(self) -> Optional[dict]:
+        return self._loader_layouts.get(self.loader_combo.currentText())
+
     def _create_grids_section(self) -> QGroupBox:
         group = QGroupBox("2. Configure Electrode Grids")
         group.setStyleSheet(f"""
@@ -556,25 +590,6 @@ class ConfigTab(QWidget):
         if self.emg_path:
             self._update_file_info()
     
-    def _update_file_info(self):
-        """Update file info label with current sampling rate."""
-        try:
-            data = self._load_data(self.emg_path)
-            n_samples, n_channels = data.shape
-            fs = int(self.fsamp_edit.text() or 2048)
-            duration_sec = n_samples / fs
-            
-            self.file_info_label.setText(
-                f"Loaded: {self.emg_path.name} | "
-                f"Shape: {n_samples} samples × {n_channels} channels | "
-                f"Duration: {duration_sec:.1f}s @ {fs} Hz"
-            )
-        except Exception as e:
-            self.file_info_label.setText(
-                f"File: {self.emg_path.name} | "
-                f"Available Channels: {self.max_channels} (estimated)"
-            )
-    
     def _browse_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -595,83 +610,43 @@ class ConfigTab(QWidget):
             
             if not self.grid_cards:
                 self._add_grid()
-    
+
     def _estimate_channels_from_file(self, file_path: Path) -> int:
+        """Get channel count using the selected loader preset."""
+        layout = self._get_current_layout()
+        if layout is None:
+            return 256
         try:
-            if file_path.suffix.lower() == '.mat':
-                mat = sio.loadmat(str(file_path))
-                
-                for key in ['emg', 'data', 'sig', 'signal']:
-                    if key in mat:
-                        data = mat[key]
-                        if data.shape[1] > data.shape[0]:
-                            n_channels = data.shape[0]
-                        else:
-                            n_channels = data.shape[1]
-                        return n_channels
-                
-                for key, value in mat.items():
-                    if isinstance(value, np.ndarray) and value.ndim == 2:
-                        data = value
-                        if data.shape[1] > data.shape[0]:
-                            n_channels = data.shape[0]
-                        else:
-                            n_channels = data.shape[1]
-                        return n_channels
-            
-            elif file_path.suffix.lower() == '.npy':
-                data = np.load(str(file_path))
-                if data.ndim == 2:
-                    if data.shape[1] > data.shape[0]:
-                        n_channels = data.shape[0]
-                    else:
-                        n_channels = data.shape[1]
-                    return n_channels
-            
-            elif file_path.suffix.lower() == '.csv':
-                with open(file_path, 'r') as f:
-                    first_line = f.readline()
-                    n_channels = len(first_line.split(','))
-                return n_channels
-        
+            emg = load_field(file_path, layout, "emg")
+            # load_field returns (samples, channels)
+            return emg.shape[1]
         except Exception as e:
             print(f"Warning: Could not determine channel count: {e}")
             return 256
-        
-        return 256
-    
-    def _load_data(self, path: Path, key: str = "emg") -> torch.Tensor:
-        if path.suffix.lower() == ".mat":
-            mat = sio.loadmat(str(path))
-            
-            if key in mat:
-                data = mat[key]
-            else:
-                for common_key in ['emg', 'data', 'sig', 'signal']:
-                    if common_key in mat:
-                        data = mat[common_key]
-                        break
-                else:
-                    for k, v in mat.items():
-                        if isinstance(v, np.ndarray) and v.ndim == 2:
-                            data = v
-                            break
-                    else:
-                        raise ValueError(f"No suitable data array found")
-        
-        elif path.suffix.lower() == ".npy":
-            data = np.load(str(path))
-        
-        else:
-            raise ValueError(f"Unsupported format: {path.suffix}")
-        
-        neural_data = torch.from_numpy(data).to(dtype=torch.float32)
-        
-        if neural_data.shape[1] > neural_data.shape[0]:
-            neural_data = neural_data.T
-        
-        return neural_data
-    
+
+    def _update_file_info(self):
+        """Update file info label using the selected loader preset."""
+        layout = self._get_current_layout()
+        if layout is None or self.emg_path is None:
+            return
+        try:
+            emg = load_field(self.emg_path, layout, "emg")
+            n_samples, n_channels = emg.shape
+            fs = int(self.fsamp_edit.text() or 2048)
+            duration_sec = n_samples / fs
+            self.max_channels = n_channels
+            self.allocation_bar.set_max_channels(n_channels)
+
+            self.file_info_label.setText(
+                f"Loaded: {self.emg_path.name} | "
+                f"Shape: {n_samples} samples × {n_channels} channels | "
+                f"Duration: {duration_sec:.1f}s @ {fs} Hz"
+            )
+        except Exception as e:
+            self.file_info_label.setText(f"⚠ Load failed: {e}")
+            self.file_info_label.setStyleSheet(get_label_style(size='small', color='error'))
+
+
     def _add_grid(self):
         index = len(self.grid_cards) + 1
         color_idx = (index - 1) % len(GridCard.GRID_COLORS)
@@ -840,6 +815,7 @@ class ConfigTab(QWidget):
                     )
                     
                     config.ports.append(port)
-        
+
+        config.data_layout = self._get_current_layout()
         self.config_applied.emit(config, self.emg_path)
     
