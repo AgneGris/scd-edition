@@ -1,0 +1,18 @@
+# OTB+ Recording Layout
+# Auto-detects adapters and channel counts from the device XML inside the .otb+ archive.
+# No manual configuration needed.
+
+name: ".otb+"
+format: otb
+
+fields:
+  emg:
+    path: emg
+    channels: null            # null = all channels
+    orientation: samples_first  # otb reader already returns (samples, channels)
+  aux:
+    path: aux
+    channels: null
+    orientation: samples_first
+  timestamps:
+    path: timestamps

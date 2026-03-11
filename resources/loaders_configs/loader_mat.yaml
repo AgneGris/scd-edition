@@ -1,0 +1,20 @@
+# Loader Test — simple .mat file with EMG data
+# Typical format: single variable containing (channels × samples) or (samples × channels)
+
+name: ".mat"
+format: mat
+
+fields:
+  emg:
+    path: "emg"                    # .mat variable name
+    fallback_keys: ["data", "Data", "sig", "signal"] 
+    channels: null                 # null = all channels
+    orientation: auto              # auto-detect from shape
+  force:
+    path: "force"
+    fallback_keys: ["aux", "torque"]
+    channels: null
+    orientation: auto
+  timestamps:
+    path: "timestamps"
+    fallback_keys: ["t", "time"]

@@ -1,0 +1,25 @@
+# Loader — Generic HDF5 recording
+# Update the paths and orientation below to match your HDF5 file structure.
+#
+# orientation choices:
+#   channels_first  — data stored as (channels, samples)  → will be transposed to (samples, channels)
+#   samples_first   — data stored as (samples, channels)  → no transpose needed
+#   auto            — larger dimension is assumed to be samples
+#
+# channels: leave null to load all channels (recommended).
+#   Use [start, end] for a Python-style slice (exclusive end): e.g. [0, 64] = channels 0..63
+
+name: ".hdf5"
+format: h5
+
+fields:
+  emg:
+    path: "emg/data"               # HDF5 dataset path — update to match your file
+    channels: null                 # null = load all channels; channel selection is done in the GUI
+    orientation: channels_first    # update if your file stores (samples, channels)
+  force:
+    path: "aux/data"
+    channels: null
+    orientation: channels_first
+  timestamps:
+    path: "timestamps"
