@@ -33,6 +33,7 @@ dependencies = [
     "PyQt5>=5.15.0",
     "scikit-learn>=1.0.0",
     "mat73>=0.59",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
