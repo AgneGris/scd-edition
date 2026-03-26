@@ -356,11 +356,17 @@ def decompose_concatenated(
     sample_offsets = [0]          # start sample index of each file in the concat
     for fp in file_paths:
         print(f"  Loading {fp.name} …")
+        t_load = time.perf_counter()
         try:
             emg = load_field(fp, layout, "emg")
         except Exception as exc:
             print(f"  ERROR loading {fp.name}: {exc} — aborting concat.")
             return
+        t_load = time.perf_counter() - t_load
+        dur_s = emg.shape[0] / sampling_rate
+        print(f"    shape    : {tuple(emg.shape)}  ({emg.shape[1]} channels, {dur_s:.2f} s)")
+        print(f"    dtype    : {emg.dtype}")
+        print(f"    loaded in: {t_load:.1f}s")
         segments.append(emg)
         sample_offsets.append(sample_offsets[-1] + emg.shape[0])
 
@@ -403,10 +409,16 @@ def decompose_concatenated(
     # ── output path ───────────────────────────────────────────────────────────
     if output_stem is None:
         stems = [fp.stem for fp in file_paths]
-        if len(stems) <= 2:
-            output_stem = "_".join(stems) + "_concat"
+        # Find common prefix, then append only the unique suffixes of each stem
+        # e.g. ["base_run-01", "base_run-02"] → "base_run-01_run-02_concat"
+        from os.path import commonprefix
+        prefix = commonprefix(stems).rstrip("_")
+        suffixes = [s[len(prefix):].lstrip("_") for s in stems]
+        suffixes = [s for s in suffixes if s]  # drop empty
+        if suffixes:
+            output_stem = prefix + "_" + "_".join(suffixes) + "_concat"
         else:
-            output_stem = f"{stems[0]}_to_{stems[-1]}_concat"
+            output_stem = prefix + "_concat"
     save_path = output_dir / f"{output_stem}_decomp_output.pkl"
 
     # ── plateau ───────────────────────────────────────────────────────────────
@@ -453,6 +465,7 @@ class _HeadlessWorker:
         self.sampling_rate       = sampling_rate
         self.save_path           = save_path
         self.time_masks_per_grid = time_masks_per_grid or []
+        self.aux_configs         = []
         self._is_running         = True
 
     # Mimic Qt signals as no-ops so we can share the run() implementation

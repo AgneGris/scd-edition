@@ -1,0 +1,73 @@
+=== Job: sub01_5ext_I ===
+Channel config : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_config_sub01_day01.json
+Concatenate    : True
+Rejections     : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json
+Output dir     : /rds/general/project/thinfilmdata/live/forearm/output/sub-01
+sil_threshold  : 0.85
+iterations     : 1
+Files:
+  /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/day-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+
+  /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/day-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+
+
+=== Copying input files to local SSD ===
+  Copying sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+ ...
+  Copying sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+ ...
+  All files copied in 1s
+
+Channel config : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_config_sub01_day01.json
+Fs             : 10240 Hz
+Grids          : ['Grid_1', 'Grid_2', 'Grid_3', 'Grid_4', 'Grid_5', 'Grid_6']
+Param overrides: {'sil_threshold': 0.85, 'iterations': 1}
+
+Files to process (2):
+  /var/tmp/pbs.2025128.pbs-7/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+
+  /var/tmp/pbs.2025128.pbs-7/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+
+Rejections: loaded per-file from /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json
+  Loaded rejections for sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+: 6 channel(s) rejected
+  Loaded rejections for sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+: 8 channel(s) rejected
+
+Concatenating 2 file(s):
+  Loading sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+ …
+    shape    : (259324, 401)  (401 channels, 25.32 s)
+    dtype    : torch.float32
+    loaded in: 1.2s
+  Loading sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+ …
+    shape    : (250898, 401)  (401 channels, 24.50 s)
+    dtype    : torch.float32
+    loaded in: 0.9s
+  Concatenated shape: torch.Size([510222, 401])  (49.83 s)
+  Processing Grid_1 (1/6)...
+    Masked channels : none
+EMG shape: torch.Size([510222, 1000])
+0: accept new source.
+    Grid_1: 1 MU(s) found
+  Processing Grid_2 (2/6)...
+    Masked channels : [np.int64(34)]
+EMG shape: torch.Size([510222, 1000])
+0: accept new source.
+    Grid_2: 1 MU(s) found
+  Processing Grid_3 (3/6)...
+    Masked channels : [np.int64(60)]
+EMG shape: torch.Size([510222, 1024])
+0: accept new source.
+    Grid_3: 1 MU(s) found
+  Processing Grid_4 (4/6)...
+    Masked channels : [np.int64(25), np.int64(50), np.int64(51), np.int64(52)]
+EMG shape: torch.Size([510222, 1024])
+0: accept new source.
+    Grid_4: 1 MU(s) found
+  Processing Grid_5 (5/6)...
+    Masked channels : [np.int64(15), np.int64(16)]
+EMG shape: torch.Size([510222, 1024])
+0: accept new source.
+    Grid_5: 1 MU(s) found
+  Processing Grid_6 (6/6)...
+    Masked channels : none
+EMG shape: torch.Size([510222, 1000])
+0: accept new source.
+    Grid_6: 1 MU(s) found
+  Saving → /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01_sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02_concat_decomp_output.pkl  (total 6 MU(s))
+File saved successfully: /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01_sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02_concat_decomp_output.pkl
+  Done in 252.2s → /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01_sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02_concat_decomp_output.pkl
+
+All done in 254.5s.
