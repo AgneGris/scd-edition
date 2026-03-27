@@ -476,17 +476,20 @@ GRID_POSITIONS_HD04MM1606 = {
     16: (5, 15),
 }
 
-# HD10MM0804 / HD05MM0804: 8 cols × 4 rows = 32 channels
-# Serpentine pattern, same convention as GR10MM0808 (GRID_POSITIONS_8x8).
+# HD10MM0804 / HD05MM0804: 8 rows × 4 cols = 32 channels
+# Sequential layout (NOT serpentine): channels increase monotonically
+# top-to-bottom within each physical column, columns left-to-right.
+# grid_shape=(8,4) → positions as (row, col), matching the (rows,cols) convention
+# used by GR08MM1305 and GR10MM0808.
 GRID_POSITIONS_8x4 = {
-     8: (0, 0),  7: (1, 0),  6: (2, 0),  5: (3, 0),
-     4: (4, 0),  3: (5, 0),  2: (6, 0),  1: (7, 0),
-    16: (0, 1), 15: (1, 1), 14: (2, 1), 13: (3, 1),
-    12: (4, 1), 11: (5, 1), 10: (6, 1),  9: (7, 1),
-    24: (0, 2), 23: (1, 2), 22: (2, 2), 21: (3, 2),
-    20: (4, 2), 19: (5, 2), 18: (6, 2), 17: (7, 2),
-    32: (0, 3), 31: (1, 3), 30: (2, 3), 29: (3, 3),
-    28: (4, 3), 27: (5, 3), 26: (6, 3), 25: (7, 3),
+     1: (0, 0),  2: (1, 0),  3: (2, 0),  4: (3, 0),
+     5: (4, 0),  6: (5, 0),  7: (6, 0),  8: (7, 0),
+     9: (0, 1), 10: (1, 1), 11: (2, 1), 12: (3, 1),
+    13: (4, 1), 14: (5, 1), 15: (6, 1), 16: (7, 1),
+    17: (0, 2), 18: (1, 2), 19: (2, 2), 20: (3, 2),
+    21: (4, 2), 22: (5, 2), 23: (6, 2), 24: (7, 2),
+    25: (0, 3), 26: (1, 3), 27: (2, 3), 28: (3, 3),
+    29: (4, 3), 30: (5, 3), 31: (6, 3), 32: (7, 3),
 }
 
 
