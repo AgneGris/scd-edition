@@ -199,14 +199,50 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    app = QApplication(sys.argv)
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="scd-edition",
+        description="SCD EMG Decomposition & Edition GUI",
+    )
+    parser.add_argument(
+        "--open", dest="open_path", metavar="FILE",
+        help="PKL decomposition file to load directly into the Edition tab on startup",
+    )
+    parser.add_argument(
+        "--output", dest="output_path", metavar="FILE",
+        help="Default output path used when saving (skips the save dialog)",
+    )
+    # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
+    args, qt_argv = parser.parse_known_args()
+
+    app = QApplication([sys.argv[0]] + qt_argv)
     app.setApplicationName("SCD-Edition")
 
     set_style_sheet(app)
 
     window = MainWindow()
+
+    if args.output_path:
+        window.edition_tab.set_output_path(Path(args.output_path))
+
+    if args.open_path:
+        open_path = Path(args.open_path)
+        # Defer until the event loop is running so the window is fully shown
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, lambda: _open_on_startup(window, open_path))
+
     window.show()
     sys.exit(app.exec_())
+
+
+def _open_on_startup(window: "MainWindow", path: Path):
+    try:
+        window.edition_tab.load_from_path(path)
+        window.tabs.setCurrentIndex(2)
+    except Exception as e:
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.critical(window, "Load Error", f"Could not open file:\n{e}")
 
 
 if __name__ == "__main__":
