@@ -476,6 +476,19 @@ GRID_POSITIONS_HD04MM1606 = {
     16: (5, 15),
 }
 
+# HD10MM0804 / HD05MM0804: 8 cols × 4 rows = 32 channels
+# Serpentine pattern, same convention as GR10MM0808 (GRID_POSITIONS_8x8).
+GRID_POSITIONS_8x4 = {
+     8: (0, 0),  7: (1, 0),  6: (2, 0),  5: (3, 0),
+     4: (4, 0),  3: (5, 0),  2: (6, 0),  1: (7, 0),
+    16: (0, 1), 15: (1, 1), 14: (2, 1), 13: (3, 1),
+    12: (4, 1), 11: (5, 1), 10: (6, 1),  9: (7, 1),
+    24: (0, 2), 23: (1, 2), 22: (2, 2), 21: (3, 2),
+    20: (4, 2), 19: (5, 2), 18: (6, 2), 17: (7, 2),
+    32: (0, 3), 31: (1, 3), 30: (2, 3), 29: (3, 3),
+    28: (4, 3), 27: (5, 3), 26: (6, 3), 25: (7, 3),
+}
+
 
 ELECTRODE_GRIDS = {
     "GR08MM1305": {
@@ -519,6 +532,27 @@ ELECTRODE_GRIDS = {
         "n_channels": 96,
         "muap_mapping": {i: i + 1 for i in range(96)},
         "positions": GRID_POSITIONS_HD04MM1606,
+    },
+    "HD08MM1305": {
+        "grid_shape": (5, 13),
+        "ied_mm": 8,
+        "n_channels": 64,
+        "muap_mapping": {i: i + 1 for i in range(64)},
+        "positions": GRID_POSITIONS_HD04MM1305,
+    },
+    "HD10MM0804": {
+        "grid_shape": (8, 4),
+        "ied_mm": 10,
+        "n_channels": 32,
+        "muap_mapping": {i: i + 1 for i in range(32)},
+        "positions": GRID_POSITIONS_8x4,
+    },
+    "HD05MM0804": {
+        "grid_shape": (8, 4),
+        "ied_mm": 5,
+        "n_channels": 32,
+        "muap_mapping": {i: i + 1 for i in range(32)},
+        "positions": GRID_POSITIONS_8x4,
     },
 }
 
@@ -879,6 +913,7 @@ class EditionTab(QWidget):
         self._edit_mode = EditMode.VIEW
         self._sel_arm = SelectionArm.NONE
         self._loaded_path: Optional[Path] = None
+        self._output_path: Optional[Path] = None
 
         self._start_sample: int = 0
         self._end_sample: int = 0
@@ -1656,24 +1691,35 @@ class EditionTab(QWidget):
         if path:
             self.load_from_path(Path(path))
 
+    def set_output_path(self, path: Path):
+        """Set a fixed output path so Ctrl+S saves without a dialog."""
+        self._output_path = Path(path)
+
     def _save_file(self):
         if not self._ports:
             self._update_status("Nothing to save")
             return
-        default = ""
-        if self._loaded_path:
-            default = str(
-                self._loaded_path.with_name(self._loaded_path.stem + "_edited.pkl")
+
+        # Use pre-configured output path (e.g. from --output CLI arg) if set
+        if self._output_path:
+            save_path = self._output_path
+        else:
+            default = ""
+            if self._loaded_path:
+                default = str(
+                    self._loaded_path.with_name(self._loaded_path.stem + "_edited.pkl")
+                )
+            chosen, _ = QFileDialog.getSaveFileName(
+                self, "Save Decomposition", default, "Pickle (*.pkl)"
             )
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Decomposition", default, "Pickle (*.pkl)"
-        )
-        if not path:
-            return
+            if not chosen:
+                return
+            save_path = Path(chosen)
+
         try:
-            with open(path, "wb") as f:
+            with open(save_path, "wb") as f:
                 pickle.dump(self._build_save_dict(), f)
-            self._update_status(f"Saved: {Path(path).name}")
+            self._update_status(f"Saved: {save_path.name}")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
 

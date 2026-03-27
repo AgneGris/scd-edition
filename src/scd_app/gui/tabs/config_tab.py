@@ -167,6 +167,24 @@ class GridCard(QFrame):
                 "spacing_mm": 4.0,
                 "n_channels": 96,
             },
+            "Grid (HD08MM1305)": {
+                "rows": 13,
+                "cols": 5,
+                "spacing_mm": 8.0,
+                "n_channels": 64,
+            },
+            "Grid (HD10MM0804)": {
+                "rows": 8,
+                "cols": 4,
+                "spacing_mm": 10.0,
+                "n_channels": 32,
+            },
+            "Grid (HD05MM0804)": {
+                "rows": 8,
+                "cols": 4,
+                "spacing_mm": 5.0,
+                "n_channels": 32,
+            },
         },
         "Intramuscular": {
             "Thin-film (40ch)": {
