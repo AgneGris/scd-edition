@@ -213,6 +213,10 @@ def main():
         "--output", dest="output_path", metavar="FILE",
         help="Default output path used when saving (skips the save dialog)",
     )
+    parser.add_argument(
+        "--quit-after-save", dest="quit_after_save", action="store_true",
+        help="Close the application automatically after the file is saved",
+    )
     # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
     args, qt_argv = parser.parse_known_args()
 
@@ -225,6 +229,9 @@ def main():
 
     if args.output_path:
         window.edition_tab.set_output_path(Path(args.output_path))
+
+    if args.quit_after_save:
+        window.edition_tab.set_quit_after_save(True)
 
     if args.open_path:
         open_path = Path(args.open_path)

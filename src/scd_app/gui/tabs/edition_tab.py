@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
     QStatusBar,
     QFrame,
     QRubberBand,
+    QApplication,
 )
 from PyQt5.QtGui import QKeySequence, QFont
 import pyqtgraph as pg
@@ -880,6 +881,7 @@ class EditionTab(QWidget):
         self._sel_arm = SelectionArm.NONE
         self._loaded_path: Optional[Path] = None
         self._output_path: Optional[Path] = None
+        self._quit_after_save: bool = False
 
         self._start_sample: int = 0
         self._end_sample: int = 0
@@ -1661,6 +1663,10 @@ class EditionTab(QWidget):
         """Set a fixed output path so Ctrl+S saves without a dialog."""
         self._output_path = Path(path)
 
+    def set_quit_after_save(self, enabled: bool):
+        """Close the application after the next successful save."""
+        self._quit_after_save = enabled
+
     def _save_file(self):
         if not self._ports:
             self._update_status("Nothing to save")
@@ -1685,6 +1691,8 @@ class EditionTab(QWidget):
             with open(save_path, "wb") as f:
                 pickle.dump(self._build_save_dict(), f)
             self._update_status(f"Saved: {save_path.name}")
+            if self._quit_after_save:
+                QApplication.quit()
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
 
