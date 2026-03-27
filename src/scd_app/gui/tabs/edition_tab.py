@@ -879,6 +879,7 @@ class EditionTab(QWidget):
         self._edit_mode = EditMode.VIEW
         self._sel_arm = SelectionArm.NONE
         self._loaded_path: Optional[Path] = None
+        self._output_path: Optional[Path] = None
 
         self._start_sample: int = 0
         self._end_sample: int = 0
@@ -1656,24 +1657,34 @@ class EditionTab(QWidget):
         if path:
             self.load_from_path(Path(path))
 
+    def set_output_path(self, path: Path):
+        """Set a fixed output path so Ctrl+S saves without a dialog."""
+        self._output_path = Path(path)
+
     def _save_file(self):
         if not self._ports:
             self._update_status("Nothing to save")
             return
-        default = ""
-        if self._loaded_path:
-            default = str(
-                self._loaded_path.with_name(self._loaded_path.stem + "_edited.pkl")
+
+        if self._output_path:
+            save_path = self._output_path
+        else:
+            default = ""
+            if self._loaded_path:
+                default = str(
+                    self._loaded_path.with_name(self._loaded_path.stem + "_edited.pkl")
+                )
+            chosen, _ = QFileDialog.getSaveFileName(
+                self, "Save Decomposition", default, "Pickle (*.pkl)"
             )
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Decomposition", default, "Pickle (*.pkl)"
-        )
-        if not path:
-            return
+            if not chosen:
+                return
+            save_path = Path(chosen)
+
         try:
-            with open(path, "wb") as f:
+            with open(save_path, "wb") as f:
                 pickle.dump(self._build_save_dict(), f)
-            self._update_status(f"Saved: {Path(path).name}")
+            self._update_status(f"Saved: {save_path.name}")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
 
