@@ -1,0 +1,28 @@
+=== Job: sub02_5ext_IM_run01 ===
+Channel config : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-02/channel_config_sub02_day01.json
+Concatenate    : False
+Rejections     : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-02/channel_rejections_sub02_day01.json
+Output dir     : /rds/general/project/thinfilmdata/live/forearm/output/sub-02
+sil_threshold  : 0.85
+iterations     : 150
+Files:
+  /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-02/day-01/sub-02_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_reps-02_run-01.otb+
+
+=== Copying input files to local SSD ===
+  Copying sub-02_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_reps-02_run-01.otb+ ...
+  All files copied in 0s
+
+Channel config : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-02/channel_config_sub02_day01.json
+Fs             : 10240 Hz
+Grids          : ['Grid_1', 'Grid_2', 'Grid_3', 'Grid_4', 'Grid_5', 'Grid_6']
+Param overrides: {'sil_threshold': 0.85, 'iterations': 150}
+
+Files to process (1):
+  /var/tmp/pbs.2027667.pbs-7/sub-02_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_reps-02_run-01.otb+
+Rejections: loaded per-file from /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-02/channel_rejections_sub02_day01.json
+  Loaded rejections for sub-02_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_reps-02_run-01.otb+: 10 channel(s) rejected
+
+[1/1] sub-02_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_reps-02_run-01.otb+
+  ERROR loading file: No .sig file found in sub-02_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_reps-02_run-01.otb+ — skipping.
+
+All done in 15.6s.
