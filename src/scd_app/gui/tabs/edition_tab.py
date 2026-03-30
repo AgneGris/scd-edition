@@ -482,14 +482,38 @@ GRID_POSITIONS_HD04MM1606 = {
 # grid_shape=(8,4) → positions as (row, col), matching the (rows,cols) convention
 # used by GR08MM1305 and GR10MM0808.
 GRID_POSITIONS_8x4 = {
-     1: (0, 0),  2: (1, 0),  3: (2, 0),  4: (3, 0),
-     5: (4, 0),  6: (5, 0),  7: (6, 0),  8: (7, 0),
-     9: (0, 1), 10: (1, 1), 11: (2, 1), 12: (3, 1),
-    13: (4, 1), 14: (5, 1), 15: (6, 1), 16: (7, 1),
-    17: (0, 2), 18: (1, 2), 19: (2, 2), 20: (3, 2),
-    21: (4, 2), 22: (5, 2), 23: (6, 2), 24: (7, 2),
-    25: (0, 3), 26: (1, 3), 27: (2, 3), 28: (3, 3),
-    29: (4, 3), 30: (5, 3), 31: (6, 3), 32: (7, 3),
+    1: (0, 0),
+    2: (1, 0),
+    3: (2, 0),
+    4: (3, 0),
+    5: (4, 0),
+    6: (5, 0),
+    7: (6, 0),
+    8: (7, 0),
+    9: (0, 1),
+    10: (1, 1),
+    11: (2, 1),
+    12: (3, 1),
+    13: (4, 1),
+    14: (5, 1),
+    15: (6, 1),
+    16: (7, 1),
+    17: (0, 2),
+    18: (1, 2),
+    19: (2, 2),
+    20: (3, 2),
+    21: (4, 2),
+    22: (5, 2),
+    23: (6, 2),
+    24: (7, 2),
+    25: (0, 3),
+    26: (1, 3),
+    27: (2, 3),
+    28: (3, 3),
+    29: (4, 3),
+    30: (5, 3),
+    31: (6, 3),
+    32: (7, 3),
 }
 
 
@@ -968,6 +992,13 @@ class EditionTab(QWidget):
             f"color: {COLORS.get('text_dim', '#6c7086')}; "
             f"font-size: {FONT_SIZES.get('small', '9pt')};"
         )
+        self._file_label = QLabel("")
+        self._file_label.setStyleSheet(
+            f"color: {COLORS.get('text_dim', '#6c7086')}; "
+            f"font-size: {FONT_SIZES.get('small', '9pt')}; "
+            f"padding-right: 6px;"
+        )
+        self.status_bar.addPermanentWidget(self._file_label)
         root.addWidget(self.status_bar)
         self._update_status()
 
@@ -1395,6 +1426,12 @@ class EditionTab(QWidget):
     # File I/O
     # ------------------------------------------------------------------
 
+    def _update_file_label(self):
+        if self._loaded_path:
+            self._file_label.setText(f"📄 Current File: {self._loaded_path.name}")
+        else:
+            self._file_label.setText("")
+
     def load_from_path(self, path: Path):
         path = Path(path)
         if not path.exists():
@@ -1417,6 +1454,7 @@ class EditionTab(QWidget):
             self._load_decomposition_data(data)
             self._loaded_path = path
             self._update_status(f"Loaded: {path.name}")
+            self._update_file_label()
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Load Error", f"Failed to parse:\n{e}")
@@ -1711,6 +1749,7 @@ class EditionTab(QWidget):
             with open(path, "wb") as f:
                 pickle.dump(self._build_save_dict(), f)
             self._update_status(f"Saved: {Path(path).name}")
+            self._update_file_label()
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
 
@@ -1719,9 +1758,15 @@ class EditionTab(QWidget):
 
         ports = list(self._ports.keys())
         discharge_times, pulse_trains, mu_filters, mu_properties = [], [], [], []
+        kept_indices_per_port = {}
 
         for port_name in ports:
-            kept = [mu for mu in self._ports[port_name] if not mu.flagged_duplicate]
+            mus = self._ports[port_name]
+            kept_local = [
+                (i, mu) for i, mu in enumerate(mus) if not mu.flagged_duplicate
+            ]
+            kept_indices_per_port[port_name] = [i for i, _ in kept_local]
+            kept = [mu for _, mu in kept_local]
 
             if self._full_source_mode:
                 save_ts = [self._ts_to_plateau_local(mu.timestamps) for mu in kept]
@@ -1760,6 +1805,7 @@ class EditionTab(QWidget):
             "mu_filters": mu_filters,
             "mu_properties": mu_properties,
         }
+
         if self._original_decomp_data is not None:
             for key in [
                 "data",
@@ -1771,7 +1817,6 @@ class EditionTab(QWidget):
                 "dewhitened_filters",
                 "version",
                 "preprocessing_config",
-                "peel_off_sequence",
                 "w_mat",
                 "selected_points",
             ]:
@@ -1779,13 +1824,53 @@ class EditionTab(QWidget):
                 if val is not None and key not in save_data:
                     save_data[key] = val
 
-        if self._emg_data:
-            save_data["emg_per_port"] = dict(self._emg_data)
+            # Remap peel_off_sequence to match kept MUs only
+            orig_peel = self._original_decomp_data.get("peel_off_sequence")
+            if orig_peel is not None:
+                # Build a per-port mapping: old local index -> new local index
+                # (or None if that MU was flagged/deleted)
+                port_index_maps = {}
+                for port_name in ports:
+                    all_mus = self._ports[port_name]
+                    kept_set = set(kept_indices_per_port[port_name])
+                    old_to_new = {}
+                    new_idx = 0
+                    for old_idx in range(len(all_mus)):
+                        if old_idx in kept_set:
+                            old_to_new[old_idx] = new_idx
+                            new_idx += 1
+                        # else: deleted — not added to map
+                    port_index_maps[port_name] = old_to_new
 
-        if self._original_decomp_data is not None:
+                def remap_port_peel_seq(port_seq, old_to_new):
+                    remapped = []
+                    for entry in port_seq:
+                        uid = entry.get("accepted_unit_idx")
+                        if uid is None:
+                            # Rejected repeat — keep as-is, no index to remap
+                            remapped.append(entry)
+                        elif uid in old_to_new:
+                            # Kept MU — update its index
+                            remapped.append(
+                                {**entry, "accepted_unit_idx": old_to_new[uid]}
+                            )
+                        # else: flagged MU — drop this entry entirely
+                    return remapped
+
+                # peel_off_sequence is list[list], one per port
+                new_peel = []
+                for port_idx, port_name in enumerate(ports):
+                    port_seq = orig_peel[port_idx] if port_idx < len(orig_peel) else []
+                    old_to_new = port_index_maps[port_name]
+                    new_peel.append(remap_port_peel_seq(port_seq, old_to_new))
+                save_data["peel_off_sequence"] = new_peel
+
             orig_filters = self._original_decomp_data.get("mu_filters")
             if orig_filters is not None:
                 save_data["mu_filters_original"] = orig_filters
+
+        if self._emg_data:
+            save_data["emg_per_port"] = dict(self._emg_data)
 
         return save_data
 
