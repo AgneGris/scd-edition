@@ -205,15 +205,22 @@ def _apply_filter_torch(
     emg: torch.Tensor,             # (samples, ext_ch)
     filt_np: np.ndarray,
     device: torch.device,
+    norm_slice: Optional[slice] = None,
 ) -> torch.Tensor:
-    """Apply filter → z-scored source (torch tensor, full-length)."""
+    """Apply filter → z-scored source (torch tensor, full-length).
+
+    norm_slice: if provided, mean/std are computed on that slice of the source
+    (e.g. slice(start_sample, end_sample) for plateau-only normalisation).
+    Defaults to full-signal normalisation.
+    """
     filt = np.asarray(filt_np, dtype=np.float32).squeeze()
     filt_t = torch.from_numpy(filt).to(device).float()
     if filt_t.ndim == 1:
         filt_t = filt_t.unsqueeze(-1)
     source = torch.matmul(emg, filt_t).squeeze(-1)
-    mu  = source.mean()
-    std = source.std().clamp(min=1e-8)
+    ref = source[norm_slice] if norm_slice is not None else source
+    mu  = ref.mean()
+    std = ref.std().clamp(min=1e-8)
     return (source - mu) / std
 
 
@@ -249,6 +256,7 @@ def _replay_peel_off_for_port(
     port_filters: List[Optional[np.ndarray]],  # current filters for this port
     global_offset: int,                        # sum of units in earlier ports
     start_sample: int,
+    end_sample: int,
     window_size: int,
     min_peak_sep: int,
     device: torch.device,
@@ -277,6 +285,7 @@ def _replay_peel_off_for_port(
     fn = _get_scd_modules()
     emg_running = emg_full.clone()
     results_dict: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+    plateau_norm = slice(start_sample, end_sample)
 
     for entry in port_peel_seq:
         uid = entry.get("accepted_unit_idx")
@@ -297,17 +306,18 @@ def _replay_peel_off_for_port(
                 # optimisation iterations (filter = last accepted iteration,
                 # timestamps = global-best iteration), so re-detecting from the
                 # filter does NOT reproduce the original peel state.
-                # Timestamps are taken from peel_off_sequence directly.
+                # Peel uses saved timestamps; displayed timestamps are re-detected
+                # from the computed source so markers align with source peaks.
                 ts_saved = _to_numpy(np.asarray(entry["timestamps"])).flatten().astype(np.int64)
-                ts_abs   = (ts_saved + start_sample)
-                ts_abs   = ts_abs[(ts_abs >= 0) & (ts_abs < emg_running.shape[0])]
+                ts_peel  = (ts_saved + start_sample)
+                ts_peel  = ts_peel[(ts_peel >= 0) & (ts_peel < emg_running.shape[0])]
 
                 new_filt_np = None
-                if recalculate_filters and len(ts_abs) >= 2:
+                if recalculate_filters and len(ts_peel) >= 2:
                     # Recompute filter via STA on the current peeled EMG at the
                     # saved spike times.  This makes source consistent with the
                     # spike train and gives a better starting point for edits.
-                    ts_t  = torch.from_numpy(ts_abs).to(device)
+                    ts_t  = torch.from_numpy(ts_peel).to(device)
                     sta   = fn["spike_triggered_average"](emg_running, ts_t, 1)
                     norm  = sta.abs().sum().clamp(min=1e-8)
                     new_filt = (sta.t() / norm)
@@ -317,24 +327,37 @@ def _replay_peel_off_for_port(
                     if 0 <= local_idx < len(port_filters):
                         port_filters[local_idx] = new_filt_np
                     source_t  = torch.matmul(emg_running, new_filt).squeeze(-1)
-                    plateau_sl = source_t[start_sample:start_sample + max(1, len(ts_abs))]
-                    mu_  = source_t.mean()
-                    std_ = source_t.std().clamp(min=1e-8)
+                    plateau_sl = source_t[plateau_norm]
+                    mu_  = plateau_sl.mean()
+                    std_ = plateau_sl.std().clamp(min=1e-8)
                     source_t  = (source_t - mu_) / std_
                     source_t  = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
                     source_np = source_t.cpu().numpy().astype(np.float64)
                 elif filt is not None:
-                    source_t  = _apply_filter_torch(emg_running, filt, device)
+                    source_t  = _apply_filter_torch(emg_running, filt, device,
+                                                    norm_slice=plateau_norm)
+                    source_t  = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
                     source_np = source_t.cpu().numpy().astype(np.float64)
                 else:
+                    source_t  = None
                     source_np = None
 
-                results_dict[local_idx] = (source_np, ts_abs, new_filt_np)
+                # Re-detect timestamps from the computed source so that markers
+                # align with source peaks.  Peel still uses the original saved
+                # timestamps to preserve the decomposition's peel state.
+                if source_t is not None:
+                    ts_display = _extract_timestamps(
+                        source_t, fn, min_peak_sep, square_source=square_source,
+                    )
+                else:
+                    ts_display = ts_peel
+
+                results_dict[local_idx] = (source_np, ts_display, new_filt_np)
 
                 # Peel with saved timestamps so every subsequent unit sees the
                 # same peeled EMG as during the original decomposition.
-                if len(ts_abs) > 0:
-                    ts_t = torch.from_numpy(ts_abs).to(device)
+                if len(ts_peel) > 0:
+                    ts_t = torch.from_numpy(ts_peel).to(device)
                     emg_running = fn["peel_off_source"](emg_running, ts_t, window_size)
 
             elif filt is not None:
@@ -504,7 +527,7 @@ def compute_all_full_sources(
 
         _, results_dict = _replay_peel_off_for_port(
             emg_proc, port_peel_seq, port_filters,
-            global_offset, start_sample, window_size, min_peak_sep, device,
+            global_offset, start_sample, end_sample, window_size, min_peak_sep, device,
             stop_before_local_idx=None, square_source=square_source,
             use_saved_peel_timestamps=True, recalculate_filters=True,
         )
@@ -592,7 +615,7 @@ def recalculate_unit_filter(
     # ── Step 2: Replay peel-off up to this unit ───────────────────────────
     emg_peeled, _ = _replay_peel_off_for_port(
         emg_proc, port_peel_seq, current_port_filters,
-        global_offset, start_sample, window_size, min_peak_sep, device,
+        global_offset, start_sample, end_sample, window_size, min_peak_sep, device,
         stop_before_local_idx=local_mu_idx, square_source=square_source,
     )
 
