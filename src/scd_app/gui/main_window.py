@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
         """Handle decomposition completion and auto-load into Edition tab."""
         try:
             self.edition_tab.load_from_path(decomp_path)
-            self.tabs.setCurrentIndex(2)
+            self.tabs.setCurrentWidget(self.edition_tab)
             self.status_bar.showMessage(
                 "✓ Decomposition complete — loaded into Edition tab"
             )
@@ -246,10 +246,12 @@ def main():
 def _open_on_startup(window: "MainWindow", path: Path):
     try:
         window.edition_tab.load_from_path(path)
-        window.tabs.setCurrentIndex(2)
+        window.tabs.setCurrentWidget(window.edition_tab)
     except Exception as e:
+        print(f"ERROR: Could not open file '{path}': {e}", file=sys.stderr)
         from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(window, "Load Error", f"Could not open file:\n{e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

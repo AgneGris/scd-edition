@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QPushButton,
     QComboBox,
+    QCheckBox,
     QSpinBox,
     QScrollArea,
     QFrame,
@@ -166,6 +167,24 @@ class GridCard(QFrame):
                 "cols": 6,
                 "spacing_mm": 4.0,
                 "n_channels": 96,
+            },
+            "Grid (HD08MM1305)": {
+                "rows": 13,
+                "cols": 5,
+                "spacing_mm": 8.0,
+                "n_channels": 64,
+            },
+            "Grid (HD10MM0804)": {
+                "rows": 8,
+                "cols": 4,
+                "spacing_mm": 10.0,
+                "n_channels": 32,
+            },
+            "Grid (HD05MM0804)": {
+                "rows": 8,
+                "cols": 4,
+                "spacing_mm": 5.0,
+                "n_channels": 32,
             },
         },
         "Intramuscular": {
@@ -582,6 +601,9 @@ class ConfigTab(QWidget):
 
     config_applied = pyqtSignal(object, list)
 
+    # 6 quaternion channels appended after each novecento-type grid (i.e. HD...) EMG channels
+    HD_QUATERNION_CHANNELS = 6
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.config_manager = ConfigManager()
@@ -762,8 +784,23 @@ class ConfigTab(QWidget):
         """
         )
 
+        self.skip_quaternions_cb = QCheckBox("Skip Quaternions (Novecento)")
+        self.skip_quaternions_cb.setChecked(True)
+        self.skip_quaternions_cb.setToolTip(
+            "Data recorded with Novecento includes 6 additional quaternion channels after EMG data.\n"
+            "When checked, these are automatically excluded and the next grid's start\n"
+            "value is offset by 6."
+        )
+        self.skip_quaternions_cb.setStyleSheet(
+            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES['small']};"
+        )
+        self.skip_quaternions_cb.stateChanged.connect(
+            self._recalculate_all_channel_ranges
+        )
+
         action_layout.addWidget(add_grid_btn)
         action_layout.addWidget(add_aux_btn)
+        action_layout.addWidget(self.skip_quaternions_cb)
         action_layout.addStretch()
         action_layout.addWidget(self.channel_summary_label)
         action_layout.addWidget(clear_btn)
@@ -1022,7 +1059,7 @@ class ConfigTab(QWidget):
         # Only set the start of the NEW card based on where the previous one ends
         if len(self.grid_cards) > 1:
             prev_card = self.grid_cards[-2]
-            next_start = prev_card.end_spin.value()
+            next_start = prev_card.end_spin.value() + self._quaternion_gap(prev_card)
         else:
             next_start = 0
 
@@ -1038,8 +1075,24 @@ class ConfigTab(QWidget):
 
         self._update_summary()
 
+    @staticmethod
+    def _is_hd_grid(card: "GridCard") -> bool:
+        """Return True if the card's electrode config name contains 'HD'."""
+        config_name = card.config_combo.currentText()
+        return "HD" in config_name.upper()
+
+    def _quaternion_gap(self, card: "GridCard") -> int:
+        """Return 6 if skip-quaternions is enabled and the card is an HD grid, else 0."""
+        if self.skip_quaternions_cb.isChecked() and self._is_hd_grid(card):
+            return self.HD_QUATERNION_CHANNELS
+        return 0
+
     def _recalculate_all_channel_ranges(self):
-        """Walk all grid cards in order, assigning sequential channel ranges."""
+        """Assign sequential channel ranges to all grid cards.
+
+        When 'Skip Quaternions' is checked, a 6-channel gap is added after each
+        HD grid to skip the quaternion channels in the recording.
+        """
         next_start = 0
         for card in self.grid_cards:
             _, _, _, n_ch = card.get_geometry()
@@ -1051,7 +1104,8 @@ class ConfigTab(QWidget):
             card.end_spin.setValue(next_start + n_ch)
             card.start_spin.blockSignals(False)
             card.end_spin.blockSignals(False)
-            next_start += n_ch
+            next_start += n_ch + self._quaternion_gap(card)
+        self._update_summary()
 
     def _remove_grid(self, card: GridCard):
         if card in self.grid_cards:
@@ -1248,6 +1302,7 @@ class ConfigTab(QWidget):
             "sampling_rate": int(self.fsamp_edit.text() or 2048),
             "file_path": str(self.emg_path) if self.emg_path else None,
             "output_dir": self.output_dir_edit.text(),
+            "skip_quaternions": self.skip_quaternions_cb.isChecked(),
             "grids": [
                 {
                     **card.get_data(),
@@ -1269,6 +1324,9 @@ class ConfigTab(QWidget):
         # Sampling rate
         self.fsamp_edit.setText(str(cfg.get("sampling_rate", 2048)))
 
+        # Defaults to True for configs saved before this field existed
+        self.skip_quaternions_cb.setChecked(cfg.get("skip_quaternions", True))
+
         # File path (don't auto-load, just set the path)
         file_path = cfg.get("file_path")
         if file_path and Path(file_path).exists():
@@ -1284,10 +1342,22 @@ class ConfigTab(QWidget):
         self.grid_cards.clear()
         self.aux_cards.clear()
 
-        # Restore grids — use set_values to restore name/muscle/type/config,
-        # then let _recalculate_all_channel_ranges set the spinboxes correctly.
+        # Restore grids with their saved channel ranges. The recalculate signals are
+        # disconnected during set_values to prevent them overwriting the saved start/end.
         for g in cfg.get("grids", []):
             card = self._add_grid_raw()
+            try:
+                card.type_combo.currentTextChanged.disconnect(
+                    self._recalculate_all_channel_ranges
+                )
+            except TypeError:
+                pass
+            try:
+                card.config_combo.currentTextChanged.disconnect(
+                    self._recalculate_all_channel_ranges
+                )
+            except TypeError:
+                pass
             card.blockSignals(True)
             card.set_values(
                 name=g.get("name", ""),
@@ -1298,6 +1368,13 @@ class ConfigTab(QWidget):
                 end=g.get("end_chan", 63),
             )
             card.blockSignals(False)
+            # Reconnect recalculate signals
+            card.type_combo.currentTextChanged.connect(
+                self._recalculate_all_channel_ranges
+            )
+            card.config_combo.currentTextChanged.connect(
+                self._recalculate_all_channel_ranges
+            )
 
         # Restore aux
         for a in cfg.get("aux_channels", []):

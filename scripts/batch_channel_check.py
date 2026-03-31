@@ -659,14 +659,39 @@ def main():
                     help="Session YAML path (not needed if --channel-config is given).")
     ap.add_argument("--layout",  default=None,
                     help="Data-layout YAML path (not needed if --channel-config is given).")
-    ap.add_argument("--files",   required=True, nargs="+",
+    ap.add_argument("--files",   required=False, default=None, nargs="+",
                     help="EMG file path(s), directory, or glob pattern.")
+    ap.add_argument("--files-yaml", default=None, metavar="YAML",
+                    help="Path to a file-list YAML (e.g. jobs/file_lists/sub01_day01.yaml). "
+                         "Collects all unique files from the 'decompositions' list and "
+                         "fills in --channel-config / --output from the YAML if not provided.")
     ap.add_argument("--output",  default="channel_rejections.json",
                     help="Output JSON path (default: channel_rejections.json).")
     ap.add_argument("--ext",     default=None,
                     help="File extension when --files is a directory "
                          "(e.g. .h5, .mat, .otb+).")
     args = ap.parse_args()
+
+    # ── resolve --files-yaml ──────────────────────────────────────────────────
+    if args.files_yaml:
+        import yaml
+        with open(args.files_yaml) as _fh:
+            _fl = yaml.safe_load(_fh)
+        _data_dir = Path(_fl["data_dir"])
+        if not args.channel_config and _fl.get("channel_config"):
+            args.channel_config = _fl["channel_config"]
+        if args.output == "channel_rejections.json" and _fl.get("output_rejections"):
+            args.output = _fl["output_rejections"]
+        _seen: dict = {}
+        for _group in _fl.get("decompositions", []):
+            for _fname in _group.get("files", []):
+                _p = str(_data_dir / _fname)
+                if _p not in _seen:
+                    _seen[_p] = None
+        args.files = list(_seen.keys())
+
+    if not args.files:
+        ap.error("Provide either --files or --files-yaml.")
 
     # ── load config ───────────────────────────────────────────────────────────
     if args.channel_config:

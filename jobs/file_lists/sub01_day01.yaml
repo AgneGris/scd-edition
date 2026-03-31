@@ -1,0 +1,203 @@
+subject: sub-01
+data_dir: "Z:/projects/thinfilmdata/live/forearm/raw_data/sub-01/day-01"
+channel_config: "Z:/projects/thinfilmdata/live/forearm/raw_data/sub-01/channel_config_sub01_day01.json"
+output_rejections: "Z:/projects/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json"
+output_dir: "Z:/projects/thinfilmdata/live/forearm/output/sub-01"
+
+decompositions:
+
+  # ── 5% MVC extensions ─────────────────────────────────────────────────────
+
+  - name: "5ext_I"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_M"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-M_time-1-1-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-M_time-1-1-20_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_R"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-R_time-1-1-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-R_time-1-1-20_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_IM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IM_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_MR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-MR_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-MR_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_TIM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-TIM_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-TIM_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_TIMRL"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-TIMRL_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-TIMRL_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5ext_IMR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5ext_fing-IMR_time-1-1-25_reps-02_run-01.otb+"
+    concatenate: false
+
+  # ── 5% MVC flexions ───────────────────────────────────────────────────────
+
+  - name: "5flex_I"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-5flex_fing-I_time-1-1-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-5flex_fing-I_time-1-1-20_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_M"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-5flex_fing-M_time-1-1-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-5flex_fing-M_time-1-1-20_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_R"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-5flex_fing-R_time-1-1-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-5flex_fing-R_time-1-1-20_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_IM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-IM_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-IM_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_MR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-MR_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-MR_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_TIM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-TIM_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-TIM_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_TIMRL"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-TIMRL_time-1-1-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-TIMRL_time-1-1-25_run-02.otb+"
+    concatenate: true
+
+  - name: "5flex_IMR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-5flex_fing-IMR_time-1-1-25_reps-02_run-01.otb+"
+    concatenate: false
+
+  # ── 15% MVC extensions ────────────────────────────────────────────────────
+
+  - name: "15ext_I"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-15ext_fing-I_time-1-3-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-15ext_fing-I_time-1-3-20_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_M"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-15ext_fing-M_time-1-3-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-15ext_fing-M_time-1-3-20_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_R"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-15ext_fing-R_time-1-3-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-15ext_fing-R_time-1-3-20_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_IM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-IM_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-IM_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_MR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-MR_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-MR_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_TIM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-TIM_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-TIM_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_TIMRL"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-TIMRL_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-TIMRL_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15ext_IMR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15ext_fing-IMR_time-1-3-25_reps-02_run-01.otb+"
+    concatenate: false
+
+  # ── 15% MVC flexions ──────────────────────────────────────────────────────
+
+  - name: "15flex_I"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-15flex_fing-I_time-1-3-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-15flex_fing-I_time-1-3-20_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_M"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-15flex_fing-M_time-1-3-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-15flex_fing-M_time-1-3-20_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_R"
+    files:
+      - "sub-01_day-01_task-trap_ang-0_mvc-15flex_fing-R_time-1-3-20_run-01.otb+"
+      - "sub-01_day-01_task-trap_ang-0_mvc-15flex_fing-R_time-1-3-20_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_IM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-IM_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-IM_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_MR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-MR_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-MR_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_TIM"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-TIM_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-TIM_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_TIMRL"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-TIMRL_time-1-3-25_run-01.otb+"
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-TIMRL_time-1-3-25_run-02.otb+"
+    concatenate: true
+
+  - name: "15flex_IMR"
+    files:
+      - "sub-01_day-01_task-trapcombsameforce_ang-0_mvc-15flex_fing-IMR_time-1-3-25_reps-02_run-01.otb+"
+    concatenate: false
