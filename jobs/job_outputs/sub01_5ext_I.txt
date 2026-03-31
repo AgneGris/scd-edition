@@ -4,7 +4,7 @@ Concatenate    : True
 Rejections     : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json
 Output dir     : /rds/general/project/thinfilmdata/live/forearm/output/sub-01
 sil_threshold  : 0.85
-iterations     : 1
+iterations     : 150
 Files:
   /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/day-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+
   /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/day-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+
@@ -17,11 +17,11 @@ Files:
 Channel config : /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_config_sub01_day01.json
 Fs             : 10240 Hz
 Grids          : ['Grid_1', 'Grid_2', 'Grid_3', 'Grid_4', 'Grid_5', 'Grid_6']
-Param overrides: {'sil_threshold': 0.85, 'iterations': 1}
+Param overrides: {'sil_threshold': 0.85, 'iterations': 150}
 
 Files to process (2):
-  /var/tmp/pbs.2025128.pbs-7/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+
-  /var/tmp/pbs.2025128.pbs-7/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+
+  /var/tmp/pbs.2027701.pbs-7/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+
+  /var/tmp/pbs.2027701.pbs-7/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+
 Rejections: loaded per-file from /rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json
   Loaded rejections for sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+: 6 channel(s) rejected
   Loaded rejections for sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+: 8 channel(s) rejected
@@ -30,7 +30,7 @@ Concatenating 2 file(s):
   Loading sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01.otb+ …
     shape    : (259324, 401)  (401 channels, 25.32 s)
     dtype    : torch.float32
-    loaded in: 1.2s
+    loaded in: 1.1s
   Loading sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02.otb+ …
     shape    : (250898, 401)  (401 channels, 24.50 s)
     dtype    : torch.float32
@@ -40,34 +40,300 @@ Concatenating 2 file(s):
     Masked channels : none
 EMG shape: torch.Size([510222, 1000])
 0: accept new source.
+1: reject low silhouette source.
+2: reject low silhouette source.
+3: reject low silhouette source.
+4: reject low silhouette source.
+5: reject low silhouette source.
+6: reject low silhouette source.
+7: reject low silhouette source.
+8: reject low silhouette source.
+9: reject low silhouette source.
+10: reject low silhouette source.
+11: reject low silhouette source.
+12: reject low silhouette source.
+13: reject low silhouette source.
+14: reject low silhouette source.
+15: reject low silhouette source.
+16: reject low silhouette source.
+17: reject low silhouette source.
+18: reject low silhouette source.
+19: reject low silhouette source.
+20: reject low silhouette source.
     Grid_1: 1 MU(s) found
   Processing Grid_2 (2/6)...
     Masked channels : [np.int64(34)]
 EMG shape: torch.Size([510222, 1000])
 0: accept new source.
-    Grid_2: 1 MU(s) found
+1: accept new source.
+2: accept new source.
+3: accept new source.
+4: accept new source.
+5: accept new source.
+6: accept new source.
+7: accept new source.
+8: accept new source.
+9: accept new source.
+10: reject low silhouette source.
+11: accept new source.
+12: accept new source.
+13: accept new source.
+14: accept new source.
+15: accept new source.
+16: accept new source.
+17: accept new source.
+18: accept new source.
+19: accept new source.
+20: accept new source.
+21: reject low silhouette source.
+22: reject low silhouette source.
+23: reject low silhouette source.
+24: reject low silhouette source.
+25: reject repeat source.
+26: accept new source.
+27: accept new source.
+28: reject low silhouette source.
+29: reject low silhouette source.
+30: reject low silhouette source.
+31: reject repeat source.
+32: reject low silhouette source.
+33: reject low silhouette source.
+34: reject low silhouette source.
+35: reject low silhouette source.
+36: accept new source.
+37: reject low silhouette source.
+38: accept new source.
+39: reject low silhouette source.
+40: reject low silhouette source.
+41: accept new source.
+42: accept new source.
+43: reject low silhouette source.
+44: accept new source.
+45: accept new source.
+46: reject low silhouette source.
+47: reject low silhouette source.
+48: reject low silhouette source.
+49: reject low silhouette source.
+50: reject low silhouette source.
+51: reject low silhouette source.
+52: reject low silhouette source.
+53: reject low silhouette source.
+54: reject low silhouette source.
+55: reject low silhouette source.
+56: accept new source.
+57: reject low silhouette source.
+58: reject low silhouette source.
+59: reject low silhouette source.
+60: reject repeat source.
+61: reject low silhouette source.
+62: reject low silhouette source.
+63: reject repeat source.
+64: reject low silhouette source.
+65: reject low silhouette source.
+66: reject low silhouette source.
+67: reject low silhouette source.
+68: reject low silhouette source.
+69: reject low silhouette source.
+70: accept new source.
+71: reject low silhouette source.
+72: reject low silhouette source.
+73: reject low silhouette source.
+74: reject low silhouette source.
+75: reject low silhouette source.
+76: reject low silhouette source.
+77: reject low silhouette source.
+78: reject low silhouette source.
+79: reject low silhouette source.
+80: reject low silhouette source.
+81: reject low silhouette source.
+82: reject low silhouette source.
+83: reject low silhouette source.
+84: reject low silhouette source.
+85: reject low silhouette source.
+86: reject low silhouette source.
+87: reject low silhouette source.
+88: reject low silhouette source.
+89: reject low silhouette source.
+90: reject low silhouette source.
+    Grid_2: 30 MU(s) found
   Processing Grid_3 (3/6)...
     Masked channels : [np.int64(60)]
 EMG shape: torch.Size([510222, 1024])
 0: accept new source.
-    Grid_3: 1 MU(s) found
+1: accept new source.
+2: accept new source.
+3: accept new source.
+4: accept new source.
+5: accept new source.
+6: accept new source.
+7: accept new source.
+8: reject low silhouette source.
+9: reject low silhouette source.
+10: reject low silhouette source.
+11: reject low silhouette source.
+12: reject low silhouette source.
+13: reject low silhouette source.
+14: reject low silhouette source.
+15: reject low silhouette source.
+16: reject repeat source.
+17: reject low silhouette source.
+18: accept new source.
+19: reject low silhouette source.
+20: accept new source.
+21: reject low silhouette source.
+22: reject low silhouette source.
+23: reject low silhouette source.
+24: reject low silhouette source.
+25: reject low silhouette source.
+26: reject low silhouette source.
+27: reject low silhouette source.
+28: reject low silhouette source.
+29: reject low silhouette source.
+30: accept new source.
+31: reject low silhouette source.
+32: reject low silhouette source.
+33: reject low silhouette source.
+34: reject low silhouette source.
+35: reject low silhouette source.
+36: reject low silhouette source.
+37: reject low silhouette source.
+38: reject low silhouette source.
+39: reject low silhouette source.
+40: reject low silhouette source.
+41: reject low silhouette source.
+42: reject low silhouette source.
+43: reject low silhouette source.
+44: reject low silhouette source.
+45: reject low silhouette source.
+46: reject low silhouette source.
+47: reject low silhouette source.
+48: reject low silhouette source.
+49: reject low silhouette source.
+50: reject low silhouette source.
+    Grid_3: 11 MU(s) found
   Processing Grid_4 (4/6)...
     Masked channels : [np.int64(25), np.int64(50), np.int64(51), np.int64(52)]
 EMG shape: torch.Size([510222, 1024])
 0: accept new source.
-    Grid_4: 1 MU(s) found
+1: accept new source.
+2: accept new source.
+3: accept new source.
+4: accept new source.
+5: accept new source.
+6: accept new source.
+7: accept new source.
+8: accept new source.
+9: reject low silhouette source.
+10: accept new source.
+11: reject low silhouette source.
+12: reject low silhouette source.
+13: reject low silhouette source.
+14: reject low silhouette source.
+15: accept new source.
+16: accept new source.
+17: accept new source.
+18: reject low silhouette source.
+19: reject low silhouette source.
+20: accept new source.
+21: reject low silhouette source.
+22: reject low silhouette source.
+23: reject low silhouette source.
+24: reject low silhouette source.
+25: reject low silhouette source.
+26: reject low silhouette source.
+27: reject low silhouette source.
+28: reject low silhouette source.
+29: reject low silhouette source.
+30: reject low silhouette source.
+31: reject low silhouette source.
+32: reject low silhouette source.
+33: reject low silhouette source.
+34: reject low silhouette source.
+35: reject low silhouette source.
+36: reject low silhouette source.
+37: reject low silhouette source.
+38: reject low silhouette source.
+39: reject low silhouette source.
+40: reject low silhouette source.
+    Grid_4: 14 MU(s) found
   Processing Grid_5 (5/6)...
     Masked channels : [np.int64(15), np.int64(16)]
 EMG shape: torch.Size([510222, 1024])
 0: accept new source.
+1: reject repeat source.
+2: reject low silhouette source.
+3: reject low silhouette source.
+4: reject low silhouette source.
+5: reject low silhouette source.
+6: reject low silhouette source.
+7: reject low silhouette source.
+8: reject low silhouette source.
+9: reject low silhouette source.
+10: reject low silhouette source.
+11: reject low silhouette source.
+12: reject low silhouette source.
+13: reject low silhouette source.
+14: reject low silhouette source.
+15: reject low silhouette source.
+16: reject low silhouette source.
+17: reject low silhouette source.
+18: reject low silhouette source.
+19: reject low silhouette source.
+20: reject low silhouette source.
     Grid_5: 1 MU(s) found
   Processing Grid_6 (6/6)...
     Masked channels : none
 EMG shape: torch.Size([510222, 1000])
 0: accept new source.
-    Grid_6: 1 MU(s) found
-  Saving → /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01_sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02_concat_decomp_output.pkl  (total 6 MU(s))
-File saved successfully: /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01_sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02_concat_decomp_output.pkl
-  Done in 252.2s → /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-01_sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-02_concat_decomp_output.pkl
+1: accept new source.
+2: accept new source.
+3: accept new source.
+4: accept new source.
+5: accept new source.
+6: reject repeat source.
+7: accept new source.
+8: accept new source.
+9: accept new source.
+10: accept new source.
+11: accept new source.
+12: reject repeat source.
+13: reject repeat source.
+14: reject repeat source.
+15: reject repeat source.
+16: reject repeat source.
+17: reject repeat source.
+18: reject repeat source.
+19: reject repeat source.
+20: reject repeat source.
+21: reject repeat source.
+22: reject repeat source.
+23: reject repeat source.
+24: reject repeat source.
+25: reject repeat source.
+26: accept new source.
+27: reject repeat source.
+28: reject repeat source.
+29: reject repeat source.
+30: reject repeat source.
+31: reject repeat source.
+32: reject repeat source.
+33: reject repeat source.
+34: reject repeat source.
+35: reject repeat source.
+36: reject repeat source.
+37: reject repeat source.
+38: reject repeat source.
+39: reject low silhouette source.
+40: reject repeat source.
+41: reject repeat source.
+42: reject low silhouette source.
+43: reject repeat source.
+44: reject repeat source.
+45: reject repeat source.
+46: reject repeat source.
+    Grid_6: 12 MU(s) found
+  Saving → /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-0_1_2_concat_decomp_output.pkl  (total 69 MU(s))
+File saved successfully: /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-0_1_2_concat_decomp_output.pkl
+  Done in 16883.3s → /rds/general/project/thinfilmdata/live/forearm/output/sub-01/sub-01_day-01_task-trap_ang-0_mvc-5ext_fing-I_time-1-1-20_run-0_1_2_concat_decomp_output.pkl
 
-All done in 254.5s.
+All done in 16885.5s.
