@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
         """Handle decomposition completion and auto-load into Edition tab."""
         try:
             self.edition_tab.load_from_path(decomp_path)
-            self.tabs.setCurrentIndex(2)
+            self.tabs.setCurrentWidget(self.edition_tab)
             self.status_bar.showMessage(
                 "✓ Decomposition complete — loaded into Edition tab"
             )
@@ -199,14 +199,59 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    app = QApplication(sys.argv)
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="scd-edition",
+        description="SCD EMG Decomposition & Edition GUI",
+    )
+    parser.add_argument(
+        "--open", dest="open_path", metavar="FILE",
+        help="PKL decomposition file to load directly into the Edition tab on startup",
+    )
+    parser.add_argument(
+        "--output", dest="output_path", metavar="FILE",
+        help="Default output path used when saving (skips the save dialog)",
+    )
+    parser.add_argument(
+        "--quit-after-save", dest="quit_after_save", action="store_true",
+        help="Close the application automatically after the file is saved",
+    )
+    # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
+    args, qt_argv = parser.parse_known_args()
+
+    app = QApplication([sys.argv[0]] + qt_argv)
     app.setApplicationName("SCD-Edition")
 
     set_style_sheet(app)
 
     window = MainWindow()
+
+    if args.output_path:
+        window.edition_tab.set_output_path(Path(args.output_path))
+
+    if args.quit_after_save:
+        window.edition_tab.set_quit_after_save(True)
+
+    if args.open_path:
+        open_path = Path(args.open_path)
+        # Defer until the event loop is running so the window is fully shown
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, lambda: _open_on_startup(window, open_path))
+
     window.show()
     sys.exit(app.exec_())
+
+
+def _open_on_startup(window: "MainWindow", path: Path):
+    try:
+        window.edition_tab.load_from_path(path)
+        window.tabs.setCurrentWidget(window.edition_tab)
+    except Exception as e:
+        print(f"ERROR: Could not open file '{path}': {e}", file=sys.stderr)
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.critical(window, "Load Error", f"Could not open file:\n{e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
