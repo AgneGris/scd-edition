@@ -23,7 +23,7 @@ import yaml
 # ── HPC / environment settings (edit as needed) ──────────────────────────────
 
 CONDA_ENV    = "scd"                                        # conda environment
-PATH_TO_LOGS = Path(os.environ.get("EPHEMERAL", "/tmp"), "thinfilm_logs")
+PATH_TO_LOGS = Path(os.environ.get("EPHEMERAL", "/tmp"), "thinfilm_logs_dir")
 
 # ── decomposition parameters ─────────────────────────────────────────────────
 
@@ -64,15 +64,8 @@ def generate_jobs(yaml_path: Path) -> None:
         # Full paths
         full_paths = [str(data_dir / fname) for fname in files]
 
-        # --files block: each file on its own line with \ continuation,
-        # last file has no trailing \
-        files_args = ""
-        for i, p in enumerate(full_paths):
-            is_last = (i == len(full_paths) - 1)
-            if is_last:
-                files_args += f'            "{p}"'
-            else:
-                files_args += f'            "{p}" \\\n'
+        # bash array of quoted file paths for the copy loop
+        files_bash_array = " ".join(f'"{p}"' for p in full_paths)
 
         # echo lines for logging
         files_echo = "\n".join(f'    echo "  {p}"' for p in full_paths)
@@ -82,10 +75,10 @@ def generate_jobs(yaml_path: Path) -> None:
         concat_bool = str(concatenate)
 
         job_script = template
-        job_script = job_script.replace("%RUN_NAME%",       run_name)
-        job_script = job_script.replace("%CHANNEL_CONFIG%", channel_cfg)
-        job_script = job_script.replace("%FILES_ARGS%",     files_args)
-        job_script = job_script.replace("%FILES_ECHO%",     files_echo)
+        job_script = job_script.replace("%RUN_NAME%",        run_name)
+        job_script = job_script.replace("%CHANNEL_CONFIG%",  channel_cfg)
+        job_script = job_script.replace("%FILES_BASH_ARRAY%",files_bash_array)
+        job_script = job_script.replace("%FILES_ECHO%",      files_echo)
         job_script = job_script.replace("%CONCAT_FLAG%",    concat_flag)
         job_script = job_script.replace("%CONCAT_BOOL%",    concat_bool)
         job_script = job_script.replace("%REJECTIONS_FILE%",rejections)

@@ -1,8 +1,8 @@
 subject: sub-01
-data_dir: "Z:/projects/thinfilmdata/live/forearm/raw_data/sub-01/day-01"
-channel_config: "Z:/projects/thinfilmdata/live/forearm/raw_data/sub-01/channel_config_sub01_day01.json"
-output_rejections: "Z:/projects/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json"
-output_dir: "Z:/projects/thinfilmdata/live/forearm/output/sub-01"
+data_dir: "/rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/day-01"
+channel_config: "/rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_config_sub01_day01.json"
+output_rejections: "/rds/general/project/thinfilmdata/live/forearm/raw_data/sub-01/channel_rejections_sub01_day01.json"
+output_dir: "/rds/general/project/thinfilmdata/live/forearm/output/sub-01"
 
 decompositions:
 
