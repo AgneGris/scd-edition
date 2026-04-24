@@ -246,6 +246,23 @@ def _extract_timestamps(
     return locs.cpu().numpy().astype(np.int64)
 
 
+def recalculate_unit_centroid(
+    source: np.ndarray,
+    min_peak_sep: int = 30,
+    square_source: bool = True,
+) -> np.ndarray:
+    """Re-run amplitude-clustering spike detection on a pre-computed source.
+
+    Calls source_to_timestamps (k-means, 100 iter) on `source` and returns
+    the winning cluster's indices as int64. Does not touch the filter or
+    peel-off sequence.
+    """
+    fn = _get_scd_modules()
+    source_t = torch.from_numpy(np.asarray(source, dtype=np.float32))
+    return _extract_timestamps(source_t, fn, min_peak_sep=min_peak_sep,
+                               square_source=square_source)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Peel-off replay (shared by load and recalculate)
 # ═══════════════════════════════════════════════════════════════════════════════

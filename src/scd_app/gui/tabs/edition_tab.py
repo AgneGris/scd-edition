@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
     QRubberBand,
     QApplication,
 )
-from PyQt5.QtGui import QKeySequence, QFont
+from PyQt5.QtGui import QKeySequence, QFont, QPixmap, QIcon, QPainter, QColor
 import pyqtgraph as pg
 
 from scd_app.gui.style.styling import (
@@ -56,10 +56,12 @@ from scd_app.core.mu_properties import (
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
 from scd_app.core.filter_recalculation import (
     recalculate_unit_filter,
+    recalculate_unit_centroid,
     supports_filter_recalculation,
     supports_full_source_computation,
     compute_all_full_sources,
 )
+from scd_app.core.auto_editor import auto_edit, AutoEditResult, MIN_SPIKES
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +649,78 @@ class XZoomViewBox(pg.ViewBox):
 
 
 # ---------------------------------------------------------------------------
+# AUX legend overlay
+# ---------------------------------------------------------------------------
+
+_AUX_COLORS_HEX = ["#FFD700", "#C0EFFF", "#FFB347"]
+_AUX_COLORS_RGB = [(255, 215, 0), (192, 239, 255), (255, 179, 71)]
+
+
+class _AuxLegend(pg.LegendItem):
+    """Floating click-to-toggle legend for AUX force traces.
+
+    Labels are added directly to the grid layout (no ItemSample swatch).
+    Toggling uses pen-alpha (70 → 5) rather than setVisible to avoid the
+    pyqtgraph 'hidden' eye-slash glyph.
+    """
+
+    def __init__(self):
+        super().__init__(offset=(-10, 10))  # top-right corner
+        self._curves: list = []
+        self._names: list = []
+        self._colors: list = []
+        self._on_states: list = []
+
+    def clear(self):
+        for _sample, label in self.items:
+            self.layout.removeItem(label)
+            label.close()
+        self.items = []
+        self.updateSize()
+
+    def populate(self, channels: list, curves: list):
+        self.clear()
+        self._curves = list(curves)
+        self._names = []
+        self._colors = []
+        self._on_states = [True] * len(channels)
+        for i, (ch, _curve) in enumerate(zip(channels, curves)):
+            meta = ch.get("meta", {})
+            name = meta.get("name", meta.get("unit", f"AUX {i + 1}"))
+            color = _AUX_COLORS_HEX[i % len(_AUX_COLORS_HEX)]
+            self._names.append(name)
+            self._colors.append(color)
+            label = pg.LabelItem(f"● {name}", color=color, justify="left")
+            self.layout.addItem(label, i, 0)
+            self.items.append((None, label))
+        self.updateSize()
+        self.setVisible(bool(channels))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            y = event.pos().y()
+            for i, (_sample, label) in enumerate(self.items):
+                rect = label.mapRectToParent(label.boundingRect())
+                if rect.top() <= y <= rect.bottom():
+                    self._toggle(i)
+                    event.accept()
+                    return
+        event.accept()  # consume all clicks; legend is not draggable
+
+    def _toggle(self, idx: int):
+        self._on_states[idx] = not self._on_states[idx]
+        on = self._on_states[idx]
+        r, g, b = _AUX_COLORS_RGB[idx % len(_AUX_COLORS_RGB)]
+        alpha = 70 if on else 5
+        self._curves[idx].setPen(pg.mkPen(color=(r, g, b, alpha), width=2.5))
+        _sample, label = self.items[idx]
+        dot = "●" if on else "○"
+        color = self._colors[idx] if on else "#555555"
+        label.setText(f"{dot} {self._names[idx]}", color=color)
+        self.update()
+
+
+# ---------------------------------------------------------------------------
 # SourcePlotWidget
 # ---------------------------------------------------------------------------
 
@@ -698,6 +772,11 @@ class SourcePlotWidget(pg.PlotWidget):
         self.addItem(self._spike_scatter)
         self._plateau_region: Optional[pg.LinearRegionItem] = None
 
+        self._aux_curves: list = []
+        self._aux_raw: list = []
+        self._legend = _AuxLegend()
+        self._legend.setParentItem(self.plotItem.vb)
+
         # Rubberband overlay (pixel space, parented to this widget)
         self._rb_widget: Optional[QRubberBand] = None
         self._rb_origin: Optional[QPoint] = None
@@ -747,6 +826,7 @@ class SourcePlotWidget(pg.PlotWidget):
         t = np.arange(len(self._source)) / self._fsamp
         self._signal_curve.setData(t, self._source)
         self._update_spike_markers()
+        self._redraw_aux()
 
     def set_plateau_region(self, start_sample: int, end_sample: int):
         if self._plateau_region is not None:
@@ -762,6 +842,44 @@ class SourcePlotWidget(pg.PlotWidget):
         self._plateau_region.setZValue(-10)
         self.addItem(self._plateau_region)
 
+    def set_aux_data(self, channels: list, fsamp: float):
+        for curve in self._aux_curves:
+            self.removeItem(curve)
+        self._aux_curves.clear()
+        self._aux_raw.clear()
+        for i, ch in enumerate(channels):
+            raw = np.asarray(ch["data"]).squeeze()
+            raw = np.nan_to_num(raw, nan=0.0)
+            self._aux_raw.append(raw)
+            r, g, b = _AUX_COLORS_RGB[i % len(_AUX_COLORS_RGB)]
+            curve = pg.PlotCurveItem(pen=pg.mkPen(color=(r, g, b, 70), width=2.5))
+            curve.setZValue(-20)
+            self.addItem(curve)
+            self._aux_curves.append(curve)
+        self._legend.populate(channels, self._aux_curves)
+        self._redraw_aux()
+
+    def _redraw_aux(self):
+        if self._source is not None and len(self._source) > 0:
+            src_min = float(self._source.min())
+            src_max = float(self._source.max())
+        else:
+            src_min = 0.0
+            src_max = 1.0
+        # Map force onto the source amplitude range:
+        #   force 0   → src_min  (noise floor)
+        #   force max → src_max * 1.05  (5% above the tallest spike)
+        src_range = max(src_max * 1.05 - src_min, 1e-9)
+        n_src = len(self._source) if self._source is not None else 0
+        for raw, curve in zip(self._aux_raw, self._aux_curves):
+            sig = raw - float(raw.min())
+            sig_range = max(float(sig.max()), 1e-9)
+            sig_scaled = (sig / sig_range) * src_range + src_min
+            n_plot = min(len(sig_scaled), n_src) if n_src > 0 else len(sig_scaled)
+            step = max(1, n_plot // 2000)
+            t = np.arange(0, n_plot, step) / self._fsamp
+            curve.setData(t, sig_scaled[:n_plot:step])
+
     def update_timestamps(self, timestamps: np.ndarray):
         """Refresh spike markers without touching the signal curve or view range."""
         self._timestamps = timestamps
@@ -770,6 +888,8 @@ class SourcePlotWidget(pg.PlotWidget):
     def clear_data(self):
         self._signal_curve.setData([], [])
         self._spike_scatter.setData([], [])
+        for curve in self._aux_curves:
+            curve.setData([], [])
         self._source = None
         self._timestamps = None
         if self._plateau_region is not None:
@@ -1039,6 +1159,41 @@ class EditionTab(QWidget):
             f"QPushButton:disabled {{ color: {COLORS.get('text_dim','#6c7086')}; }}"
         )
 
+    @staticmethod
+    def _make_warning_icon(size: int = 14) -> QIcon:
+        """Render ⚠ in warning yellow to a QIcon, independent of button text colour."""
+        px = QPixmap(size, size)
+        px.fill(Qt.transparent)
+        p = QPainter(px)
+        f = QFont()
+        f.setPixelSize(size)
+        p.setFont(f)
+        p.setPen(QColor(COLORS["warning"]))
+        p.drawText(px.rect(), Qt.AlignCenter, "⚠")
+        p.end()
+        return QIcon(px)
+
+    @staticmethod
+    def _warn_toolbar_btn_style() -> str:
+        """Subtle toolbar button style — transparent background, default text colour."""
+        fg = COLORS["foreground"]
+        bg_hover = COLORS.get("background_input", "#1a1f24")
+        fs = FONT_SIZES.get("small", "9pt")
+        return (
+            f"QPushButton {{"
+            f"  color: {fg};"
+            f"  background: transparent;"
+            f"  border: 1px solid transparent;"
+            f"  border-radius: 4px;"
+            f"  padding: 4px 10px;"
+            f"  font-size: {fs};"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {bg_hover};"
+            f"  border-color: {COLORS['border']};"
+            f"}}"
+        )
+
     # ── Toolbar ──────────────────────────────────────────────────────────
 
     def _build_toolbar(self) -> QToolBar:
@@ -1160,6 +1315,18 @@ class EditionTab(QWidget):
         self.action_redo.triggered.connect(self._redo)
         tb.addAction(self.action_redo)
 
+        # ── Global MU management ──────────────────────────────────────
+        tb.addSeparator()
+        self.btn_auto_flag = QPushButton("Auto-Flag Unreliable")
+        self.btn_auto_flag.setIcon(self._make_warning_icon())
+        self.btn_auto_flag.setToolTip(
+            "Flag all MUs with SIL < 0.9 across all ports for deletion.\n"
+            "Units with SIL ≥ 0.9 are left for manual review."
+        )
+        self.btn_auto_flag.clicked.connect(self._auto_flag_unreliable)
+        self.btn_auto_flag.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_auto_flag)
+
         return tb
 
     # ── Left panel ───────────────────────────────────────────────────────
@@ -1202,32 +1369,55 @@ class EditionTab(QWidget):
         mu_row.addWidget(self.mu_combo, stretch=1)
         lay.addLayout(mu_row)
 
-        btn_style = f"""
+        # ── Button styles ────────────────────────────────────────────────
+        _fs = FONT_SIZES.get("small", "9pt")
+        _bg = COLORS.get("background_input", "#1a1f24")
+        _fg = COLORS["foreground"]
+        _border = COLORS["border"]
+        _bg_hover = COLORS.get("background_hover", "#1e242b")
+
+        primary_btn_style = f"""
             QPushButton {{
-                background-color: {COLORS.get('background_input','#33334d')};
-                color: {COLORS['foreground']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS['accent']};
+                color: #ffffff;
+                border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
-                font-size: {FONT_SIZES.get('small','9pt')};
+                padding: 8px 12px;
+                font-size: {_fs};
+                font-weight: 600;
             }}
             QPushButton:hover {{
-                background-color: {COLORS.get('background_light','#2a2a3c')};
-                border-color: {COLORS.get('info','#89b4fa')};
+                background-color: {COLORS['accent_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS.get('accent_light', COLORS['accent'])};
             }}
             QPushButton:disabled {{
-                color: {COLORS.get('text_dim','#6c7086')};
-                border-color: {COLORS['border']};
+                background-color: {COLORS.get('background_hover', '#1e242b')};
+                color: {COLORS.get('text_dim', '#6c7086')};
             }}"""
 
-        self.btn_flag_delete = QPushButton("🗑 Flag to Delete")
-        self.btn_flag_delete.setStyleSheet(btn_style)
-        self.btn_flag_delete.setShortcut(QKeySequence("X"))
-        self.btn_flag_delete.clicked.connect(self._toggle_flag_delete)
-        lay.addWidget(self.btn_flag_delete)
+        base_btn_style = f"""
+            QPushButton {{
+                background-color: {_bg};
+                color: {_fg};
+                border: 1px solid {_border};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: {_fs};
+            }}
+            QPushButton:hover {{
+                background-color: {_bg_hover};
+                border-color: {COLORS.get('info', '#4a9eff')};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS.get('text_dim', '#6c7086')};
+                border-color: {_border};
+            }}"""
 
+        # ── Recalculate Filter (primary action) ──────────────────────────
         self.btn_recalc_filter = QPushButton("⟳ Recalculate Filter")
-        self.btn_recalc_filter.setStyleSheet(btn_style)
+        self.btn_recalc_filter.setStyleSheet(primary_btn_style)
         self.btn_recalc_filter.setShortcut(QKeySequence("F"))
         self.btn_recalc_filter.setToolTip(
             "Replay peel-off and recompute filter + source + timestamps [F]"
@@ -1235,6 +1425,57 @@ class EditionTab(QWidget):
         self.btn_recalc_filter.clicked.connect(self._recalculate_filter)
         self.btn_recalc_filter.setEnabled(False)
         lay.addWidget(self.btn_recalc_filter)
+
+        # ── Recalculate Centroid ─────────────────────────────────────────
+        self.btn_recalc_centroid = QPushButton("⟳ Recalculate Centroid")
+        self.btn_recalc_centroid.setStyleSheet(base_btn_style)
+        self.btn_recalc_centroid.setShortcut(QKeySequence("C"))
+        self.btn_recalc_centroid.setToolTip(
+            "Re-run SCD amplitude clustering on the current source [C]\n"
+            "Finds peaks in the source/IPT, then k-means (100 iter) separates\n"
+            "true spikes from noise. Does not recompute the filter. Undoable."
+        )
+        self.btn_recalc_centroid.clicked.connect(self._recalculate_centroid)
+        lay.addWidget(self.btn_recalc_centroid)
+
+        # ── Per-MU actions ───────────────────────────────────────────────
+        lay.addSpacing(6)
+        _mu_lbl = QLabel("Current MU")
+        _mu_lbl.setStyleSheet(
+            f"color: {COLORS.get('text_dim', '#9da3ab')};"
+            f" font-size: {FONT_SIZES.get('tiny', '9pt')};"
+            " text-transform: uppercase;"
+            " letter-spacing: 1px;"
+        )
+        lay.addWidget(_mu_lbl)
+
+        self.btn_remove_outliers = QPushButton("⚡ Remove Outliers")
+        self.btn_remove_outliers.setStyleSheet(base_btn_style)
+        self.btn_remove_outliers.setShortcut(QKeySequence("O"))
+        self.btn_remove_outliers.setToolTip(
+            "Remove spikes causing outlier instantaneous firing rate [O]\n"
+            "Uses Tukey fence (Q75 + 1.5×IQR) on the IFR distribution.\n"
+            "For each outlier pair, the lower-amplitude spike is deleted."
+        )
+        self.btn_remove_outliers.clicked.connect(self._remove_outliers)
+        lay.addWidget(self.btn_remove_outliers)
+
+        self.btn_flag_delete = QPushButton("🗑 Flag to Delete")
+        self.btn_flag_delete.setStyleSheet(base_btn_style)
+        self.btn_flag_delete.setToolTip("Toggle deletion flag for the current MU [X]")
+        self.btn_flag_delete.clicked.connect(self._toggle_flag_delete)
+        lay.addWidget(self.btn_flag_delete)
+
+        self.btn_auto_edit_mu = QPushButton("⚙ Auto-Edit This MU")
+        self.btn_auto_edit_mu.setStyleSheet(base_btn_style)
+        self.btn_auto_edit_mu.setShortcut(QKeySequence("E"))
+        self.btn_auto_edit_mu.setToolTip(
+            "Apply rule-based auto-editing to the current MU only [E]\n"
+            "Removes low/high-IPT spikes; adds missed spikes by FR/IPT criteria.\n"
+            "Based on Wen et al. (2024). Undoable with Ctrl+Z."
+        )
+        self.btn_auto_edit_mu.clicked.connect(self._run_auto_edit_current)
+        lay.addWidget(self.btn_auto_edit_mu)
 
         self.muap_widget = pg.GraphicsLayoutWidget()
         self.muap_widget.setBackground(COLORS["background"])
@@ -1285,6 +1526,7 @@ class EditionTab(QWidget):
             lambda: self.btn_sel_delete.setChecked(not self.btn_sel_delete.isChecked()),
         )
         QShortcut(QKeySequence("Escape"), self, lambda: self._set_mode(EditMode.VIEW))
+        QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
 
     # ------------------------------------------------------------------
     # Sampling rate
@@ -1453,6 +1695,17 @@ class EditionTab(QWidget):
                 "File does not contain 'ports' and 'discharge_times'.",
             )
             return
+        if data.get("skip_filter_recalc"):
+            reply = QMessageBox.question(
+                self,
+                "Recalculate Filters?",
+                "This file was previously edited.\n\nDo you want to recalculate the filters for each motor unit?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                data["skip_filter_recalc"] = False
+
         try:
             self._load_decomposition_data(data)
             self._loaded_path = path
@@ -1482,12 +1735,18 @@ class EditionTab(QWidget):
             if emg_full.ndim == 2 and emg_full.shape[0] > emg_full.shape[1]:
                 emg_full = emg_full.T
 
+        skip_recalc = bool(decomp_data.get("skip_filter_recalc", False))
         can_full, reason = supports_full_source_computation(decomp_data)
         full_port_results: Dict[int, list] = {}
         start_sample = 0
         end_sample = emg_full.shape[1] if emg_full is not None else 0
 
-        if can_full:
+        if skip_recalc:
+            print(
+                "  [edition] skip_filter_recalc=True — using stored sources/timestamps as-is"
+            )
+            can_full = False
+        elif can_full:
             try:
                 self._update_status("Computing full-length sources (peel-off replay)…")
                 full_port_results, start_sample, end_sample, err = (
@@ -1688,6 +1947,8 @@ class EditionTab(QWidget):
         if self._full_source_mode:
             self.source_plot.set_plateau_region(start_sample, end_sample)
 
+        self._refresh_aux_controls()
+
         ok, reason = supports_filter_recalculation(decomp_data)
         self._filter_recalc_available = ok
         self.btn_recalc_filter.setEnabled(ok)
@@ -1822,12 +2083,14 @@ class EditionTab(QWidget):
             "discharge_times": discharge_times,
             "pulse_trains": pulse_trains,
             "mu_filters": mu_filters,
+            "skip_filter_recalc": True,
             "mu_properties": mu_properties,
         }
 
         if self._original_decomp_data is not None:
             for key in [
                 "data",
+                "aux_channels",
                 "plateau_coords",
                 "chans_per_electrode",
                 "channel_indices",
@@ -2146,6 +2409,54 @@ class EditionTab(QWidget):
             QMessageBox.critical(self, "Recalculation Error", str(e))
             self._update_status("Filter recalculation failed")
 
+    def _recalculate_centroid(self):
+        mu = self._current_mu()
+        if mu is None:
+            self._update_status("Select a motor unit first")
+            return
+        if mu.source is None or len(mu.source) == 0:
+            self._update_status("No source available for centroid recalculation")
+            return
+
+        # In full-source mode mu.source spans the full recording — crop to the
+        # plateau window and convert returned plateau-local indices to absolute.
+        if self._full_source_mode:
+            source_slice = mu.source[self._start_sample : self._end_sample]
+        else:
+            source_slice = mu.source
+
+        if len(source_slice) == 0:
+            self._update_status("Empty source slice — check plateau region")
+            return
+
+        self._update_status(f"Recalculating centroid for MU {mu.id}…")
+        try:
+            new_ts_local = recalculate_unit_centroid(source_slice)
+            new_timestamps = (
+                self._ts_to_absolute(new_ts_local)
+                if self._full_source_mode
+                else new_ts_local
+            )
+
+            old_timestamps = mu.timestamps.copy()
+            mu.timestamps = new_timestamps
+
+            self._push_undo(
+                UndoAction(
+                    description=f"Recalculate centroid MU {mu.id}",
+                    port_name=self._current_port,
+                    mu_idx=self._current_mu_idx,
+                    old_timestamps=old_timestamps,
+                    new_timestamps=new_timestamps,
+                )
+            )
+            self._on_data_changed(f"Centroid recalculated for MU {mu.id}")
+
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Centroid Recalculation Error", str(e))
+            self._update_status("Centroid recalculation failed")
+
     def _global_unit_idx(self, port_name: str, mu_idx: int) -> Optional[int]:
         offset = 0
         for pname, mus in self._ports.items():
@@ -2207,6 +2518,158 @@ class EditionTab(QWidget):
             f"MU {mu.id} {'flagged' if mu.flagged_duplicate else 'unflagged'}"
         )
 
+    def _remove_outliers(self):
+        """Remove spikes causing outlier IFR in the current MU.
+
+        For each consecutive pair of spikes whose instantaneous firing rate
+        lies above the Tukey fence (Q75 + 1.5×IQR of the IFR distribution),
+        the spike with the lower source amplitude is removed.  A floor of
+        2× the median IFR prevents false positives in units with very regular
+        firing (where IQR can be near zero).
+        """
+        mu = self._current_mu()
+        if mu is None or len(mu.timestamps) < 3:
+            return
+
+        ts = np.sort(mu.timestamps)
+        isi = np.diff(ts) / self._fsamp  # seconds
+        # Guard against zero-length ISIs (duplicate timestamps)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ifr = np.where(isi > 0, 1.0 / isi, np.inf)
+
+        finite_ifr = ifr[np.isfinite(ifr)]
+        if len(finite_ifr) < 4:
+            self._update_status("Not enough spikes for IFR outlier detection")
+            return
+
+        q25, q75 = np.percentile(finite_ifr, [25, 75])
+        iqr = q75 - q25
+        tukey_threshold = q75 + 1.5 * iqr
+        # Floor: must be at least 2× the median to avoid flagging normal variation
+        threshold = max(tukey_threshold, 2.0 * np.median(finite_ifr))
+
+        # Find pairs whose IFR exceeds the threshold
+        outlier_pair_indices = np.where(ifr > threshold)[0]
+
+        if len(outlier_pair_indices) == 0:
+            self._update_status("No IFR outliers found")
+            return
+
+        # For each outlier pair (i, i+1), mark the lower-amplitude spike for removal.
+        # Collect unique removal indices so a spike in multiple pairs is only removed once.
+        source = mu.source
+        n_src = len(source)
+        to_remove: set[int] = set()
+        for i in outlier_pair_indices:
+            idx_a, idx_b = i, i + 1
+            if idx_a in to_remove or idx_b in to_remove:
+                # One of the pair is already scheduled for removal; skip re-evaluation
+                continue
+            t_a, t_b = ts[idx_a], ts[idx_b]
+            amp_a = source[t_a] if 0 <= t_a < n_src else 0.0
+            amp_b = source[t_b] if 0 <= t_b < n_src else 0.0
+            to_remove.add(idx_a if amp_a <= amp_b else idx_b)
+
+        remove_timestamps = ts[sorted(to_remove)]
+        old_ts = mu.timestamps.copy()
+        new_ts = np.setdiff1d(mu.timestamps, remove_timestamps)
+        self._push_undo(
+            UndoAction(
+                f"Remove IFR outliers ({len(to_remove)})",
+                self._current_port,
+                self._current_mu_idx,
+                old_ts,
+                new_ts,
+            )
+        )
+        mu.timestamps = new_ts
+        self._on_data_changed(
+            f"Removed {len(to_remove)} IFR outlier spike(s) "
+            f"(threshold {threshold:.1f} Hz)"
+        )
+
+    def _run_auto_edit_current(self):
+        """Apply rule-based auto-editing to the currently selected MU.
+
+        Implements the four rules from Wen et al. (2024): removes spikes with
+        low or high IPT/FR, and adds missed spikes based on IPT and FR criteria.
+        The edit is pushed as a single undoable action.
+        """
+        mu = self._current_mu()
+        if mu is None:
+            return
+        if len(mu.timestamps) < MIN_SPIKES:
+            self._update_status(
+                f"MU {mu.id}: fewer than {MIN_SPIKES} spikes — auto-edit skipped"
+            )
+            return
+
+        old_ts = mu.timestamps.copy()
+        result = auto_edit(old_ts, mu.source, self._fsamp)
+
+        if result.skipped:
+            self._update_status(
+                f"MU {mu.id}: fewer than {MIN_SPIKES} spikes — auto-edit skipped"
+            )
+            return
+
+        if np.array_equal(old_ts, result.new_timestamps):
+            self._update_status(f"MU {mu.id}: no changes from auto-edit")
+            return
+
+        self._push_undo(
+            UndoAction(
+                f"Auto-edit MU {mu.id}",
+                self._current_port,
+                self._current_mu_idx,
+                old_ts,
+                result.new_timestamps,
+            )
+        )
+        mu.timestamps = result.new_timestamps
+        self._on_data_changed(
+            f"Auto-edited MU {mu.id}: "
+            f"{result.n_removed} removed, {result.n_added} added"
+        )
+
+    def _auto_flag_unreliable(self):
+        """Flag all MUs with SIL < 0.9 across every port for deletion.
+
+        Units with SIL >= 0.9 are considered borderline and left for manual
+        review (they pass the primary quality criterion even if secondary
+        metrics such as COV or PNR are still failing).
+
+        Units whose properties have not yet been computed are skipped.
+        """
+        flagged_count = 0
+        borderline_count = 0
+        no_props_count = 0
+
+        for port_name, mus in self._ports.items():
+            for mu in mus:
+                if mu.flagged_duplicate:
+                    continue  # already flagged — leave it
+                if mu.props is None:
+                    no_props_count += 1
+                    continue
+                sil = mu.props.sil
+                if np.isnan(sil) or sil < 0.9:
+                    mu.flagged_duplicate = True
+                    flagged_count += 1
+                else:
+                    borderline_count += 1
+
+        # Refresh the combo for the current port so ⚠ labels appear
+        self._refresh_mu_combo()
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+
+        parts = [f"Auto-flagged {flagged_count} MU(s)"]
+        if borderline_count:
+            parts.append(f"{borderline_count} borderline left (SIL ≥ 0.9)")
+        if no_props_count:
+            parts.append(f"{no_props_count} skipped (no quality data)")
+        self._update_status(" — ".join(parts))
+
     def _refresh_port_combo(self):
         cur = self.port_combo.currentText()
         self.port_combo.blockSignals(True)
@@ -2240,6 +2703,16 @@ class EditionTab(QWidget):
                     label += "  ✓" if mu.props.is_reliable else "  ✗"
                 self.mu_combo.addItem(label)
         self.mu_combo.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    # AUX / force overlay
+    # ------------------------------------------------------------------
+
+    def _refresh_aux_controls(self):
+        aux_channels = []
+        if self._original_decomp_data is not None:
+            aux_channels = self._original_decomp_data.get("aux_channels") or []
+        self.source_plot.set_aux_data(aux_channels, self._fsamp)
 
     # ------------------------------------------------------------------
     # Plot updates

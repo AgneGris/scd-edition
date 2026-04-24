@@ -792,7 +792,19 @@ class ConfigTab(QWidget):
             "value is offset by 6."
         )
         self.skip_quaternions_cb.setStyleSheet(
-            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES['small']};"
+            f"""
+            QCheckBox {{
+                color: {COLORS['foreground']};
+                font-size: {FONT_SIZES['small']};
+                background-color: {COLORS['background_input']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 8px;
+            }}
+            QCheckBox:hover {{
+                background-color: {COLORS['background_hover']};
+            }}
+            """
         )
         self.skip_quaternions_cb.stateChanged.connect(
             self._recalculate_all_channel_ranges
