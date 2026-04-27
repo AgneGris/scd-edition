@@ -14,9 +14,10 @@ import traceback
 import numpy as np
 from scipy import signal as sp_signal
 
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QPoint, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QPoint, QSize, QEvent
 from PyQt5.QtWidgets import (
     QWidget,
+    QDialog,
     QVBoxLayout,
     QHBoxLayout,
     QSplitter,
@@ -30,7 +31,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QShortcut,
     QStatusBar,
-    QFrame,
     QRubberBand,
     QApplication,
 )
@@ -380,103 +380,108 @@ GRID_POSITIONS_HD04MM1305 = {
 }
 
 GRID_POSITIONS_HD04MM1606 = {
-    # Col 0
+    # Col 0: ch 81–96 (rows 0–15)
     81: (0, 0),
-    82: (0, 1),
-    83: (0, 2),
-    84: (0, 3),
-    85: (0, 4),
-    86: (0, 5),
-    87: (0, 6),
-    88: (0, 7),
-    89: (0, 8),
-    90: (0, 9),
-    91: (0, 10),
-    92: (0, 11),
-    93: (0, 12),
-    94: (0, 13),
-    95: (0, 14),
-    96: (0, 15),
-    65: (1, 0),
+    82: (1, 0),
+    83: (2, 0),
+    84: (3, 0),
+    85: (4, 0),
+    86: (5, 0),
+    87: (6, 0),
+    88: (7, 0),
+    89: (8, 0),
+    90: (9, 0),
+    91: (10, 0),
+    92: (11, 0),
+    93: (12, 0),
+    94: (13, 0),
+    95: (14, 0),
+    96: (15, 0),
+    # Col 1: ch 65–80
+    65: (0, 1),
     66: (1, 1),
-    67: (1, 2),
-    68: (1, 3),
-    69: (1, 4),
-    70: (1, 5),
-    71: (1, 6),
-    72: (1, 7),
-    73: (1, 8),
-    74: (1, 9),
-    75: (1, 10),
-    76: (1, 11),
-    77: (1, 12),
-    78: (1, 13),
-    79: (1, 14),
-    80: (1, 15),
-    49: (2, 0),
-    50: (2, 1),
+    67: (2, 1),
+    68: (3, 1),
+    69: (4, 1),
+    70: (5, 1),
+    71: (6, 1),
+    72: (7, 1),
+    73: (8, 1),
+    74: (9, 1),
+    75: (10, 1),
+    76: (11, 1),
+    77: (12, 1),
+    78: (13, 1),
+    79: (14, 1),
+    80: (15, 1),
+    # Col 2: ch 49–64
+    49: (0, 2),
+    50: (1, 2),
     51: (2, 2),
-    52: (2, 3),
-    53: (2, 4),
-    54: (2, 5),
-    55: (2, 6),
-    56: (2, 7),
-    57: (2, 8),
-    58: (2, 9),
-    59: (2, 10),
-    60: (2, 11),
-    61: (2, 12),
-    62: (2, 13),
-    63: (2, 14),
-    64: (2, 15),
-    33: (3, 0),
-    34: (3, 1),
-    35: (3, 2),
+    52: (3, 2),
+    53: (4, 2),
+    54: (5, 2),
+    55: (6, 2),
+    56: (7, 2),
+    57: (8, 2),
+    58: (9, 2),
+    59: (10, 2),
+    60: (11, 2),
+    61: (12, 2),
+    62: (13, 2),
+    63: (14, 2),
+    64: (15, 2),
+    # Col 3: ch 33–48
+    33: (0, 3),
+    34: (1, 3),
+    35: (2, 3),
     36: (3, 3),
-    37: (3, 4),
-    38: (3, 5),
-    39: (3, 6),
-    40: (3, 7),
-    41: (3, 8),
-    42: (3, 9),
-    43: (3, 10),
-    44: (3, 11),
-    45: (3, 12),
-    46: (3, 13),
-    47: (3, 14),
-    48: (3, 15),
-    17: (4, 0),
-    18: (4, 1),
-    19: (4, 2),
-    20: (4, 3),
+    37: (4, 3),
+    38: (5, 3),
+    39: (6, 3),
+    40: (7, 3),
+    41: (8, 3),
+    42: (9, 3),
+    43: (10, 3),
+    44: (11, 3),
+    45: (12, 3),
+    46: (13, 3),
+    47: (14, 3),
+    48: (15, 3),
+    # Col 4: ch 17–32
+    17: (0, 4),
+    18: (1, 4),
+    19: (2, 4),
+    20: (3, 4),
     21: (4, 4),
-    22: (4, 5),
-    23: (4, 6),
-    24: (4, 7),
-    25: (4, 8),
-    26: (4, 9),
-    27: (4, 10),
-    28: (4, 11),
-    29: (4, 12),
-    30: (4, 13),
-    31: (4, 14),
-    32: (4, 15),
-    1: (5, 0),
-    2: (5, 1),
-    3: (5, 2),
-    4: (5, 3),
-    5: (5, 4),
+    22: (5, 4),
+    23: (6, 4),
+    24: (7, 4),
+    25: (8, 4),
+    26: (9, 4),
+    27: (10, 4),
+    28: (11, 4),
+    29: (12, 4),
+    30: (13, 4),
+    31: (14, 4),
+    32: (15, 4),
+    # Col 5: ch 1–16
+    1: (0, 5),
+    2: (1, 5),
+    3: (2, 5),
+    4: (3, 5),
+    5: (4, 5),
     6: (5, 5),
-    7: (5, 6),
-    8: (5, 7),
-    9: (5, 8),
-    10: (5, 9),
-    11: (5, 10),
-    12: (5, 11),
-    13: (5, 12),
-    14: (5, 13),
-    15: (5, 14),
-    16: (5, 15),
+    7: (6, 5),
+    8: (7, 5),
+    9: (8, 5),
+    10: (9, 5),
+    11: (10, 5),
+    12: (11, 5),
+    13: (12, 5),
+    14: (13, 5),
+    15: (14, 5),
+    16: (15, 5),
 }
 
 # HD10MM0804 / HD05MM0804: 8 rows × 4 cols = 32 channels
@@ -557,7 +562,7 @@ ELECTRODE_GRIDS = {
         "positions": GRID_POSITIONS_HD04MM1305,
     },
     "HD04MM1606": {
-        "grid_shape": (6, 16),
+        "grid_shape": (16, 6),
         "ied_mm": 4,
         "n_channels": 96,
         "muap_mapping": {i: i + 1 for i in range(96)},
@@ -1040,6 +1045,137 @@ class FiringRatePlotWidget(pg.PlotWidget):
 
 
 # ---------------------------------------------------------------------------
+# MuapPopoutDialog
+# ---------------------------------------------------------------------------
+
+
+class MuapPopoutDialog(QDialog):
+    """Floating window that mirrors the MUAP panel and live-updates with MU selection."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("MUAP Shapes")
+        self.resize(850, 620)
+        self.setWindowFlags(
+            Qt.Window
+            | Qt.WindowMinimizeButtonHint
+            | Qt.WindowMaximizeButtonHint
+            | Qt.WindowCloseButtonHint
+        )
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+
+        self._plot = pg.GraphicsLayoutWidget()
+        self._plot.setBackground(COLORS["background"])
+        lay.addWidget(self._plot)
+
+    def render_grid(self, waveforms, ch_indices, grid_cfg, mu_idx):
+        self._plot.clear()
+        rows, cols = grid_cfg["grid_shape"]
+        positions = grid_cfg["positions"]
+        valid = [w for w in waveforms if len(w) > 0]
+        amp = np.max(np.abs(np.concatenate(valid))) * 1.2 if valid else 1.0
+        n_samples = len(waveforms[0]) if valid else 409
+
+        label = (
+            f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
+            f"MU {mu_idx}</span>"
+        )
+        self._plot.addLabel(label, row=0, col=0, colspan=rows + 1, justify="center")
+
+        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:8pt;"
+
+        def _add_lbl(widget, text, row, col, **kw):
+            lbl = widget.addLabel(text, row=row, col=col, **kw)
+            lbl.setMinimumWidth(0)
+            lbl.setMinimumHeight(0)
+            return lbl
+
+        _add_lbl(self._plot, f"<span style='{lbl_style}'><b>Ch</b></span>", 1, 0, justify="center")
+        for r in range(rows):
+            _add_lbl(self._plot, f"<span style='{lbl_style}'><b>{r + 1}</b></span>", 1, r + 1, justify="center")
+        for c in range(cols):
+            _add_lbl(self._plot, f"<span style='{lbl_style}'><b>{c + 1}</b></span>", c + 2, 0, justify="center")
+
+        gl = self._plot.ci.layout
+        for c in range(cols):
+            for r in range(rows):
+                p = self._plot.addPlot(row=c + 2, col=r + 1)
+                p.hideAxis("left")
+                p.hideAxis("bottom")
+                p.setMouseEnabled(x=False, y=False)
+                p.enableAutoRange(enable=False)
+                p.setYRange(-amp, amp, padding=0)
+                p.setXRange(0, n_samples, padding=0)
+                p.setLimits(xMin=0, xMax=n_samples, yMin=-amp, yMax=amp)
+                p.setMinimumWidth(0)
+                p.setMinimumHeight(0)
+
+        gl.setSpacing(0)
+        gl.setColumnMinimumWidth(0, 0)
+        gl.setColumnStretchFactor(0, 0)
+        for r in range(rows):
+            gl.setColumnMinimumWidth(r + 1, 0)
+            gl.setColumnStretchFactor(r + 1, 1)
+        for r in range(2):
+            gl.setRowMinimumHeight(r, 0)
+            gl.setRowStretchFactor(r, 0)
+        for c in range(cols):
+            gl.setRowMinimumHeight(c + 2, 0)
+            gl.setRowStretchFactor(c + 2, 1)
+
+        for idx, wav in enumerate(waveforms):
+            if idx >= len(ch_indices):
+                break
+            pos = positions.get(int(idx))
+            if pos is None:
+                continue
+            r, c = pos
+            if r >= rows or c >= cols:
+                continue
+            item = self._plot.getItem(c + 2, r + 1)
+            if item is not None and len(wav) > 0:
+                item.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=1.5))
+
+        self.setWindowTitle(f"MUAP Shapes — MU {mu_idx}")
+
+    def render_stacked(self, waveforms, ch_indices, mu_idx):
+        self._plot.clear()
+        plot = self._plot.addPlot(row=0, col=0)
+        valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
+        if not valid:
+            return
+        all_data = np.concatenate([w for _, w in valid])
+        spacing = np.max(np.abs(all_data)) * 0.6 if len(all_data) > 0 else 1.0
+        n = len(valid)
+        for rank, (pidx, wav) in enumerate(valid):
+            offset = (n - rank - 1) * spacing
+            ch = int(ch_indices[pidx]) if pidx < len(ch_indices) else pidx
+            plot.plot(wav + offset, pen=pg.mkPen(COLORS["foreground"], width=1.5))
+            txt = pg.TextItem(f"Ch {ch}", color=(150, 150, 150), anchor=(1, 0.5))
+            txt.setPos(-1, offset)
+            txt.setFont(QFont(FONT_FAMILY, 8))
+            plot.addItem(txt)
+        plot.getAxis("left").setVisible(False)
+        plot.setTitle(
+            f"MU {mu_idx} — Stacked",
+            color=COLORS["foreground"],
+            size="11pt",
+        )
+        self.setWindowTitle(f"MUAP Shapes — MU {mu_idx} (Stacked)")
+
+    def clear(self, message="Select a Motor Unit"):
+        self._plot.clear()
+        p = self._plot.addPlot(row=0, col=0)
+        t = pg.TextItem(message, color=(120, 120, 120), anchor=(0.5, 0.5))
+        t.setFont(QFont(FONT_FAMILY, 14))
+        p.addItem(t)
+        p.hideAxis("left")
+        p.hideAxis("bottom")
+        self.setWindowTitle("MUAP Shapes")
+
+
 # EditionTab
 # ---------------------------------------------------------------------------
 
@@ -1072,6 +1208,7 @@ class EditionTab(QWidget):
         self._redo_stack: List[UndoAction] = []
         self._original_decomp_data: Optional[dict] = None
         self._filter_recalc_available: bool = False
+        self._muap_popout: Optional[MuapPopoutDialog] = None
 
         self._build_ui()
         self._setup_shortcuts()
@@ -1104,7 +1241,7 @@ class EditionTab(QWidget):
         splitter.setHandleWidth(2)
         splitter.addWidget(self._build_left_panel())
         splitter.addWidget(self._build_right_panel())
-        splitter.setSizes([320, 1080])
+        splitter.setSizes([380, 1020])
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 7)
         root.addWidget(splitter, stretch=1)
@@ -1289,6 +1426,7 @@ class EditionTab(QWidget):
             "Click again to turn off."
         )
         self.btn_sel_add.toggled.connect(self._on_sel_add_toggled)
+        self.btn_sel_add.setEnabled(False)
         tb.addWidget(self.btn_sel_add)
 
         self.btn_sel_delete = QPushButton("🗑 Del in Selection")
@@ -1301,6 +1439,7 @@ class EditionTab(QWidget):
             "Click again to turn off."
         )
         self.btn_sel_delete.toggled.connect(self._on_sel_delete_toggled)
+        self.btn_sel_delete.setEnabled(False)
         tb.addWidget(self.btn_sel_delete)
 
         # ── Undo / Redo ───────────────────────────────────────────────
@@ -1325,6 +1464,7 @@ class EditionTab(QWidget):
         )
         self.btn_auto_flag.clicked.connect(self._auto_flag_unreliable)
         self.btn_auto_flag.setStyleSheet(self._warn_toolbar_btn_style())
+        self.btn_auto_flag.setEnabled(False)
         tb.addWidget(self.btn_auto_flag)
 
         return tb
@@ -1436,18 +1576,11 @@ class EditionTab(QWidget):
             "true spikes from noise. Does not recompute the filter. Undoable."
         )
         self.btn_recalc_centroid.clicked.connect(self._recalculate_centroid)
+        self.btn_recalc_centroid.setEnabled(False)
         lay.addWidget(self.btn_recalc_centroid)
 
         # ── Per-MU actions ───────────────────────────────────────────────
         lay.addSpacing(6)
-        _mu_lbl = QLabel("Current MU")
-        _mu_lbl.setStyleSheet(
-            f"color: {COLORS.get('text_dim', '#9da3ab')};"
-            f" font-size: {FONT_SIZES.get('tiny', '9pt')};"
-            " text-transform: uppercase;"
-            " letter-spacing: 1px;"
-        )
-        lay.addWidget(_mu_lbl)
 
         self.btn_remove_outliers = QPushButton("⚡ Remove Outliers")
         self.btn_remove_outliers.setStyleSheet(base_btn_style)
@@ -1458,12 +1591,14 @@ class EditionTab(QWidget):
             "For each outlier pair, the lower-amplitude spike is deleted."
         )
         self.btn_remove_outliers.clicked.connect(self._remove_outliers)
+        self.btn_remove_outliers.setEnabled(False)
         lay.addWidget(self.btn_remove_outliers)
 
         self.btn_flag_delete = QPushButton("🗑 Flag to Delete")
         self.btn_flag_delete.setStyleSheet(base_btn_style)
         self.btn_flag_delete.setToolTip("Toggle deletion flag for the current MU [X]")
         self.btn_flag_delete.clicked.connect(self._toggle_flag_delete)
+        self.btn_flag_delete.setEnabled(False)
         lay.addWidget(self.btn_flag_delete)
 
         self.btn_auto_edit_mu = QPushButton("⚙ Auto-Edit This MU")
@@ -1475,12 +1610,31 @@ class EditionTab(QWidget):
             "Based on Wen et al. (2024). Undoable with Ctrl+Z."
         )
         self.btn_auto_edit_mu.clicked.connect(self._run_auto_edit_current)
+        self.btn_auto_edit_mu.setEnabled(False)
         lay.addWidget(self.btn_auto_edit_mu)
 
         self.muap_widget = pg.GraphicsLayoutWidget()
         self.muap_widget.setBackground(COLORS["background"])
         self.muap_widget.setMinimumHeight(50)
+        self.muap_widget.setStyleSheet(
+            f"border: 1px solid {COLORS['border']}; border-radius: 4px;"
+        )
         lay.addWidget(self.muap_widget, stretch=1)
+
+        self.btn_muap_popout = QPushButton("↗", self.muap_widget)
+        self.btn_muap_popout.setToolTip("Pop out MUAP view")
+        self.btn_muap_popout.setFixedSize(20, 20)
+        self.btn_muap_popout.setFont(QFont("Arial, Helvetica", 10))
+        self.btn_muap_popout.setStyleSheet(
+            f"QPushButton {{ background-color: {COLORS.get('background_hover', '#1e242b')};"
+            f" color: {COLORS.get('text_dim', '#6c7086')}; padding: 0px;"
+            f" border: 1px solid {COLORS['border']}; border-radius: 4px; }}"
+            f"QPushButton:hover {{ color: {COLORS['foreground']};"
+            f" border-color: {COLORS.get('info', '#4a9eff')}; }}"
+        )
+        self.btn_muap_popout.clicked.connect(self._open_muap_popout)
+        self.btn_muap_popout.raise_()
+        self.muap_widget.installEventFilter(self)
 
         return panel
 
@@ -1511,6 +1665,16 @@ class EditionTab(QWidget):
 
         lay.addWidget(plot_splitter)
         return panel
+
+    def eventFilter(self, obj, event):
+        if obj is self.muap_widget and event.type() == QEvent.Resize:
+            self._reposition_muap_popout_btn()
+        return super().eventFilter(obj, event)
+
+    def _reposition_muap_popout_btn(self):
+        btn = self.btn_muap_popout
+        btn.move(self.muap_widget.width() - btn.width() - 6, 6)
+        btn.raise_()
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Up"), self, self._select_prev_mu)
@@ -1941,8 +2105,7 @@ class EditionTab(QWidget):
         if ports:
             self.port_combo.setCurrentText(ports[0])
             self._on_port_changed(ports[0])
-        self.source_plot.plotItem.autoRange()
-        self.fr_plot.plotItem.autoRange()
+        self._reset_view_full()
 
         if self._full_source_mode:
             self.source_plot.set_plateau_region(start_sample, end_sample)
@@ -1954,6 +2117,17 @@ class EditionTab(QWidget):
         self.btn_recalc_filter.setEnabled(ok)
         if not ok:
             self.btn_recalc_filter.setToolTip(f"Unavailable: {reason}")
+
+        for btn in (
+            self.btn_recalc_centroid,
+            self.btn_remove_outliers,
+            self.btn_flag_delete,
+            self.btn_auto_edit_mu,
+            self.btn_sel_add,
+            self.btn_sel_delete,
+            self.btn_auto_flag,
+        ):
+            btn.setEnabled(True)
 
         all_mus = [mu for mus in self._ports.values() for mu in mus]
         n_total = len(all_mus)
@@ -2172,9 +2346,26 @@ class EditionTab(QWidget):
         self._disarm_selection()
         self._update_status()
 
+    def _reset_view_full(self):
+        """Reset both plots to show the entire signal length."""
+        mu = self._current_mu()
+        if mu is None or len(mu.source) == 0:
+            return
+        x_max = len(mu.source) / self._fsamp
+        # Source plot: set X and Y explicitly.  Any autoRange() call (even on
+        # the linked FR plot) feeds spike-marker bounds back through the X link
+        # and re-clips the range to the plateau region, so we avoid it entirely.
+        src_sq = np.nan_to_num(mu.source**2)
+        y_max = float(np.max(src_sq)) if len(src_sq) > 0 else 1.0
+        y_pad = y_max * 0.05
+        self.source_plot.getViewBox().setRange(
+            xRange=(0, x_max), yRange=(-y_pad, y_max + y_pad), padding=0
+        )
+        # FR plot X follows via the link; only auto-range its Y axis.
+        self.fr_plot.getViewBox().enableAutoRange(axis=1, enable=True)
+
     def _reset_view(self):
-        self.source_plot.plotItem.autoRange()
-        self.fr_plot.plotItem.autoRange()
+        self._reset_view_full()
         self._update_status("View reset")
 
     # ------------------------------------------------------------------
@@ -2736,8 +2927,7 @@ class EditionTab(QWidget):
         self.fr_plot.set_data(mu.timestamps)
 
         if reset_view:
-            self.source_plot.plotItem.autoRange()
-            self.fr_plot.plotItem.autoRange()
+            self._reset_view_full()
         elif had_custom_range:
             vb.setRange(xRange=x_range, yRange=y_range, padding=0)
 
@@ -2835,6 +3025,19 @@ class EditionTab(QWidget):
     # MUAP panel
     # ------------------------------------------------------------------
 
+    def _open_muap_popout(self):
+        if self._muap_popout is None or not self._muap_popout.isVisible():
+            self._muap_popout = MuapPopoutDialog(parent=None)
+            self._muap_popout.setAttribute(Qt.WA_DeleteOnClose)
+            self._muap_popout.destroyed.connect(self._on_muap_popout_closed)
+        self._muap_popout.show()
+        self._muap_popout.raise_()
+        self._muap_popout.activateWindow()
+        self._plot_muap()
+
+    def _on_muap_popout_closed(self):
+        self._muap_popout = None
+
     def _plot_muap(self):
         mu = self._current_mu()
         if mu is None:
@@ -2842,9 +3045,8 @@ class EditionTab(QWidget):
             return
         if mu.props is None or mu.props.muap_grid is None:
             no_emg = self._emg_data.get(self._current_port) is None
-            self._clear_muap_plot(
-                "No EMG data in file" if no_emg else "MUAP unavailable"
-            )
+            msg = "No EMG data in file" if no_emg else "MUAP unavailable"
+            self._clear_muap_plot(msg)
             return
 
         muap_grid = mu.props.muap_grid
@@ -2862,10 +3064,18 @@ class EditionTab(QWidget):
                     waveforms.append(muap_grid[r, c])
                     ch_indices.append(ch)
             self._render_muap_grid(waveforms, ch_indices, grid_cfg)
+            if self._muap_popout and self._muap_popout.isVisible():
+                self._muap_popout.render_grid(
+                    waveforms, ch_indices, grid_cfg, self._current_mu_idx
+                )
         else:
             n_ch = muap_grid.shape[0]
             waveforms = [muap_grid[i, 0] for i in range(n_ch)]
             self._render_muap_stacked(waveforms, list(range(n_ch)))
+            if self._muap_popout and self._muap_popout.isVisible():
+                self._muap_popout.render_stacked(
+                    waveforms, list(range(n_ch)), self._current_mu_idx
+                )
 
     def _render_muap_grid(self, waveforms, ch_indices, grid_cfg):
         self.muap_widget.clear()
@@ -2875,15 +3085,33 @@ class EditionTab(QWidget):
         amp = np.max(np.abs(np.concatenate(valid))) * 1.2 if valid else 1.0
         n_samples = len(waveforms[0]) if valid else 409
 
+        # Transposed layout: data rows → display columns, data cols → display rows.
+        # Row 0: MU label.  Row 1: data-row number strip.  Rows 2…cols+1: data plots.
+        # Col 0: data-col number strip.  Cols 1…rows: data plots.
         label = (
             f"<span style='color:{COLORS['foreground']};font-size:10pt;'>"
             f"MU {self._current_mu_idx}</span>"
         )
-        self.muap_widget.addLabel(label, row=0, col=0, colspan=cols)
+        self.muap_widget.addLabel(label, row=0, col=0, colspan=rows + 1, justify="center")
 
+        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:7pt;"
+
+        def _add_lbl(widget, text, row, col, **kw):
+            lbl = widget.addLabel(text, row=row, col=col, **kw)
+            lbl.setMinimumWidth(0)
+            lbl.setMinimumHeight(0)
+            return lbl
+
+        _add_lbl(self.muap_widget, f"<span style='{lbl_style}'><b>Ch</b></span>", 1, 0, justify="center")
         for r in range(rows):
-            for c in range(cols):
-                p = self.muap_widget.addPlot(row=r + 1, col=c)
+            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{r + 1}</span>", 1, r + 1, justify="center")
+        for c in range(cols):
+            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{c + 1}</span>", c + 2, 0, justify="center")
+
+        gl = self.muap_widget.ci.layout
+        for c in range(cols):
+            for r in range(rows):
+                p = self.muap_widget.addPlot(row=c + 2, col=r + 1)
                 p.hideAxis("left")
                 p.hideAxis("bottom")
                 p.setMouseEnabled(x=False, y=False)
@@ -2891,6 +3119,21 @@ class EditionTab(QWidget):
                 p.setYRange(-amp, amp, padding=0)
                 p.setXRange(0, n_samples, padding=0)
                 p.setLimits(xMin=0, xMax=n_samples, yMin=-amp, yMax=amp)
+                p.setMinimumWidth(0)
+                p.setMinimumHeight(0)
+
+        gl.setSpacing(0)
+        gl.setColumnMinimumWidth(0, 0)
+        gl.setColumnStretchFactor(0, 0)
+        for r in range(rows):
+            gl.setColumnMinimumWidth(r + 1, 0)
+            gl.setColumnStretchFactor(r + 1, 1)
+        for r in range(2):
+            gl.setRowMinimumHeight(r, 0)
+            gl.setRowStretchFactor(r, 0)
+        for c in range(cols):
+            gl.setRowMinimumHeight(c + 2, 0)
+            gl.setRowStretchFactor(c + 2, 1)
 
         for idx, wav in enumerate(waveforms):
             if idx >= len(ch_indices):
@@ -2901,9 +3144,14 @@ class EditionTab(QWidget):
             r, c = pos
             if r >= rows or c >= cols:
                 continue
-            item = self.muap_widget.getItem(r + 1, c)
+            item = self.muap_widget.getItem(c + 2, r + 1)
             if item is not None and len(wav) > 0:
                 item.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=1.5))
+
+        # pyqtgraph's GraphicsView only updates its viewport transform in resizeEvent.
+        # Calling resizeEvent(None) recomputes the transform for the current widget
+        # size without requiring an actual geometry change.
+        self.muap_widget.resizeEvent(None)
 
     def _render_muap_stacked(self, waveforms, ch_indices):
         self.muap_widget.clear()
@@ -2937,3 +3185,5 @@ class EditionTab(QWidget):
         p.addItem(t)
         p.hideAxis("left")
         p.hideAxis("bottom")
+        if self._muap_popout and self._muap_popout.isVisible():
+            self._muap_popout.clear(message)
