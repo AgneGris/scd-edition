@@ -130,8 +130,14 @@ class MainWindow(QMainWindow):
         self.decomp_tab.decomposition_complete.connect(self._on_decomposition_complete)
 
         # Edition → Visualisation
-        self.edition_tab.data_modified.connect(self.vis_tab.on_data_modified)
         self.edition_tab.file_loaded.connect(self._on_file_loaded_into_edition)
+
+        # Tab switch → Visualisation refresh
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+    def _on_tab_changed(self, index: int):
+        if index == 3:
+            self.vis_tab.on_tab_activated()
 
     def _reset_session(self):
         """Reset session state."""

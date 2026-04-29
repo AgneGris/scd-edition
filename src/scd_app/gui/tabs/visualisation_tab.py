@@ -3,7 +3,7 @@ Visualisation Tab (Tab 4) — interactive discharge-rate plots for the current f
 
 Inner tabs: Raster | IDR | CST
 X-axes are linked across all three inner tabs.
-AUX force channels can be overlaid on any plot and toggled per-channel.
+AUX force channels can be overlaid on any plot and toggled via floating legend (top-right).
 """
 
 from typing import Dict, List, Optional, Set
@@ -17,13 +17,9 @@ from PyQt5.QtWidgets import (
     QTabWidget,
     QPushButton,
     QLabel,
-    QCheckBox,
     QComboBox,
-    QDialog,
     QScrollArea,
-    QDialogButtonBox,
     QFrame,
-    QSizePolicy,
 )
 import pyqtgraph as pg
 
@@ -34,20 +30,25 @@ from scd_app.gui.style.styling import COLORS, FONT_SIZES
 
 # ── Colour constants ──────────────────────────────────────────────────────────
 
-_MU_PALETTE = [
-    (74, 158, 255),
-    (72, 187, 120),
-    (246, 173, 85),
-    (252, 129, 129),
-    (167, 139, 250),
-    (255, 107, 157),
-    (129, 236, 236),
-    (255, 204, 100),
-    (102, 204, 153),
-    (255, 159, 90),
-]
-
 _AUX_COLORS = [(255, 215, 0), (192, 239, 255), (255, 179, 71)]
+_AUX_COLORS_HEX = ["#FFD700", "#C0EFFF", "#FFB347"]
+
+# ── Colour helpers ─────────────────────────────────────────────────────────────
+
+
+def _blue_palette(n: int) -> List[tuple]:
+    """Generate n colours linearly interpolated from #63B3ED to #003E74."""
+    if n == 0:
+        return []
+    if n == 1:
+        return [(0x63, 0xB3, 0xED)]
+    light = np.array([0x63, 0xB3, 0xED], dtype=float)
+    dark = np.array([0x00, 0x3E, 0x74], dtype=float)
+    return [
+        tuple(int(v) for v in light * (1 - i / (n - 1)) + dark * (i / (n - 1)))
+        for i in range(n)
+    ]
+
 
 # ── Sort helpers ──────────────────────────────────────────────────────────────
 
@@ -77,73 +78,72 @@ _SORT_FNS = {
 }
 
 
-# ── MU selection dialog ───────────────────────────────────────────────────────
+# ── AUX floating legend ────────────────────────────────────────────────────────
 
-class MUSelectionDialog(QDialog):
-    """Lets the user toggle individual motor units on/off."""
 
-    def __init__(
-        self,
-        ports: Dict[str, List[MotorUnit]],
-        disabled_ids: Set[tuple],
-        parent=None,
-    ):
-        super().__init__(parent)
-        self.setWindowTitle("Select Motor Units")
-        self.setMinimumWidth(340)
-        self.setStyleSheet(
-            f"background-color: {COLORS['background_light']}; "
-            f"color: {COLORS['foreground']};"
-        )
-        self._checks: Dict[tuple, QCheckBox] = {}
+class _VisAuxLegend(pg.LegendItem):
+    """Floating click-to-toggle AUX legend anchored to the top-right of each plot.
 
-        layout = QVBoxLayout(self)
+    All three per-plot instances share the same _on_states list so toggling on
+    any one plot keeps the others visually in sync after _on_toggle fires.
+    """
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none;")
-        container = QWidget()
-        inner = QVBoxLayout(container)
-        inner.setSpacing(4)
-        inner.setContentsMargins(4, 4, 4, 4)
+    def __init__(self, on_states: List[bool], on_toggle_callback):
+        super().__init__(offset=(-10, 10))  # top-right
+        self._on_states = on_states  # shared mutable reference
+        self._on_toggle = on_toggle_callback
+        self._names: List[str] = []
+        self._colors_hex: List[str] = []
 
-        for port_name, mus in ports.items():
-            hdr = QLabel(f"  {port_name}")
-            hdr.setStyleSheet(
-                f"color: {COLORS['text_secondary']}; font-weight: bold; "
-                f"font-size: {FONT_SIZES['small']}; padding-top: 6px;"
-            )
-            inner.addWidget(hdr)
-            for mu in mus:
-                key = (port_name, mu.id)
-                label = f"MU {mu.id}"
-                if mu.props and not np.isnan(mu.props.discharge_rate_hz):
-                    label += f"  — {mu.props.discharge_rate_hz:.1f} Hz"
-                cb = QCheckBox(label)
-                cb.setChecked(key not in disabled_ids)
-                cb.setStyleSheet(f"color: {COLORS['foreground']}; padding-left: 12px;")
-                self._checks[key] = cb
-                inner.addWidget(cb)
+    def clear(self):
+        for _sample, label in self.items:
+            self.layout.removeItem(label)
+            label.close()
+        self.items = []
+        self.updateSize()
 
-        inner.addStretch()
-        scroll.setWidget(container)
-        layout.addWidget(scroll)
+    def populate(self, channels: list):
+        self.clear()
+        self._names = []
+        self._colors_hex = []
+        for i, ch in enumerate(channels):
+            name = ch.get("name", ch.get("unit", f"AUX {i + 1}"))
+            hex_color = _AUX_COLORS_HEX[i % len(_AUX_COLORS_HEX)]
+            self._names.append(name)
+            self._colors_hex.append(hex_color)
+            label = pg.LabelItem(f"● {name}", color=hex_color, justify="left")
+            self.layout.addItem(label, i, 0)
+            self.items.append((None, label))
+        self.updateSize()
+        self.setVisible(bool(channels))
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.setStyleSheet(
-            f"QPushButton {{ background: {COLORS['background_input']}; "
-            f"color: {COLORS['foreground']}; border: 1px solid {COLORS['border']}; "
-            f"border-radius: 4px; padding: 4px 12px; }}"
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+    def sync_labels(self):
+        """Refresh dot/colour from current _on_states."""
+        for i, (_sample, label) in enumerate(self.items):
+            if i >= len(self._on_states):
+                break
+            on = self._on_states[i]
+            dot = "●" if on else "○"
+            color = self._colors_hex[i] if on else "#555555"
+            label.setText(f"{dot} {self._names[i]}", color=color)
+        self.update()
 
-    def get_disabled_ids(self) -> Set[tuple]:
-        return {key for key, cb in self._checks.items() if not cb.isChecked()}
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            y = event.pos().y()
+            for i, (_sample, label) in enumerate(self.items):
+                rect = label.mapRectToParent(label.boundingRect())
+                if rect.top() <= y <= rect.bottom():
+                    if i < len(self._on_states):
+                        self._on_states[i] = not self._on_states[i]
+                    self._on_toggle()
+                    event.accept()
+                    return
+        event.accept()
 
 
 # ── Main tab ──────────────────────────────────────────────────────────────────
+
 
 class VisualisationTab(QWidget):
     """Tab 4 — raster, IDR, and CST plots for the current edition file."""
@@ -153,7 +153,7 @@ class VisualisationTab(QWidget):
 
         self._edition_tab = edition_tab
 
-        # Cached data snapshot (filled on Refresh)
+        # Cached data snapshot (filled on tab activation)
         self._ports: Dict[str, List[MotorUnit]] = {}
         self._aux_channels: list = []
         self._fsamp: float = 2048.0
@@ -161,11 +161,11 @@ class VisualisationTab(QWidget):
         self._end_sample: int = 0
 
         # UI state
-        self._stale: bool = False
         self._disabled_mus: Set[tuple] = set()
-        self._probe_enabled: Dict[str, bool] = {}
-        self._probe_checks: Dict[str, QCheckBox] = {}
-        self._aux_checks: List[QCheckBox] = []
+        self._sidebar_rows: Dict[tuple, QPushButton] = {}
+        self._sidebar_port_rows: Dict[str, QPushButton] = {}
+        self._aux_on_states: List[bool] = []
+        self._aux_legends: List[_VisAuxLegend] = []
 
         self._build_ui()
 
@@ -178,6 +178,17 @@ class VisualisationTab(QWidget):
 
         root.addWidget(self._build_header())
 
+        content = QWidget()
+        content_layout = QHBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(6)
+
+        content_layout.addWidget(self._build_sidebar())
+        content_layout.addWidget(self._build_plot_area(), stretch=1)
+
+        root.addWidget(content, stretch=1)
+
+    def _build_plot_area(self) -> QTabWidget:
         self._inner_tabs = QTabWidget()
         self._inner_tabs.setStyleSheet(
             f"QTabWidget::pane {{ border: 1px solid {COLORS['border']}; }}"
@@ -199,7 +210,67 @@ class VisualisationTab(QWidget):
         self._inner_tabs.addTab(self._idr_plot, "IDR")
         self._inner_tabs.addTab(self._cst_plot, "CST")
 
-        root.addWidget(self._inner_tabs, stretch=1)
+        # One floating AUX legend per plot; all share _aux_on_states
+        for pw in (self._raster_plot, self._idr_plot, self._cst_plot):
+            leg = _VisAuxLegend(self._aux_on_states, self._on_aux_toggled)
+            leg.setParentItem(pw.plotItem.vb)
+            leg.setVisible(False)
+            self._aux_legends.append(leg)
+
+        return self._inner_tabs
+
+    def _build_sidebar(self) -> QWidget:
+        sidebar = QWidget()
+        sidebar.setFixedWidth(160)
+        sidebar.setStyleSheet(
+            f"background-color: {COLORS['background_light']}; border-radius: 4px;"
+        )
+
+        outer = QVBoxLayout(sidebar)
+        outer.setContentsMargins(4, 6, 4, 6)
+        outer.setSpacing(4)
+
+        # All / None toggle row
+        toggle_row = QWidget()
+        toggle_row.setStyleSheet("background: transparent;")
+        toggle_layout = QHBoxLayout(toggle_row)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.setSpacing(4)
+
+        self._btn_all = QPushButton("All")
+        self._btn_none = QPushButton("None")
+        for btn in (self._btn_all, self._btn_none):
+            btn.setFixedHeight(22)
+            btn.setStyleSheet(self._small_btn_style())
+        self._btn_all.clicked.connect(self._on_sidebar_all)
+        self._btn_none.clicked.connect(self._on_sidebar_none)
+        toggle_layout.addWidget(self._btn_all)
+        toggle_layout.addWidget(self._btn_none)
+        outer.addWidget(toggle_row)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet(f"color: {COLORS['border']}; background: {COLORS['border']};")
+        sep.setFixedHeight(1)
+        outer.addWidget(sep)
+
+        # Scrollable MU list
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background: transparent;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self._sidebar_container = QWidget()
+        self._sidebar_container.setStyleSheet("background: transparent;")
+        self._sidebar_inner_layout = QVBoxLayout(self._sidebar_container)
+        self._sidebar_inner_layout.setContentsMargins(0, 2, 0, 2)
+        self._sidebar_inner_layout.setSpacing(1)
+        self._sidebar_inner_layout.addStretch()
+
+        scroll.setWidget(self._sidebar_container)
+        outer.addWidget(scroll, stretch=1)
+
+        return sidebar
 
     def _make_plot_widget(self, ylabel: str, xlabel: str) -> pg.PlotWidget:
         pw = pg.PlotWidget()
@@ -207,10 +278,12 @@ class VisualisationTab(QWidget):
         for axis in ("left", "bottom"):
             pw.getAxis(axis).setTextPen(pg.mkPen(color=COLORS["foreground"]))
             pw.getAxis(axis).setPen(pg.mkPen(color=COLORS["border"]))
-        pw.setLabel("left", ylabel, color=COLORS["text_secondary"],
-                    size=FONT_SIZES["small"])
-        pw.setLabel("bottom", xlabel, color=COLORS["text_secondary"],
-                    size=FONT_SIZES["small"])
+        pw.setLabel(
+            "left", ylabel, color=COLORS["text_secondary"], size=FONT_SIZES["small"]
+        )
+        pw.setLabel(
+            "bottom", xlabel, color=COLORS["text_secondary"], size=FONT_SIZES["small"]
+        )
         pw.showGrid(x=True, y=True, alpha=0.12)
         return pw
 
@@ -222,33 +295,6 @@ class VisualisationTab(QWidget):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(8)
-
-        self._btn_refresh = QPushButton("Refresh")
-        self._btn_refresh.setFixedWidth(90)
-        self._btn_refresh.clicked.connect(self._on_refresh_clicked)
-        self._btn_refresh.setStyleSheet(self._refresh_btn_style(stale=False))
-        layout.addWidget(self._btn_refresh)
-
-        layout.addWidget(self._make_sep())
-
-        probe_lbl = QLabel("Probes:")
-        probe_lbl.setStyleSheet(
-            f"color: {COLORS['text_dim']}; font-size: {FONT_SIZES['small']};"
-        )
-        layout.addWidget(probe_lbl)
-
-        self._probe_container = QWidget()
-        self._probe_container_layout = QHBoxLayout(self._probe_container)
-        self._probe_container_layout.setContentsMargins(0, 0, 0, 0)
-        self._probe_container_layout.setSpacing(6)
-        layout.addWidget(self._probe_container)
-
-        self._btn_select_mus = QPushButton("Select MUs…")
-        self._btn_select_mus.setStyleSheet(self._small_btn_style())
-        self._btn_select_mus.clicked.connect(self._open_mu_selection)
-        layout.addWidget(self._btn_select_mus)
-
-        layout.addWidget(self._make_sep())
 
         sort_lbl = QLabel("Sort:")
         sort_lbl.setStyleSheet(
@@ -266,21 +312,8 @@ class VisualisationTab(QWidget):
             f"QComboBox QAbstractItemView {{ background: {COLORS['background_input']}; "
             f"color: {COLORS['foreground']}; }}"
         )
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         layout.addWidget(self._sort_combo)
-
-        layout.addWidget(self._make_sep())
-
-        self._aux_label = QLabel("AUX:")
-        self._aux_label.setStyleSheet(
-            f"color: {COLORS['text_dim']}; font-size: {FONT_SIZES['small']};"
-        )
-        layout.addWidget(self._aux_label)
-
-        self._aux_container = QWidget()
-        self._aux_container_layout = QHBoxLayout(self._aux_container)
-        self._aux_container_layout.setContentsMargins(0, 0, 0, 0)
-        self._aux_container_layout.setSpacing(6)
-        layout.addWidget(self._aux_container)
 
         layout.addStretch()
         return bar
@@ -298,85 +331,121 @@ class VisualisationTab(QWidget):
         return sep
 
     @staticmethod
-    def _refresh_btn_style(stale: bool) -> str:
-        bg = "#7c4b00" if stale else COLORS["background_input"]
-        border = "#f59e0b" if stale else COLORS["border"]
+    def _small_btn_style() -> str:
         return (
-            f"QPushButton {{ background: {bg}; color: {COLORS['foreground']}; "
-            f"border: 1px solid {border}; border-radius: 4px; padding: 4px 8px; "
+            f"QPushButton {{ background: {COLORS['background_input']}; "
+            f"color: {COLORS['foreground']}; border: 1px solid {COLORS['border']}; "
+            f"border-radius: 4px; padding: 2px 6px; "
             f"font-size: {FONT_SIZES['small']}; }}"
             f"QPushButton:hover {{ background: {COLORS['background_hover']}; }}"
         )
 
     @staticmethod
-    def _small_btn_style() -> str:
+    def _sidebar_row_style(active: bool, color: tuple) -> str:
+        r, g, b = color
+        text_color = f"rgb({r},{g},{b})" if active else COLORS["text_muted"]
         return (
-            f"QPushButton {{ background: {COLORS['background_input']}; "
-            f"color: {COLORS['foreground']}; border: 1px solid {COLORS['border']}; "
-            f"border-radius: 4px; padding: 4px 8px; "
+            f"QPushButton {{ background: transparent; color: {text_color}; "
+            f"border: none; text-align: left; padding: 2px 6px; "
             f"font-size: {FONT_SIZES['small']}; }}"
-            f"QPushButton:hover {{ background: {COLORS['background_hover']}; }}"
+            f"QPushButton:hover {{ background: {COLORS['background_hover']}; "
+            f"border-radius: 3px; }}"
+        )
+
+    @staticmethod
+    def _port_btn_style(active: bool) -> str:
+        text_color = COLORS["text_secondary"] if active else COLORS["text_muted"]
+        return (
+            f"QPushButton {{ background: transparent; color: {text_color}; "
+            f"border: none; text-align: left; padding: 6px 4px 2px 4px; "
+            f"font-size: {FONT_SIZES['normal']}; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {COLORS['background_hover']}; "
+            f"border-radius: 3px; }}"
         )
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     @pyqtSlot()
     def on_data_modified(self):
-        """Mark tab as stale — called when edition data changes."""
-        self._mark_stale()
+        """Called when edition data changes — no-op; refresh happens on tab activation."""
+        pass
 
-    # ── Header rebuild ────────────────────────────────────────────────────────
+    @pyqtSlot()
+    def on_tab_activated(self):
+        """Called when the user switches to this tab — re-fetches and re-renders."""
+        self._fetch_edition_data()
+        self._render()
 
-    def _rebuild_header_controls(self):
-        # --- probe checkboxes ---
-        while self._probe_container_layout.count():
-            item = self._probe_container_layout.takeAt(0)
+    # ── Sidebar rebuild ───────────────────────────────────────────────────────
+
+    def _rebuild_sidebar_rows(self):
+        while self._sidebar_inner_layout.count() > 1:
+            item = self._sidebar_inner_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self._probe_checks.clear()
+        self._sidebar_rows.clear()
+        self._sidebar_port_rows.clear()
 
-        for port_name in self._ports:
-            cb = QCheckBox(port_name)
-            cb.setChecked(self._probe_enabled.get(port_name, True))
-            cb.setStyleSheet(
-                f"color: {COLORS['foreground']}; font-size: {FONT_SIZES['small']};"
+        default_color = (0x63, 0xB3, 0xED)
+        insert_pos = 0
+
+        for port_name, mus in self._ports.items():
+            all_disabled = bool(mus) and all(
+                (port_name, mu.id) in self._disabled_mus for mu in mus
             )
-            self._probe_container_layout.addWidget(cb)
-            self._probe_checks[port_name] = cb
+            dot = "○" if all_disabled else "●"
+            port_btn = QPushButton(f"{dot}  {port_name}")
+            port_btn.setFlat(True)
+            port_btn.setStyleSheet(self._port_btn_style(not all_disabled))
+            port_btn.clicked.connect(lambda _, p=port_name: self._toggle_port(p))
+            self._sidebar_port_rows[port_name] = port_btn
+            self._sidebar_inner_layout.insertWidget(insert_pos, port_btn)
+            insert_pos += 1
 
-        # --- AUX checkboxes ---
-        while self._aux_container_layout.count():
-            item = self._aux_container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._aux_checks.clear()
+            for mu in mus:
+                key = (port_name, mu.id)
+                active = key not in self._disabled_mus
+                dot_mu = "●" if active else "○"
+                btn = QPushButton(f"{dot_mu} MU {mu.id}")
+                btn.setFlat(True)
+                btn.setStyleSheet(self._sidebar_row_style(active, default_color))
+                btn.clicked.connect(lambda _, k=key: self._toggle_mu(k))
+                self._sidebar_rows[key] = btn
+                self._sidebar_inner_layout.insertWidget(insert_pos, btn)
+                insert_pos += 1
 
-        for i, ch in enumerate(self._aux_channels):
-            name = ch.get("name", ch.get("unit", f"AUX {i + 1}"))
-            cb = QCheckBox(name)
-            cb.setChecked(True)
-            r, g, b = _AUX_COLORS[i % len(_AUX_COLORS)]
-            cb.setStyleSheet(
-                f"color: rgb({r},{g},{b}); font-size: {FONT_SIZES['small']};"
+    def _update_sidebar_colours(self, sorted_active: List[tuple]):
+        palette = _blue_palette(len(sorted_active))
+        color_map: Dict[tuple, tuple] = {}
+        for rank, (port_name, mu) in enumerate(sorted_active):
+            color_map[(port_name, mu.id)] = palette[rank]
+
+        default_color = (0x63, 0xB3, 0xED)
+        for key, btn in self._sidebar_rows.items():
+            port_name, mu_id = key
+            active = key not in self._disabled_mus
+            color = color_map.get(key, default_color)
+            dot = "●" if active else "○"
+            btn.setText(f"{dot} MU {mu_id}")
+            btn.setStyleSheet(self._sidebar_row_style(active, color))
+
+        for port_name, btn in self._sidebar_port_rows.items():
+            mus = self._ports.get(port_name, [])
+            all_disabled = bool(mus) and all(
+                (port_name, mu.id) in self._disabled_mus for mu in mus
             )
-            self._aux_container_layout.addWidget(cb)
-            self._aux_checks.append(cb)
+            dot = "○" if all_disabled else "●"
+            btn.setText(f"{dot}  {port_name}")
+            btn.setStyleSheet(self._port_btn_style(not all_disabled))
 
-        has_aux = bool(self._aux_channels)
-        self._aux_label.setVisible(has_aux)
-        self._aux_container.setVisible(has_aux)
+    # ── AUX legend rebuild ────────────────────────────────────────────────────
 
-    # ── Stale tracking ────────────────────────────────────────────────────────
-
-    def _mark_stale(self):
-        self._stale = True
-        self._btn_refresh.setStyleSheet(self._refresh_btn_style(stale=True))
-        self._btn_refresh.setText("Refresh ●")
-
-    def _mark_fresh(self):
-        self._stale = False
-        self._btn_refresh.setStyleSheet(self._refresh_btn_style(stale=False))
-        self._btn_refresh.setText("Refresh")
+    def _rebuild_aux_controls(self):
+        self._aux_on_states.clear()
+        for _ in self._aux_channels:
+            self._aux_on_states.append(True)
+        for leg in self._aux_legends:
+            leg.populate(self._aux_channels)
 
     # ── Fetch data from edition tab ───────────────────────────────────────────
 
@@ -389,30 +458,18 @@ class VisualisationTab(QWidget):
         self._fsamp = d["fsamp"]
         self._start_sample = d["start_sample"]
         self._end_sample = d["end_sample"]
-        # preserve prior probe enabled state
-        self._probe_enabled = {
-            p: self._probe_checks.get(p, QCheckBox()).isChecked()
-            if p in self._probe_checks else True
-            for p in self._ports
-        }
-        self._rebuild_header_controls()
+        self._rebuild_sidebar_rows()
+        self._rebuild_aux_controls()
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
-    def _on_refresh_clicked(self):
-        self._fetch_edition_data()
-        self._render()
-
     def _get_active_mus(self) -> List[tuple]:
-        result = []
-        for port_name, mus in self._ports.items():
-            cb = self._probe_checks.get(port_name)
-            if cb is not None and not cb.isChecked():
-                continue
-            for mu in mus:
-                if (port_name, mu.id) not in self._disabled_mus:
-                    result.append((port_name, mu))
-        return result
+        return [
+            (port_name, mu)
+            for port_name, mus in self._ports.items()
+            for mu in mus
+            if (port_name, mu.id) not in self._disabled_mus
+        ]
 
     def _sorted_mus(self, active: List[tuple]) -> List[tuple]:
         sort_name = self._sort_combo.currentText()
@@ -426,22 +483,13 @@ class VisualisationTab(QWidget):
         spike_matrix, t_axis = self._build_idr_matrix(sorted_active)
         self._render_idr(sorted_active, spike_matrix, t_axis)
         self._render_cst(spike_matrix, t_axis)
-        self._mark_fresh()
+        self._update_sidebar_colours(sorted_active)
 
-    def _build_idr_matrix(
-        self, sorted_mus: List[tuple]
-    ):
-        """Build the (n_samples, n_units) binary spike matrix and time axis.
-
-        Uses the union timestamp range across all active MUs so the IDR array
-        aligns with the raster x-axis.
-        """
+    def _build_idr_matrix(self, sorted_mus: List[tuple]):
         if not sorted_mus:
             return None, None
 
-        all_ts = [
-            mu.timestamps for _, mu in sorted_mus if len(mu.timestamps) > 0
-        ]
+        all_ts = [mu.timestamps for _, mu in sorted_mus if len(mu.timestamps) > 0]
         if not all_ts:
             return None, None
 
@@ -468,6 +516,7 @@ class VisualisationTab(QWidget):
         if not sorted_mus:
             return
 
+        palette = _blue_palette(len(sorted_mus))
         fsamp = self._fsamp
         ticks = []
         for rank, (port_name, mu) in enumerate(sorted_mus):
@@ -476,9 +525,10 @@ class VisualisationTab(QWidget):
                 continue
             t = mu.timestamps / fsamp
             y = np.full(len(t), rank, dtype=float)
-            r, g, b = _MU_PALETTE[rank % len(_MU_PALETTE)]
+            r, g, b = palette[rank]
             scatter = pg.ScatterPlotItem(
-                x=t, y=y,
+                x=t,
+                y=y,
                 symbol="s",
                 size=4,
                 brush=pg.mkBrush(r, g, b, 200),
@@ -505,6 +555,7 @@ class VisualisationTab(QWidget):
         if spike_matrix is None or t_axis is None or not sorted_mus:
             return
 
+        palette = _blue_palette(len(sorted_mus))
         idr = get_inst_discharge_rate(spike_matrix, int(self._fsamp))
 
         y_max = 0.0
@@ -513,12 +564,12 @@ class VisualisationTab(QWidget):
             peak = float(dr_trace.max())
             if peak > y_max:
                 y_max = peak
-            r, g, b = _MU_PALETTE[rank % len(_MU_PALETTE)]
-            label = f"MU {mu.id} ({port_name})"
+            r, g, b = palette[rank]
             pw.plot(
-                t_axis, dr_trace,
+                t_axis,
+                dr_trace,
                 pen=pg.mkPen(color=(r, g, b, 220), width=1.5),
-                name=label,
+                name=f"MU {mu.id} ({port_name})",
             )
 
         self._draw_aux_overlay(pw, y_min=0.0, y_max=y_max)
@@ -544,18 +595,17 @@ class VisualisationTab(QWidget):
             int(COLORS["info"][5:7], 16),
         )
         pw.plot(
-            t_axis, cst,
+            t_axis,
+            cst,
             pen=pg.mkPen(color=(r_info, g_info, b_info), width=2),
         )
 
         self._draw_aux_overlay(pw, y_min=0.0, y_max=y_max)
 
-    def _draw_aux_overlay(
-        self, pw: pg.PlotWidget, y_min: float, y_max: float
-    ):
+    def _draw_aux_overlay(self, pw: pg.PlotWidget, y_min: float, y_max: float):
         y_range = max(y_max * 1.05 - y_min, 1e-9)
         for i, ch in enumerate(self._aux_channels):
-            if i >= len(self._aux_checks) or not self._aux_checks[i].isChecked():
+            if i >= len(self._aux_on_states) or not self._aux_on_states[i]:
                 continue
             raw = np.asarray(ch.get("data", [])).squeeze()
             if raw.size == 0:
@@ -578,10 +628,41 @@ class VisualisationTab(QWidget):
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
-    def _open_mu_selection(self):
-        if not self._ports:
-            return
-        dlg = MUSelectionDialog(self._ports, self._disabled_mus, parent=self)
-        if dlg.exec_() == QDialog.Accepted:
-            self._disabled_mus = dlg.get_disabled_ids()
-            self._mark_stale()
+    def _toggle_mu(self, key: tuple):
+        if key in self._disabled_mus:
+            self._disabled_mus.discard(key)
+        else:
+            self._disabled_mus.add(key)
+        self._render()
+
+    def _toggle_port(self, port_name: str):
+        mus = self._ports.get(port_name, [])
+        all_disabled = bool(mus) and all(
+            (port_name, mu.id) in self._disabled_mus for mu in mus
+        )
+        if all_disabled:
+            for mu in mus:
+                self._disabled_mus.discard((port_name, mu.id))
+        else:
+            for mu in mus:
+                self._disabled_mus.add((port_name, mu.id))
+        self._render()
+
+    def _on_aux_toggled(self):
+        for leg in self._aux_legends:
+            leg.sync_labels()
+        self._render()
+
+    def _on_sidebar_all(self):
+        self._disabled_mus.clear()
+        self._render()
+
+    def _on_sidebar_none(self):
+        self._disabled_mus = {
+            (port_name, mu.id) for port_name, mus in self._ports.items() for mu in mus
+        }
+        self._render()
+
+    def _on_sort_changed(self):
+        if self._ports:
+            self._render()
