@@ -26,6 +26,7 @@ from PyQt5.QtGui import QKeySequence
 from scd_app.gui.tabs.config_tab import ConfigTab
 from scd_app.gui.tabs.decomposition_tab import DecompositionTab
 from scd_app.gui.tabs.edition_tab import EditionTab
+from scd_app.gui.tabs.visualisation_tab import VisualisationTab
 
 from scd_app.core.config import ConfigManager, SessionConfig
 from scd_app.gui.style.styling import set_style_sheet
@@ -80,6 +81,10 @@ class MainWindow(QMainWindow):
         self.edition_tab = EditionTab(fsamp=2048.0)
         self.tabs.addTab(self.edition_tab, "3. Edition")
 
+        # 4. Visualisation Tab (disabled until a file is loaded)
+        self.vis_tab = VisualisationTab(edition_tab=self.edition_tab)
+        self.tabs.addTab(self.vis_tab, "4. Visualisation")
+
         self._set_tabs_enabled(False)
 
         layout.addWidget(self.tabs)
@@ -102,7 +107,7 @@ class MainWindow(QMainWindow):
 
         # View Menu
         view_menu = menubar.addMenu("&View")
-        for i, name in enumerate(["Configuration", "Decomposition", "Edition"]):
+        for i, name in enumerate(["Configuration", "Decomposition", "Edition", "Visualisation"]):
             action = QAction(f"&{i+1}. {name}", self)
             action.setShortcut(QKeySequence(f"Ctrl+{i+1}"))
             action.triggered.connect(
@@ -124,6 +129,10 @@ class MainWindow(QMainWindow):
         # Decomposition → Edition
         self.decomp_tab.decomposition_complete.connect(self._on_decomposition_complete)
 
+        # Edition → Visualisation
+        self.edition_tab.data_modified.connect(self.vis_tab.on_data_modified)
+        self.edition_tab.file_loaded.connect(self._on_file_loaded_into_edition)
+
     def _reset_session(self):
         """Reset session state."""
         self.config = None
@@ -134,6 +143,8 @@ class MainWindow(QMainWindow):
         self.tabs.setTabEnabled(1, enabled)
         # Always allow Edition (index 2)
         self.tabs.setTabEnabled(2, True)
+        # Visualisation tab (index 3) starts disabled; enabled on first file load
+        self.tabs.setTabEnabled(3, False)
 
     def _on_config_applied(self, config: SessionConfig, emg_paths: list):
         """Handle the 'Apply' event from the Configuration tab."""
@@ -153,6 +164,11 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(
             f"✓ Configuration Applied: {len(config.ports)} grid(s) configured"
         )
+
+    def _on_file_loaded_into_edition(self):
+        """Enable the Visualisation tab and mark it stale after a file load."""
+        self.tabs.setTabEnabled(3, True)
+        self.vis_tab.on_data_modified()
 
     def _on_decomposition_complete(self, decomp_path: Path):
         """Handle decomposition completion and auto-load into Edition tab."""

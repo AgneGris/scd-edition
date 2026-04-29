@@ -156,12 +156,18 @@ class MUPropertiesPanel(QFrame):
         )
         badge_row.addWidget(self._reliability_badge)
         badge_row.addStretch()
-        self._duplicate_label = QLabel()
-        self._duplicate_label.setStyleSheet(
-            f"color: {_C_WARN}; font-size: {FONT_SIZES.get('small','9pt')};"
-        )
-        badge_row.addWidget(self._duplicate_label)
         root.addLayout(badge_row)
+
+        _dup_style = (
+            f"color: {_C_WARN}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f" font-family: {FONT_FAMILY};"
+        )
+        self._within_dup_label = QLabel()
+        self._within_dup_label.setStyleSheet(_dup_style)
+        self._cross_dup_label = QLabel()
+        self._cross_dup_label.setStyleSheet(_dup_style)
+        root.addWidget(self._within_dup_label)
+        root.addWidget(self._cross_dup_label)
 
         # ── metric rows ──────────────────────────────────────────────────
         sections_layout = QHBoxLayout()
@@ -204,7 +210,14 @@ class MUPropertiesPanel(QFrame):
 
     # ── public API ─────────────────────────────────────────────────────────
 
-    def set_properties(self, props: MUProperties):
+    def set_properties(
+        self,
+        props: MUProperties,
+        within_role=None,
+        within_partners=None,
+        cross_role=None,
+        cross_partners=None,
+    ):
         flags = props.quality_flags
 
         # — Firing —
@@ -254,16 +267,34 @@ class MUPropertiesPanel(QFrame):
                 f"font-size: {FONT_SIZES.get('small','9pt')};"
             )
 
-        # — Duplicate candidates —
-        if props.duplicate_candidates:
+        # — Within-port duplicate partners —
+        if within_partners:
+            parts = ", ".join(
+                f"MU{mid} ({score:.0%})"
+                for (_, mid, score) in sorted(within_partners, key=lambda x: -x[2])
+            )
+            self._within_dup_label.setText(f"⚠ Within-port duplicates: {parts}")
+        elif props.duplicate_candidates:
+            # Fallback: show toolbox-computed candidates when no role assigned yet
             ids = ", ".join(
                 f"MU{k} ({v:.0%})"
-                for k, v in sorted(props.duplicate_candidates.items(),
-                                   key=lambda x: -x[1])
+                for k, v in sorted(
+                    props.duplicate_candidates.items(), key=lambda x: -x[1]
+                )
             )
-            self._duplicate_label.setText(f"⚠ Possible duplicates: {ids}")
+            self._within_dup_label.setText(f"⚠ Possible duplicates: {ids}")
         else:
-            self._duplicate_label.setText("")
+            self._within_dup_label.setText("")
+
+        # — Cross-port duplicate partners —
+        if cross_partners:
+            parts = ", ".join(
+                f"{pname} MU{mid} ({score:.0%})"
+                for (pname, mid, score) in sorted(cross_partners, key=lambda x: -x[2])
+            )
+            self._cross_dup_label.setText(f"⚠ Cross-port duplicates: {parts}")
+        else:
+            self._cross_dup_label.setText("")
 
     def clear_properties(self):
         for row in (
@@ -277,7 +308,8 @@ class MUPropertiesPanel(QFrame):
             f"color: {_C_DIM}; font-weight: bold; "
             f"font-size: {FONT_SIZES.get('small','9pt')};"
         )
-        self._duplicate_label.setText("")
+        self._within_dup_label.setText("")
+        self._cross_dup_label.setText("")
 
 
 # ── backwards-compatible thin bar  (for easy migration) ───────────────────────

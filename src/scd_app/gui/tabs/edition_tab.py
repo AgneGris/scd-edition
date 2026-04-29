@@ -52,6 +52,7 @@ from scd_app.core.mu_properties import (
     compute_port_properties,
     recompute_unit_properties,
     flat_channels_to_grid,
+    build_spike_train_matrix,
 )
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
 from scd_app.core.filter_recalculation import (
@@ -61,6 +62,12 @@ from scd_app.core.filter_recalculation import (
     compute_all_full_sources,
 )
 from scd_app.core.auto_editor import auto_edit, AutoEditResult, MIN_SPIKES
+
+try:
+    from motor_unit_toolbox import spike_comp as _tb_spike_comp
+    _SPIKE_COMP_AVAILABLE = True
+except ImportError:
+    _SPIKE_COMP_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -1181,6 +1188,7 @@ class MuapPopoutDialog(QDialog):
 
 class EditionTab(QWidget):
     data_modified = pyqtSignal()
+    file_loaded = pyqtSignal()
 
     def __init__(self, fsamp: float = 2048.0, parent=None):
         super().__init__(parent)
@@ -1466,6 +1474,29 @@ class EditionTab(QWidget):
         self.btn_auto_flag.setStyleSheet(self._warn_toolbar_btn_style())
         self.btn_auto_flag.setEnabled(False)
         tb.addWidget(self.btn_auto_flag)
+
+        tb.addSeparator()
+        _no_props_tip = "Compute MU properties first"
+
+        self.btn_flag_within_dups = QPushButton("⧉ Within-Port Dups")
+        self.btn_flag_within_dups.setToolTip(
+            "Flag lower-quality duplicate MUs within each grid/probe for deletion.\n"
+            "Uses rate-of-agreement (threshold 0.3) to identify duplicates."
+        )
+        self.btn_flag_within_dups.clicked.connect(self._flag_within_duplicates)
+        self.btn_flag_within_dups.setStyleSheet(self._warn_toolbar_btn_style())
+        self.btn_flag_within_dups.setEnabled(False)
+        tb.addWidget(self.btn_flag_within_dups)
+
+        self.btn_flag_cross_dups = QPushButton("⧉ Cross-Port Dups")
+        self.btn_flag_cross_dups.setToolTip(
+            "Flag lower-quality duplicate MUs across different grids/probes for deletion.\n"
+            "Uses rate-of-agreement (threshold 0.3) to identify duplicates."
+        )
+        self.btn_flag_cross_dups.clicked.connect(self._flag_cross_duplicates)
+        self.btn_flag_cross_dups.setStyleSheet(self._warn_toolbar_btn_style())
+        self.btn_flag_cross_dups.setEnabled(False)
+        tb.addWidget(self.btn_flag_cross_dups)
 
         return tb
 
@@ -1828,6 +1859,16 @@ class EditionTab(QWidget):
         else:
             self._file_label.setText("")
 
+    def get_visualisation_data(self) -> dict:
+        """Return a snapshot of all data needed by the Visualisation tab."""
+        return {
+            "ports": self._ports,
+            "aux_channels": (self._original_decomp_data or {}).get("aux_channels") or [],
+            "fsamp": self._fsamp,
+            "start_sample": self._start_sample,
+            "end_sample": self._end_sample,
+        }
+
     def load_from_path(self, path: Path):
         path = Path(path)
         if not path.exists():
@@ -1890,6 +1931,7 @@ class EditionTab(QWidget):
             self._loaded_path = path
             self._update_status(f"Loaded: {path.name}")
             self._update_file_label()
+            self.file_loaded.emit()
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Load Error", f"Failed to parse:\n{e}")
@@ -2131,8 +2173,22 @@ class EditionTab(QWidget):
             self.btn_sel_add,
             self.btn_sel_delete,
             self.btn_auto_flag,
+            self.btn_flag_within_dups,
+            self.btn_flag_cross_dups,
         ):
             btn.setEnabled(True)
+
+        all_mus_have_props = all(
+            mu.props is not None
+            for mus in self._ports.values()
+            for mu in mus
+        )
+        if not all_mus_have_props:
+            _no_props_tip = "Compute MU properties first"
+            self.btn_flag_within_dups.setEnabled(False)
+            self.btn_flag_within_dups.setToolTip(_no_props_tip)
+            self.btn_flag_cross_dups.setEnabled(False)
+            self.btn_flag_cross_dups.setToolTip(_no_props_tip)
 
         all_mus = [mu for mus in self._ports.values() for mu in mus]
         n_total = len(all_mus)
@@ -2818,6 +2874,189 @@ class EditionTab(QWidget):
             parts.append(f"{no_props_count} skipped (no quality data)")
         self._update_status(" — ".join(parts))
 
+    # ------------------------------------------------------------------
+    # Duplicate detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mu_quality_key(mu: MotorUnit) -> tuple:
+        """Return a sort key where a higher tuple means higher quality."""
+        if mu.props is None:
+            return (-float("inf"), -float("inf"), 0, -mu.id)
+        sil = mu.props.sil if not np.isnan(mu.props.sil) else -float("inf")
+        pnr = mu.props.pnr_db if not np.isnan(mu.props.pnr_db) else -float("inf")
+        return (sil, pnr, mu.props.n_spikes, -mu.id)
+
+    def _flag_within_duplicates(self):
+        """Detect and flag lower-quality within-port duplicate MUs for deletion."""
+        if not _SPIKE_COMP_AVAILABLE:
+            self._update_status("motor_unit_toolbox not available — cannot detect duplicates")
+            return
+
+        ROA_THRESHOLD = 0.3
+
+        # Clear own roles; conditionally clear flagged_duplicate
+        for mus in self._ports.values():
+            for mu in mus:
+                prev_delete = mu.within_duplicate_role == "delete"
+                mu.within_duplicate_role = None
+                mu.within_duplicate_partners = []
+                if prev_delete and mu.cross_duplicate_role != "delete":
+                    mu.flagged_duplicate = False
+
+        for port_name, mus in self._ports.items():
+            if len(mus) < 2:
+                continue
+
+            n_samples = max(len(mu.source) for mu in mus)
+            spike_mat = build_spike_train_matrix(
+                [mu.timestamps for mu in mus], n_samples
+            )
+
+            try:
+                # rate_of_agreement_full returns full (n, n) RoA matrix
+                roa, _ = _tb_spike_comp.rate_of_agreement_full(
+                    spike_trains_ref=spike_mat,
+                    spike_trains_test=spike_mat,
+                    fs=int(round(self._fsamp)),
+                )
+            except Exception as exc:
+                print(f"  [within-dup] RoA failed for {port_name}: {exc}")
+                continue
+
+            n = len(mus)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    # Use max of both directions for a symmetric score
+                    score = float(max(roa[i, j], roa[j, i]))
+                    if score >= ROA_THRESHOLD:
+                        mus[i].within_duplicate_partners.append(
+                            (port_name, mus[j].id, score)
+                        )
+                        mus[j].within_duplicate_partners.append(
+                            (port_name, mus[i].id, score)
+                        )
+
+            for mu in mus:
+                if not mu.within_duplicate_partners:
+                    continue
+                partner_ids = {mid for (_, mid, _) in mu.within_duplicate_partners}
+                partner_mus = [m for m in mus if m.id in partner_ids]
+                best_partner = max(partner_mus, key=self._mu_quality_key)
+                if self._mu_quality_key(mu) >= self._mu_quality_key(best_partner):
+                    mu.within_duplicate_role = "keep"
+                else:
+                    mu.within_duplicate_role = "delete"
+                    mu.flagged_duplicate = True
+
+        n_flagged = sum(
+            1 for mus in self._ports.values()
+            for mu in mus if mu.within_duplicate_role == "delete"
+        )
+        self._refresh_mu_combo()
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        self._update_quality_panel(self._current_mu())
+        self._update_status(
+            f"Within-port duplicates: flagged {n_flagged} MU(s) for deletion"
+        )
+
+    def _flag_cross_duplicates(self):
+        """Detect and flag lower-quality cross-port duplicate MUs for deletion."""
+        if not _SPIKE_COMP_AVAILABLE:
+            self._update_status("motor_unit_toolbox not available — cannot detect duplicates")
+            return
+
+        port_names = list(self._ports.keys())
+        if len(port_names) < 2:
+            self._update_status("Cross-port: only one port loaded — nothing to compare")
+            return
+
+        ROA_THRESHOLD = 0.3
+
+        # Clear own roles; conditionally clear flagged_duplicate
+        for mus in self._ports.values():
+            for mu in mus:
+                prev_delete = mu.cross_duplicate_role == "delete"
+                mu.cross_duplicate_role = None
+                mu.cross_duplicate_partners = []
+                if prev_delete and mu.within_duplicate_role != "delete":
+                    mu.flagged_duplicate = False
+
+        for idx_a in range(len(port_names)):
+            for idx_b in range(idx_a + 1, len(port_names)):
+                port_a, port_b = port_names[idx_a], port_names[idx_b]
+                mus_a = self._ports[port_a]
+                mus_b = self._ports[port_b]
+
+                if not mus_a or not mus_b:
+                    continue
+
+                n_samples = max(
+                    max(len(mu.source) for mu in mus_a),
+                    max(len(mu.source) for mu in mus_b),
+                )
+                spike_mat_a = build_spike_train_matrix(
+                    [mu.timestamps for mu in mus_a], n_samples
+                )
+                spike_mat_b = build_spike_train_matrix(
+                    [mu.timestamps for mu in mus_b], n_samples
+                )
+
+                try:
+                    # rate_of_agreement_full returns full (n_a, n_b) RoA matrix
+                    roa, _ = _tb_spike_comp.rate_of_agreement_full(
+                        spike_trains_ref=spike_mat_a,
+                        spike_trains_test=spike_mat_b,
+                        fs=int(round(self._fsamp)),
+                    )
+                except Exception as exc:
+                    print(f"  [cross-dup] RoA failed for {port_a} vs {port_b}: {exc}")
+                    continue
+
+                na, nb = roa.shape[0], roa.shape[1]
+                for i in range(min(len(mus_a), na)):
+                    for j in range(min(len(mus_b), nb)):
+                        score = float(roa[i, j])
+                        if score >= ROA_THRESHOLD:
+                            mus_a[i].cross_duplicate_partners.append(
+                                (port_b, mus_b[j].id, score)
+                            )
+                            mus_b[j].cross_duplicate_partners.append(
+                                (port_a, mus_a[i].id, score)
+                            )
+
+        # Assign cross-port roles: lower quality than any partner → delete
+        for port_name, mus in self._ports.items():
+            for mu in mus:
+                if not mu.cross_duplicate_partners:
+                    continue
+                partner_mus = []
+                for (pname, mid, _score) in mu.cross_duplicate_partners:
+                    for pm in self._ports.get(pname, []):
+                        if pm.id == mid:
+                            partner_mus.append(pm)
+                            break
+                if not partner_mus:
+                    continue
+                best_partner = max(partner_mus, key=self._mu_quality_key)
+                if self._mu_quality_key(mu) >= self._mu_quality_key(best_partner):
+                    if mu.cross_duplicate_role != "delete":
+                        mu.cross_duplicate_role = "keep"
+                else:
+                    mu.cross_duplicate_role = "delete"
+                    mu.flagged_duplicate = True
+
+        n_flagged = sum(
+            1 for mus in self._ports.values()
+            for mu in mus if mu.cross_duplicate_role == "delete"
+        )
+        self._refresh_mu_combo()
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        self._update_quality_panel(self._current_mu())
+        self._update_status(
+            f"Cross-port duplicates: flagged {n_flagged} MU(s) for deletion"
+        )
+
     def _refresh_port_combo(self):
         cur = self.port_combo.currentText()
         self.port_combo.blockSignals(True)
@@ -2849,6 +3088,12 @@ class EditionTab(QWidget):
                     label += "  ⚠"
                 if mu.props is not None:
                     label += "  ✓" if mu.props.is_reliable else "  ✗"
+                is_dup_delete = (
+                    mu.within_duplicate_role == "delete"
+                    or mu.cross_duplicate_role == "delete"
+                )
+                if is_dup_delete:
+                    label += "  ⧉"
                 self.mu_combo.addItem(label)
         self.mu_combo.blockSignals(False)
 
@@ -2930,9 +3175,18 @@ class EditionTab(QWidget):
         self._update_status(msg)
         self.data_modified.emit()
 
-    def _update_quality_panel(self, mu: MotorUnit):
+    def _update_quality_panel(self, mu: Optional[MotorUnit]):
+        if mu is None:
+            self.quality_bar.clear_properties()
+            return
         if mu.props is not None:
-            self.quality_bar.set_properties(mu.props)
+            self.quality_bar.set_properties(
+                mu.props,
+                within_role=mu.within_duplicate_role,
+                within_partners=mu.within_duplicate_partners,
+                cross_role=mu.cross_duplicate_role,
+                cross_partners=mu.cross_duplicate_partners,
+            )
         else:
             self.quality_bar.clear_properties()
 

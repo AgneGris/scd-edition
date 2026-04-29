@@ -449,17 +449,16 @@ def compute_port_properties(
     # ── Duplicate detection (within-port RoA) ─────────────────────────────
     if _TOOLBOX_AVAILABLE and n_units > 1:
         try:
-            roa, pair_idx, _ = tb_spike.rate_of_agreement(
-                spike_trains_ref=None,
+            roa, _ = tb_spike.rate_of_agreement_full(
+                spike_trains_ref=spike_mat,
                 spike_trains_test=spike_mat,
                 fs=fsamp_int,
             )
-            # roa is an (n_units, n_units) matrix when ref=None
-            if roa.ndim == 2:
-                for i in range(n_units):
-                    for j in range(n_units):
-                        if i != j and roa[i, j] >= roa_threshold:
-                            results[i].duplicate_candidates[j] = float(roa[i, j])
+            # roa is (n_units, n_units); skip diagonal (self-comparison)
+            for i in range(n_units):
+                for j in range(n_units):
+                    if i != j and roa[i, j] >= roa_threshold:
+                        results[i].duplicate_candidates[j] = float(roa[i, j])
         except Exception:
             pass
 
