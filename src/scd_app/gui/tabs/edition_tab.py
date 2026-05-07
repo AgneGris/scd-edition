@@ -6,7 +6,8 @@ and timestamps are re-detected via source_to_timestamps.  The plateau region
 is shown as a shaded band on the source plot.
 """
 
-from typing import Optional, List, Dict, Tuple
+import logging
+from typing import Optional, List, Dict, Set, Tuple
 from pathlib import Path
 import pickle
 import traceback
@@ -14,10 +15,9 @@ import traceback
 import numpy as np
 from scipy import signal as sp_signal
 
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QPoint, QSize, QEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QTimer
 from PyQt5.QtWidgets import (
     QWidget,
-    QDialog,
     QVBoxLayout,
     QHBoxLayout,
     QSplitter,
@@ -31,7 +31,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QShortcut,
     QStatusBar,
-    QRubberBand,
     QApplication,
 )
 from PyQt5.QtGui import QKeySequence, QFont, QPixmap, QIcon, QPainter, QColor
@@ -40,28 +39,34 @@ import pyqtgraph as pg
 from scd_app.gui.style.styling import (
     COLORS,
     FONT_SIZES,
-    SPACING,
     FONT_FAMILY,
     get_section_header_style,
-    get_label_style,
-    get_button_style,
 )
 from scd_app.core.mu_model import EditMode, MotorUnit, UndoAction
 from scd_app.core.mu_properties import (
     MUProperties,
     compute_port_properties,
     recompute_unit_properties,
-    flat_channels_to_grid,
     build_spike_train_matrix,
 )
+from scd_app.core.utils import to_numpy
+from scd_app.core.constants import ROA_THRESHOLD
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
+from scd_app.gui.widgets.source_plot_widget import (
+    SelectionArm,
+    SourcePlotWidget,
+    FiringRatePlotWidget,
+)
+from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
 from scd_app.core.filter_recalculation import (
     recalculate_unit_filter,
     supports_filter_recalculation,
     supports_full_source_computation,
     compute_all_full_sources,
 )
-from scd_app.core.auto_editor import auto_edit, AutoEditResult, MIN_SPIKES
+from scd_app.core.auto_editor import auto_edit, MIN_SPIKES
+
+logger = logging.getLogger(__name__)
 
 try:
     from motor_unit_toolbox import spike_comp as _tb_spike_comp
@@ -207,46 +212,50 @@ GRID_POSITIONS_8x8 = {
     57: (7, 7),
 }
 GRID_POSITIONS_20x2 = {
-    0: (0, 0),
-    1: (1, 0),
-    2: (2, 0),
-    3: (3, 0),
-    4: (4, 0),
-    5: (5, 0),
-    6: (6, 0),
-    7: (7, 0),
-    8: (8, 0),
-    9: (9, 0),
-    10: (10, 0),
-    11: (11, 0),
-    12: (12, 0),
-    13: (13, 0),
-    14: (14, 0),
-    15: (15, 0),
-    16: (16, 0),
-    17: (17, 0),
-    18: (18, 0),
-    19: (19, 0),
-    20: (0, 1),
-    21: (1, 1),
-    22: (2, 1),
-    23: (3, 1),
-    24: (4, 1),
-    25: (5, 1),
-    26: (6, 1),
-    27: (7, 1),
-    28: (8, 1),
-    29: (9, 1),
-    30: (10, 1),
-    31: (11, 1),
-    32: (12, 1),
-    33: (13, 1),
-    34: (14, 1),
-    35: (15, 1),
-    36: (16, 1),
-    37: (17, 1),
-    38: (18, 1),
-    39: (19, 1),
+    # Key = 0-based OTBio channel index, value = (row, col) physical position
+    # Col 0 = Side A (pads 1-20), Col 1 = Side B (pads 21-40)
+    # Row 0 = pad 1/21 (proximal end), Row 19 = pad 20/40 (distal end)
+    # Derived from DEMOVE->OTBio connector mapping table
+    0: (18, 1),   # OTBio 1  -> DEMOVE 39 -> Side B pad 19
+    1: (17, 1),   # OTBio 2  -> DEMOVE 38 -> Side B pad 18
+    2: (16, 1),   # OTBio 3  -> DEMOVE 37 -> Side B pad 17
+    3: (19, 1),   # OTBio 4  -> DEMOVE 40 -> Side B pad 20
+    4: (12, 1),   # OTBio 5  -> DEMOVE 33 -> Side B pad 13
+    5: (15, 1),   # OTBio 6  -> DEMOVE 36 -> Side B pad 16
+    6: (14, 1),   # OTBio 7  -> DEMOVE 35 -> Side B pad 15
+    7: (13, 1),   # OTBio 8  -> DEMOVE 34 -> Side B pad 14
+    8: (10, 1),   # OTBio 9  -> DEMOVE 31 -> Side B pad 11
+    9: (9, 1),    # OTBio 10 -> DEMOVE 30 -> Side B pad 10
+    10: (6, 1),   # OTBio 11 -> DEMOVE 27 -> Side B pad 7
+    11: (5, 1),   # OTBio 12 -> DEMOVE 26 -> Side B pad 6
+    12: (2, 1),   # OTBio 13 -> DEMOVE 23 -> Side B pad 3
+    13: (1, 1),   # OTBio 14 -> DEMOVE 22 -> Side B pad 2
+    14: (18, 0),  # OTBio 15 -> DEMOVE 19 -> Side A pad 19
+    15: (17, 0),  # OTBio 16 -> DEMOVE 18 -> Side A pad 18
+    16: (14, 0),  # OTBio 17 -> DEMOVE 15 -> Side A pad 15
+    17: (13, 0),  # OTBio 18 -> DEMOVE 14 -> Side A pad 14
+    18: (10, 0),  # OTBio 19 -> DEMOVE 11 -> Side A pad 11
+    19: (9, 0),   # OTBio 20 -> DEMOVE 10 -> Side A pad 10
+    20: (6, 0),   # OTBio 21 -> DEMOVE 7  -> Side A pad 7
+    21: (5, 0),   # OTBio 22 -> DEMOVE 6  -> Side A pad 6
+    22: (2, 0),   # OTBio 23 -> DEMOVE 3  -> Side A pad 3
+    23: (1, 0),   # OTBio 24 -> DEMOVE 2  -> Side A pad 2
+    24: (0, 0),   # OTBio 25 -> DEMOVE 1  -> Side A pad 1
+    25: (3, 0),   # OTBio 26 -> DEMOVE 4  -> Side A pad 4
+    26: (4, 0),   # OTBio 27 -> DEMOVE 5  -> Side A pad 5
+    27: (7, 0),   # OTBio 28 -> DEMOVE 8  -> Side A pad 8
+    28: (8, 0),   # OTBio 29 -> DEMOVE 9  -> Side A pad 9
+    29: (11, 0),  # OTBio 30 -> DEMOVE 12 -> Side A pad 12
+    30: (12, 0),  # OTBio 31 -> DEMOVE 13 -> Side A pad 13
+    31: (15, 0),  # OTBio 32 -> DEMOVE 16 -> Side A pad 16
+    32: (16, 0),  # OTBio 33 -> DEMOVE 17 -> Side A pad 17
+    33: (19, 0),  # OTBio 34 -> DEMOVE 20 -> Side A pad 20
+    34: (0, 1),   # OTBio 35 -> DEMOVE 21 -> Side B pad 1
+    35: (3, 1),   # OTBio 36 -> DEMOVE 24 -> Side B pad 4
+    36: (4, 1),   # OTBio 37 -> DEMOVE 25 -> Side B pad 5
+    37: (7, 1),   # OTBio 38 -> DEMOVE 28 -> Side B pad 8
+    38: (8, 1),   # OTBio 39 -> DEMOVE 29 -> Side B pad 9
+    39: (11, 1),  # OTBio 40 -> DEMOVE 32 -> Side B pad 12
 }
 
 GRID_POSITIONS_HD02MM0808 = {
@@ -532,6 +541,13 @@ GRID_POSITIONS_8x4 = {
 
 
 ELECTRODE_GRIDS = {
+    "GR04MM1305": {
+        "grid_shape": (13, 5),
+        "ied_mm": 4,
+        "n_channels": 64,
+        "muap_mapping": {i: i + 1 for i in range(64)},
+        "positions": GRID_POSITIONS_13x5,
+    },
     "GR08MM1305": {
         "grid_shape": (13, 5),
         "ied_mm": 8,
@@ -597,37 +613,6 @@ ELECTRODE_GRIDS = {
     },
 }
 
-_MIN_RUBBERBAND_PX = 5  # drags smaller than this are ignored in selection-arm mode
-
-
-# ---------------------------------------------------------------------------
-# Selection arm state enum
-# ---------------------------------------------------------------------------
-
-
-class SelectionArm:
-    """Which (if any) rubberband-selection operation is currently armed."""
-
-    NONE = "none"
-    ADD = "add"
-    DELETE = "delete"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def to_numpy(obj) -> np.ndarray:
-    if obj is None:
-        return np.array([])
-    if isinstance(obj, np.ndarray):
-        return obj
-    if hasattr(obj, "detach"):
-        return obj.detach().cpu().numpy()
-    return np.asarray(obj)
-
-
 def get_grid_config(electrode_type: Optional[str]) -> Optional[Dict]:
     if electrode_type is None:
         return None
@@ -639,549 +624,6 @@ def get_grid_config(electrode_type: Optional[str]) -> Optional[Dict]:
 
 
 # ---------------------------------------------------------------------------
-# XZoomViewBox — Shift+scroll zooms X axis only, leaving Y fixed
-# ---------------------------------------------------------------------------
-
-
-class XZoomViewBox(pg.ViewBox):
-    def wheelEvent(self, ev, axis=None):
-        mods = ev.modifiers()
-        if mods & Qt.ShiftModifier:
-            # Shift+scroll → pan horizontally
-            delta = ev.delta()
-            self.translateBy(x=-delta / 200.0, y=0)
-            ev.accept()
-        elif mods & Qt.ControlModifier:
-            # Ctrl/Cmd+scroll → zoom both axes (pyqtgraph default)
-            super().wheelEvent(ev, axis=None)
-        else:
-            # Plain scroll → zoom X axis only
-            super().wheelEvent(ev, axis=0)
-
-
-# ---------------------------------------------------------------------------
-# AUX legend overlay
-# ---------------------------------------------------------------------------
-
-_AUX_COLORS_HEX = ["#FFD700", "#C0EFFF", "#FFB347"]
-_AUX_COLORS_RGB = [(255, 215, 0), (192, 239, 255), (255, 179, 71)]
-
-
-class _AuxLegend(pg.LegendItem):
-    """Floating click-to-toggle legend for AUX force traces.
-
-    Labels are added directly to the grid layout (no ItemSample swatch).
-    Toggling uses pen-alpha (70 → 5) rather than setVisible to avoid the
-    pyqtgraph 'hidden' eye-slash glyph.
-    """
-
-    def __init__(self):
-        super().__init__(offset=(-10, 10))  # top-right corner
-        self._curves: list = []
-        self._names: list = []
-        self._colors: list = []
-        self._on_states: list = []
-
-    def clear(self):
-        for _sample, label in self.items:
-            self.layout.removeItem(label)
-            label.close()
-        self.items = []
-        self.updateSize()
-
-    def populate(self, channels: list, curves: list):
-        self.clear()
-        self._curves = list(curves)
-        self._names = []
-        self._colors = []
-        self._on_states = [True] * len(channels)
-        for i, (ch, _curve) in enumerate(zip(channels, curves)):
-            meta = ch.get("meta", {})
-            name = meta.get("name", meta.get("unit", f"AUX {i + 1}"))
-            color = _AUX_COLORS_HEX[i % len(_AUX_COLORS_HEX)]
-            self._names.append(name)
-            self._colors.append(color)
-            label = pg.LabelItem(f"● {name}", color=color, justify="left")
-            self.layout.addItem(label, i, 0)
-            self.items.append((None, label))
-        self.updateSize()
-        self.setVisible(bool(channels))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            y = event.pos().y()
-            for i, (_sample, label) in enumerate(self.items):
-                rect = label.mapRectToParent(label.boundingRect())
-                if rect.top() <= y <= rect.bottom():
-                    self._toggle(i)
-                    event.accept()
-                    return
-        event.accept()  # consume all clicks; legend is not draggable
-
-    def _toggle(self, idx: int):
-        self._on_states[idx] = not self._on_states[idx]
-        on = self._on_states[idx]
-        r, g, b = _AUX_COLORS_RGB[idx % len(_AUX_COLORS_RGB)]
-        alpha = 70 if on else 5
-        self._curves[idx].setPen(pg.mkPen(color=(r, g, b, alpha), width=2.5))
-        _sample, label = self.items[idx]
-        dot = "●" if on else "○"
-        color = self._colors[idx] if on else "#555555"
-        label.setText(f"{dot} {self._names[idx]}", color=color)
-        self.update()
-
-
-# ---------------------------------------------------------------------------
-# SourcePlotWidget
-# ---------------------------------------------------------------------------
-
-
-class SourcePlotWidget(pg.PlotWidget):
-    """
-    Source-signal plot with two independent interaction modes:
-
-    1. Point-click editing  (EditMode.ADD / DELETE via set_edit_mode)
-       Click  →  spike_add_requested / spike_delete_requested signal.
-
-    2. Rubberband-drag selection  (armed via set_selection_arm)
-       Drag  →  region_selected(x1, x2, y1, y2) fires on mouse-release.
-       Stays armed until explicitly disarmed.  Each drag fires immediately.
-
-    The two modes coexist independently.
-    """
-
-    spike_add_requested = pyqtSignal(int)  # sample index
-    spike_delete_requested = pyqtSignal(int)  # sample index
-    region_selected = pyqtSignal(float, float, float, float)  # x1,x2,y1,y2 (data)
-
-    def __init__(self, parent=None):
-        super().__init__(
-            parent, background=COLORS["background"], viewBox=XZoomViewBox()
-        )
-        self.showGrid(x=True, y=True, alpha=0.15)
-        self.setLabel("bottom", "Time (s)", color=COLORS.get("text_dim", "#6c7086"))
-        self.setLabel("left", "Amplitude", color=COLORS.get("text_dim", "#6c7086"))
-        for axis in ("bottom", "left"):
-            self.getAxis(axis).setPen(COLORS.get("text_dim", "#6c7086"))
-            self.getAxis(axis).setTextPen(COLORS.get("text_dim", "#6c7086"))
-
-        self._fsamp = 1.0
-        self._edit_mode = EditMode.VIEW
-        self._sel_arm = SelectionArm.NONE
-
-        self._source: Optional[np.ndarray] = None
-        self._timestamps: Optional[np.ndarray] = None
-
-        self._signal_curve = self.plot([], pen=pg.mkPen("#2b6cb0", width=1))
-        self._spike_scatter = pg.ScatterPlotItem(
-            size=10,
-            pen=pg.mkPen(None),
-            brush=pg.mkBrush("#ed8936"),
-            symbol="o",
-            hoverable=True,
-        )
-        self.addItem(self._spike_scatter)
-        self._plateau_region: Optional[pg.LinearRegionItem] = None
-
-        self._aux_curves: list = []
-        self._aux_raw: list = []
-        self._legend = _AuxLegend()
-        self._legend.setParentItem(self.plotItem.vb)
-
-        # Rubberband overlay (pixel space, parented to this widget)
-        self._rb_widget: Optional[QRubberBand] = None
-        self._rb_origin: Optional[QPoint] = None
-
-    # ------------------------------------------------------------------
-    # Public setters
-    # ------------------------------------------------------------------
-
-    def set_fsamp(self, fsamp: float):
-        self._fsamp = fsamp
-
-    def set_edit_mode(self, mode: EditMode):
-        """Change the point-click edit mode. Does NOT affect selection arm."""
-        self._edit_mode = mode
-        self._apply_cursor()
-
-    def set_selection_arm(self, arm: str):
-        """
-        Arm (SelectionArm.ADD / DELETE) or disarm (SelectionArm.NONE) the
-        rubberband-drag operation.
-        """
-        self._sel_arm = arm
-        self._apply_cursor()
-        if arm == SelectionArm.NONE:
-            self._cancel_rubberband()
-
-    def _apply_cursor(self):
-        """Selection arm takes cursor priority over edit mode."""
-        if self._sel_arm != SelectionArm.NONE:
-            self.setCursor(Qt.CrossCursor)
-        else:
-            cursors = {
-                EditMode.VIEW: Qt.ArrowCursor,
-                EditMode.ADD: Qt.CrossCursor,
-                EditMode.DELETE: Qt.PointingHandCursor,
-            }
-            self.setCursor(cursors.get(self._edit_mode, Qt.ArrowCursor))
-
-    # ------------------------------------------------------------------
-    # Data
-    # ------------------------------------------------------------------
-
-    def set_data(self, source: np.ndarray, timestamps: np.ndarray):
-        source = np.nan_to_num(source, nan=0.0, posinf=0.0, neginf=0.0)
-        self._source = source**2
-        self._timestamps = timestamps
-        t = np.arange(len(self._source)) / self._fsamp
-        self._signal_curve.setData(t, self._source)
-        self._update_spike_markers()
-        self._redraw_aux()
-
-    def set_plateau_region(self, start_sample: int, end_sample: int):
-        if self._plateau_region is not None:
-            self.removeItem(self._plateau_region)
-        t0 = start_sample / self._fsamp
-        t1 = end_sample / self._fsamp
-        self._plateau_region = pg.LinearRegionItem(
-            values=(t0, t1),
-            movable=False,
-            brush=pg.mkBrush(137, 180, 250, 20),
-            pen=pg.mkPen(color=(137, 180, 250, 60), width=1, style=Qt.DashLine),
-        )
-        self._plateau_region.setZValue(-10)
-        self.addItem(self._plateau_region)
-
-    def set_aux_data(self, channels: list, fsamp: float):
-        for curve in self._aux_curves:
-            self.removeItem(curve)
-        self._aux_curves.clear()
-        self._aux_raw.clear()
-        for i, ch in enumerate(channels):
-            raw = np.asarray(ch["data"]).squeeze()
-            raw = np.nan_to_num(raw, nan=0.0)
-            self._aux_raw.append(raw)
-            r, g, b = _AUX_COLORS_RGB[i % len(_AUX_COLORS_RGB)]
-            curve = pg.PlotCurveItem(pen=pg.mkPen(color=(r, g, b, 70), width=2.5))
-            curve.setZValue(-20)
-            self.addItem(curve)
-            self._aux_curves.append(curve)
-        self._legend.populate(channels, self._aux_curves)
-        self._redraw_aux()
-
-    def _redraw_aux(self):
-        if self._source is not None and len(self._source) > 0:
-            src_min = float(self._source.min())
-            src_max = float(self._source.max())
-        else:
-            src_min = 0.0
-            src_max = 1.0
-        # Map force onto the source amplitude range:
-        #   force 0   → src_min  (noise floor)
-        #   force max → src_max * 1.05  (5% above the tallest spike)
-        src_range = max(src_max * 1.05 - src_min, 1e-9)
-        n_src = len(self._source) if self._source is not None else 0
-        for raw, curve in zip(self._aux_raw, self._aux_curves):
-            sig = raw - float(raw.min())
-            sig_range = max(float(sig.max()), 1e-9)
-            sig_scaled = (sig / sig_range) * src_range + src_min
-            n_plot = min(len(sig_scaled), n_src) if n_src > 0 else len(sig_scaled)
-            step = max(1, n_plot // 2000)
-            t = np.arange(0, n_plot, step) / self._fsamp
-            curve.setData(t, sig_scaled[:n_plot:step])
-
-    def update_timestamps(self, timestamps: np.ndarray):
-        """Refresh spike markers without touching the signal curve or view range."""
-        self._timestamps = timestamps
-        self._update_spike_markers()
-
-    def clear_data(self):
-        self._signal_curve.setData([], [])
-        self._spike_scatter.setData([], [])
-        for curve in self._aux_curves:
-            curve.setData([], [])
-        self._source = None
-        self._timestamps = None
-        if self._plateau_region is not None:
-            self.removeItem(self._plateau_region)
-            self._plateau_region = None
-        self._cancel_rubberband()
-
-    # ------------------------------------------------------------------
-    # Mouse events
-    # ------------------------------------------------------------------
-
-    def mousePressEvent(self, ev):
-        if ev.button() != Qt.LeftButton:
-            super().mousePressEvent(ev)
-            return
-
-        if self._sel_arm != SelectionArm.NONE:
-            # ── Begin rubberband drag ─────────────────────────────────
-            self._rb_origin = ev.pos()
-            if self._rb_widget is None:
-                self._rb_widget = QRubberBand(QRubberBand.Rectangle, self)
-            self._rb_widget.setGeometry(QRect(self._rb_origin, QSize()))
-            self._rb_widget.show()
-            ev.accept()
-        elif self._edit_mode in (EditMode.ADD, EditMode.DELETE):
-            # ── Track origin for point-click vs. accidental micro-drag ─
-            self._rb_origin = ev.pos()
-            ev.accept()
-        else:
-            super().mousePressEvent(ev)
-
-    def mouseMoveEvent(self, ev):
-        if (
-            self._rb_widget is not None
-            and self._rb_widget.isVisible()
-            and self._rb_origin is not None
-        ):
-            self._rb_widget.setGeometry(QRect(self._rb_origin, ev.pos()).normalized())
-            ev.accept()
-        else:
-            super().mouseMoveEvent(ev)
-
-    def mouseReleaseEvent(self, ev):
-        if ev.button() != Qt.LeftButton or self._rb_origin is None:
-            super().mouseReleaseEvent(ev)
-            return
-
-        origin = self._rb_origin
-        self._rb_origin = None
-
-        # ── Selection-arm mode ────────────────────────────────────────
-        if self._sel_arm != SelectionArm.NONE and self._rb_widget is not None:
-            rect_px = QRect(origin, ev.pos()).normalized()
-            self._rb_widget.hide()
-
-            if (
-                rect_px.width() > _MIN_RUBBERBAND_PX
-                and rect_px.height() > _MIN_RUBBERBAND_PX
-            ):
-                vb = self.getViewBox()
-                tl = vb.mapSceneToView(self.mapToScene(rect_px.topLeft()))
-                br = vb.mapSceneToView(self.mapToScene(rect_px.bottomRight()))
-                x1, x2 = sorted([tl.x(), br.x()])
-                y1, y2 = sorted([tl.y(), br.y()])
-                self.region_selected.emit(x1, x2, y1, y2)
-            # Small drag in arm mode → silently ignore (no point-click fallthrough)
-            ev.accept()
-            return
-
-        # ── Point-click mode ──────────────────────────────────────────
-        if self._edit_mode in (EditMode.ADD, EditMode.DELETE):
-            rect_px = QRect(origin, ev.pos()).normalized()
-            if (
-                rect_px.width() <= _MIN_RUBBERBAND_PX
-                and rect_px.height() <= _MIN_RUBBERBAND_PX
-            ):
-                vb = self.getViewBox()
-                pos = vb.mapSceneToView(self.mapToScene(ev.pos()))
-                sample = int(pos.x() * self._fsamp)
-                if self._edit_mode == EditMode.ADD:
-                    self.spike_add_requested.emit(sample)
-                elif self._edit_mode == EditMode.DELETE:
-                    self.spike_delete_requested.emit(sample)
-            ev.accept()
-            return
-
-        super().mouseReleaseEvent(ev)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _cancel_rubberband(self):
-        self._rb_origin = None
-        if self._rb_widget is not None:
-            self._rb_widget.hide()
-
-    def _update_spike_markers(self):
-        if (
-            self._source is None
-            or self._timestamps is None
-            or len(self._timestamps) == 0
-        ):
-            self._spike_scatter.setData([], [])
-            return
-        valid = self._timestamps[self._timestamps < len(self._source)]
-        if len(valid) == 0:
-            self._spike_scatter.setData([], [])
-            return
-        self._spike_scatter.setData(valid / self._fsamp, self._source[valid])
-
-
-# ---------------------------------------------------------------------------
-# FiringRatePlotWidget
-# ---------------------------------------------------------------------------
-
-
-class FiringRatePlotWidget(pg.PlotWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent, background=COLORS["background"])
-        self.showGrid(x=True, y=True, alpha=0.15)
-        self.setLabel("bottom", "Time (s)", color=COLORS.get("text_dim", "#6c7086"))
-        self.setLabel("left", "IFR (Hz)", color=COLORS.get("text_dim", "#6c7086"))
-        for axis in ("bottom", "left"):
-            self.getAxis(axis).setPen(COLORS.get("text_dim", "#6c7086"))
-            self.getAxis(axis).setTextPen(COLORS.get("text_dim", "#6c7086"))
-        self._curve = self.plot([], pen=pg.mkPen(COLORS["warning"], width=1.5))
-        self._fsamp = 1.0
-
-    def set_fsamp(self, fsamp: float):
-        self._fsamp = fsamp
-
-    def link_x(self, other: pg.PlotWidget):
-        self.setXLink(other)
-
-    def set_data(self, timestamps: np.ndarray):
-        ts = np.sort(timestamps)
-        if len(ts) < 2:
-            self._curve.setData([], [])
-            return
-        isi = np.diff(ts) / self._fsamp
-        ifr = np.where(isi > 0.01, 1.0 / isi, 0.0)
-        t_mid = (ts[:-1] + ts[1:]) / 2 / self._fsamp
-        self._curve.setData(t_mid, ifr)
-
-    def clear_data(self):
-        self._curve.setData([], [])
-
-
-# ---------------------------------------------------------------------------
-# MuapPopoutDialog
-# ---------------------------------------------------------------------------
-
-
-class MuapPopoutDialog(QDialog):
-    """Floating window that mirrors the MUAP panel and live-updates with MU selection."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("MUAP Shapes")
-        self.resize(850, 620)
-        self.setWindowFlags(
-            Qt.Window
-            | Qt.WindowMinimizeButtonHint
-            | Qt.WindowMaximizeButtonHint
-            | Qt.WindowCloseButtonHint
-        )
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(4, 4, 4, 4)
-
-        self._plot = pg.GraphicsLayoutWidget()
-        self._plot.setBackground(COLORS["background"])
-        lay.addWidget(self._plot)
-
-    def render_grid(self, waveforms, ch_indices, grid_cfg, mu_idx):
-        self._plot.clear()
-        rows, cols = grid_cfg["grid_shape"]
-        positions = grid_cfg["positions"]
-        valid = [w for w in waveforms if len(w) > 0]
-        amp = np.max(np.abs(np.concatenate(valid))) * 1.2 if valid else 1.0
-        n_samples = len(waveforms[0]) if valid else 409
-
-        label = (
-            f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
-            f"MU {mu_idx}</span>"
-        )
-        self._plot.addLabel(label, row=0, col=0, colspan=rows + 1, justify="center")
-
-        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:8pt;"
-
-        def _add_lbl(widget, text, row, col, **kw):
-            lbl = widget.addLabel(text, row=row, col=col, **kw)
-            lbl.setMinimumWidth(0)
-            lbl.setMinimumHeight(0)
-            return lbl
-
-        _add_lbl(self._plot, f"<span style='{lbl_style}'><b>Ch</b></span>", 1, 0, justify="center")
-        for r in range(rows):
-            _add_lbl(self._plot, f"<span style='{lbl_style}'><b>{r + 1}</b></span>", 1, r + 1, justify="center")
-        for c in range(cols):
-            _add_lbl(self._plot, f"<span style='{lbl_style}'><b>{c + 1}</b></span>", c + 2, 0, justify="center")
-
-        gl = self._plot.ci.layout
-        for c in range(cols):
-            for r in range(rows):
-                p = self._plot.addPlot(row=c + 2, col=r + 1)
-                p.hideAxis("left")
-                p.hideAxis("bottom")
-                p.setMouseEnabled(x=False, y=False)
-                p.enableAutoRange(enable=False)
-                p.setYRange(-amp, amp, padding=0)
-                p.setXRange(0, n_samples, padding=0)
-                p.setLimits(xMin=0, xMax=n_samples, yMin=-amp, yMax=amp)
-                p.setMinimumWidth(0)
-                p.setMinimumHeight(0)
-
-        gl.setSpacing(0)
-        gl.setColumnMinimumWidth(0, 0)
-        gl.setColumnStretchFactor(0, 0)
-        for r in range(rows):
-            gl.setColumnMinimumWidth(r + 1, 0)
-            gl.setColumnStretchFactor(r + 1, 1)
-        for r in range(2):
-            gl.setRowMinimumHeight(r, 0)
-            gl.setRowStretchFactor(r, 0)
-        for c in range(cols):
-            gl.setRowMinimumHeight(c + 2, 0)
-            gl.setRowStretchFactor(c + 2, 1)
-
-        for idx, wav in enumerate(waveforms):
-            if idx >= len(ch_indices):
-                break
-            pos = positions.get(int(idx))
-            if pos is None:
-                continue
-            r, c = pos
-            if r >= rows or c >= cols:
-                continue
-            item = self._plot.getItem(c + 2, r + 1)
-            if item is not None and len(wav) > 0:
-                item.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=1.5))
-
-        self.setWindowTitle(f"MUAP Shapes — MU {mu_idx}")
-
-    def render_stacked(self, waveforms, ch_indices, mu_idx):
-        self._plot.clear()
-        plot = self._plot.addPlot(row=0, col=0)
-        valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
-        if not valid:
-            return
-        all_data = np.concatenate([w for _, w in valid])
-        spacing = np.max(np.abs(all_data)) * 0.6 if len(all_data) > 0 else 1.0
-        n = len(valid)
-        for rank, (pidx, wav) in enumerate(valid):
-            offset = (n - rank - 1) * spacing
-            ch = int(ch_indices[pidx]) if pidx < len(ch_indices) else pidx
-            plot.plot(wav + offset, pen=pg.mkPen(COLORS["foreground"], width=1.5))
-            txt = pg.TextItem(f"Ch {ch}", color=(150, 150, 150), anchor=(1, 0.5))
-            txt.setPos(-1, offset)
-            txt.setFont(QFont(FONT_FAMILY, 8))
-            plot.addItem(txt)
-        plot.getAxis("left").setVisible(False)
-        plot.setTitle(
-            f"MU {mu_idx} — Stacked",
-            color=COLORS["foreground"],
-            size="11pt",
-        )
-        self.setWindowTitle(f"MUAP Shapes — MU {mu_idx} (Stacked)")
-
-    def clear(self, message="Select a Motor Unit"):
-        self._plot.clear()
-        p = self._plot.addPlot(row=0, col=0)
-        t = pg.TextItem(message, color=(120, 120, 120), anchor=(0.5, 0.5))
-        t.setFont(QFont(FONT_FAMILY, 14))
-        p.addItem(t)
-        p.hideAxis("left")
-        p.hideAxis("bottom")
-        self.setWindowTitle("MUAP Shapes")
-
-
 # EditionTab
 # ---------------------------------------------------------------------------
 
@@ -1198,6 +640,7 @@ class EditionTab(QWidget):
         self._emg_data: Dict[str, np.ndarray] = {}
         self._grid_info: Dict[str, Optional[Dict]] = {}
         self._raw_port_channels: Dict[str, np.ndarray] = {}
+        self._rejected_ch_positions: Dict[str, set] = {}
 
         self._current_port: Optional[str] = None
         self._current_mu_idx: int = -1
@@ -1217,6 +660,19 @@ class EditionTab(QWidget):
         self._original_decomp_data: Optional[dict] = None
         self._filter_recalc_available: bool = False
         self._muap_popout: Optional[MuapPopoutDialog] = None
+
+        # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
+        self._props_timer = QTimer(self)
+        self._props_timer.setSingleShot(True)
+        self._props_timer.setInterval(120)
+        self._props_timer.timeout.connect(self._flush_props_update)
+        self._pending_source_changed: bool = False
+
+        # MUAP grid reuse: keep cell PlotDataItems alive across MU switches
+        self._muap_cell_plots: Dict[Tuple[int, int], object] = {}
+        self._muap_waveform_items: Dict[Tuple[int, int], object] = {}
+        self._muap_grid_key: Optional[Tuple] = None
+        self._muap_title_label = None
 
         self._build_ui()
         self._setup_shortcuts()
@@ -1618,7 +1074,6 @@ class EditionTab(QWidget):
 
         self.muap_widget = pg.GraphicsLayoutWidget()
         self.muap_widget.setBackground(COLORS["background"])
-        self.muap_widget.setMinimumHeight(50)
         self.muap_widget.setStyleSheet(
             f"border: 1px solid {COLORS['border']}; border-radius: 4px;"
         )
@@ -1852,6 +1307,7 @@ class EditionTab(QWidget):
             "fsamp": self._fsamp,
             "start_sample": self._start_sample,
             "end_sample": self._end_sample,
+            "file_stem": self._loaded_path.stem if self._loaded_path else "",
         }
 
     def load_from_path(self, path: Path):
@@ -1912,8 +1368,8 @@ class EditionTab(QWidget):
             self._redetect_timestamps = True
 
         try:
+            self._loaded_path = path  # must be set before _load_decomposition_data so _refresh_aux_controls sees the correct stem
             self._load_decomposition_data(data)
-            self._loaded_path = path
             self._update_status(f"Loaded: {path.name}")
             self._update_file_label()
             self.file_loaded.emit()
@@ -1927,6 +1383,7 @@ class EditionTab(QWidget):
         self._emg_data.clear()
         self._grid_info.clear()
         self._raw_port_channels.clear()
+        self._rejected_ch_positions.clear()
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._original_decomp_data = decomp_data
@@ -1948,9 +1405,7 @@ class EditionTab(QWidget):
         end_sample = emg_full.shape[1] if emg_full is not None else 0
 
         if skip_recalc:
-            print(
-                "  [edition] skip_filter_recalc=True — using stored sources/timestamps as-is"
-            )
+            logger.info("skip_filter_recalc=True — using stored sources/timestamps as-is")
             can_full = False
         elif can_full:
             try:
@@ -1960,11 +1415,10 @@ class EditionTab(QWidget):
                                             redetect_timestamps=self._redetect_timestamps)
                 )
                 if err:
-                    print(f"  [edition] Full source warning: {err}")
+                    logger.warning("Full source warning: %s", err)
                     full_port_results = {}
             except Exception as e:
-                print(f"  [edition] Full source failed: {e}")
-                traceback.print_exc()
+                logger.error("Full source computation failed: %s\n%s", e, traceback.format_exc())
                 full_port_results = {}
         else:
             sel_pts = decomp_data.get(
@@ -1984,160 +1438,18 @@ class EditionTab(QWidget):
         self._full_source_mode = bool(full_port_results)
 
         if self._full_source_mode:
-            print(
-                "  [edition] ✓ Full-length source mode (peel-off + source_to_timestamps)"
-            )
+            logger.info("Full-length source mode active (peel-off + source_to_timestamps)")
         else:
-            print(
-                f"  [edition] Fallback: plateau-only sources"
-                f"{(' — ' + reason) if not can_full else ''}"
-            )
+            logger.info("Plateau-only source mode%s",
+                        f" — {reason}" if not can_full else "")
 
         ports = decomp_data.get("ports", [])
-        chans_per_electrode = decomp_data.get("chans_per_electrode", [])
-        channel_indices_all = decomp_data.get("channel_indices")
-        mask_list = decomp_data.get("emg_mask", [])
-        electrode_list = decomp_data.get("electrodes", [])
         ch_offset = 0
-
         for port_idx, port_name in enumerate(ports):
-            n_ch = (
-                int(chans_per_electrode[port_idx])
-                if port_idx < len(chans_per_electrode)
-                else 64
-            )
-
-            if (
-                channel_indices_all is not None
-                and port_idx < len(channel_indices_all)
-                and channel_indices_all[port_idx] is not None
-            ):
-                port_ch_idx = np.asarray(channel_indices_all[port_idx], dtype=int)
-            else:
-                port_ch_idx = np.arange(ch_offset, ch_offset + n_ch, dtype=int)
-
-            if port_idx < len(mask_list) and mask_list[port_idx] is not None:
-                local_active = np.where(
-                    to_numpy(np.asarray(mask_list[port_idx])).flatten() == 0
-                )[0]
-            else:
-                local_active = np.arange(n_ch)
-            global_active = port_ch_idx[local_active[local_active < len(port_ch_idx)]]
-
-            emg_port = None
-            if emg_full is not None:
-                valid_chs = global_active[global_active < emg_full.shape[0]]
-                if len(valid_chs) > 0:
-                    if self._full_source_mode:
-                        emg_port = emg_full[valid_chs, :]
-                    else:
-                        emg_port = emg_full[
-                            valid_chs,
-                            max(0, start_sample) : min(end_sample, emg_full.shape[1]),
-                        ]
-                    valid_port_chs = port_ch_idx[port_ch_idx < emg_full.shape[0]]
-                    self._raw_port_channels[port_name] = emg_full[valid_port_chs, :]
-
-            port_discharge = (
-                decomp_data["discharge_times"][port_idx]
-                if port_idx < len(decomp_data["discharge_times"])
-                else []
-            )
-            port_sources = (
-                decomp_data["pulse_trains"][port_idx]
-                if port_idx < len(decomp_data["pulse_trains"])
-                else []
-            )
-            port_filters_raw = decomp_data.get("mu_filters", [])
-            port_filters = (
-                port_filters_raw[port_idx] if port_idx < len(port_filters_raw) else None
-            )
-
-            ts_list = self._ensure_list_of_arrays(port_discharge)
-            src_list = self._ensure_list_of_arrays(port_sources)
-            filt_list = (
-                self._ensure_list_of_arrays(port_filters)
-                if port_filters is not None
-                else [None] * len(ts_list)
-            )
-
-            full_results = full_port_results.get(port_idx, [])
-
-            motor_units = []
-            for mu_idx in range(len(ts_list)):
-                filt = (
-                    to_numpy(filt_list[mu_idx])
-                    if mu_idx < len(filt_list) and filt_list[mu_idx] is not None
-                    else None
-                )
-
-                if (
-                    self._full_source_mode
-                    and mu_idx < len(full_results)
-                    and full_results[mu_idx][0] is not None
-                ):
-                    entry = full_results[mu_idx]
-                    source = entry[0]
-                    ts_abs = entry[1]
-                    if len(entry) > 2 and entry[2] is not None:
-                        filt = entry[2]
-                else:
-                    source = (
-                        to_numpy(src_list[mu_idx]).flatten()
-                        if mu_idx < len(src_list)
-                        else np.zeros(1)
-                    )
-                    ts_plateau = to_numpy(ts_list[mu_idx]).flatten().astype(np.int64)
-                    ts_abs = (
-                        self._ts_to_absolute(ts_plateau)
-                        if self._full_source_mode
-                        else ts_plateau
-                    )
-
-                motor_units.append(
-                    MotorUnit(
-                        id=mu_idx,
-                        timestamps=ts_abs,
-                        source=source,
-                        port_name=port_name,
-                        mu_filter=filt,
-                    )
-                )
-
-            etype = electrode_list[port_idx] if port_idx < len(electrode_list) else None
-            grid_cfg = get_grid_config(etype)
-
-            if motor_units:
-                props_ts = [mu.timestamps for mu in motor_units]
-                props_src = [mu.source for mu in motor_units]
-
-                props_list = compute_port_properties(
-                    all_timestamps=props_ts,
-                    all_sources=props_src,
-                    emg_port=emg_port,
-                    grid_positions=grid_cfg["positions"] if grid_cfg else None,
-                    grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
-                    fsamp=self._fsamp,
-                )
-                for mu, p in zip(motor_units, props_list):
-                    mu.props = p
-
-            self._ports[port_name] = motor_units
-
-            # Restore flagged state persisted from a previous save
-            for idx in decomp_data.get("flagged_mus", {}).get(port_name, []):
-                if 0 <= idx < len(motor_units):
-                    motor_units[idx].flagged_duplicate = True
-
-            self._grid_info[port_name] = grid_cfg
-            if emg_port is not None:
-                self._emg_data[port_name] = emg_port
-
-            ch_offset += n_ch
-            print(
-                f"  Port '{port_name}': {len(motor_units)} MUs, "
-                f"{sum(len(m.timestamps) for m in motor_units)} spikes"
-                f"{' (full)' if self._full_source_mode else ''}"
+            ch_offset += self._load_single_port(
+                port_idx, port_name, decomp_data,
+                emg_full, start_sample, end_sample,
+                full_port_results, ch_offset,
             )
 
         self._refresh_port_combo()
@@ -2188,14 +1500,192 @@ class EditionTab(QWidget):
             1 for mu in all_mus if mu.props is not None and mu.props.is_reliable
         )
         n_unreliable = n_total - n_reliable
-        print(
-            f"  Reliability: {n_reliable}/{n_total} reliable, "
-            f"{n_unreliable}/{n_total} not reliable"
-        )
+        logger.info("Reliability: %d/%d reliable, %d/%d not reliable",
+                    n_reliable, n_total, n_unreliable, n_total)
         self._update_status(
             f"Loaded {n_total} MUs — "
             f"{n_reliable} reliable  |  {n_unreliable} not reliable"
         )
+
+    def _load_single_port(
+        self,
+        port_idx: int,
+        port_name: str,
+        decomp_data: dict,
+        emg_full,
+        start_sample: int,
+        end_sample: int,
+        full_port_results: dict,
+        ch_offset: int,
+    ) -> int:
+        chans_per_electrode = decomp_data.get("chans_per_electrode", [])
+        channel_indices_all = decomp_data.get("channel_indices")
+        mask_list = decomp_data.get("emg_mask", [])
+        electrode_list = decomp_data.get("electrodes", [])
+
+        n_ch = (
+            int(chans_per_electrode[port_idx])
+            if port_idx < len(chans_per_electrode)
+            else 64
+        )
+
+        if (
+            channel_indices_all is not None
+            and port_idx < len(channel_indices_all)
+            and channel_indices_all[port_idx] is not None
+        ):
+            port_ch_idx = np.asarray(channel_indices_all[port_idx], dtype=int)
+        else:
+            port_ch_idx = np.arange(ch_offset, ch_offset + n_ch, dtype=int)
+
+        if port_idx < len(mask_list) and mask_list[port_idx] is not None:
+            local_active = np.where(
+                to_numpy(np.asarray(mask_list[port_idx])).flatten() == 0
+            )[0]
+        else:
+            local_active = np.arange(n_ch)
+        global_active = port_ch_idx[local_active[local_active < len(port_ch_idx)]]
+
+        emg_port = None
+        if emg_full is not None:
+            valid_chs = global_active[global_active < emg_full.shape[0]]
+            if len(valid_chs) > 0:
+                if self._full_source_mode:
+                    emg_port = emg_full[valid_chs, :]
+                else:
+                    emg_port = emg_full[
+                        valid_chs,
+                        max(0, start_sample) : min(end_sample, emg_full.shape[1]),
+                    ]
+                valid_port_chs = port_ch_idx[port_ch_idx < emg_full.shape[0]]
+                self._raw_port_channels[port_name] = emg_full[valid_port_chs, :]
+
+        port_discharge = (
+            decomp_data["discharge_times"][port_idx]
+            if port_idx < len(decomp_data["discharge_times"])
+            else []
+        )
+        port_sources = (
+            decomp_data["pulse_trains"][port_idx]
+            if port_idx < len(decomp_data["pulse_trains"])
+            else []
+        )
+        port_filters_raw = decomp_data.get("mu_filters", [])
+        port_filters = (
+            port_filters_raw[port_idx] if port_idx < len(port_filters_raw) else None
+        )
+
+        ts_list = self._ensure_list_of_arrays(port_discharge)
+        src_list = self._ensure_list_of_arrays(port_sources)
+        filt_list = (
+            self._ensure_list_of_arrays(port_filters)
+            if port_filters is not None
+            else [None] * len(ts_list)
+        )
+
+        full_results = full_port_results.get(port_idx, [])
+
+        motor_units = []
+        for mu_idx in range(len(ts_list)):
+            filt = (
+                to_numpy(filt_list[mu_idx])
+                if mu_idx < len(filt_list) and filt_list[mu_idx] is not None
+                else None
+            )
+
+            if (
+                self._full_source_mode
+                and mu_idx < len(full_results)
+                and full_results[mu_idx][0] is not None
+            ):
+                entry = full_results[mu_idx]
+                source = entry[0]
+                ts_abs = entry[1]
+                if len(entry) > 2 and entry[2] is not None:
+                    filt = entry[2]
+            else:
+                source = (
+                    to_numpy(src_list[mu_idx]).flatten()
+                    if mu_idx < len(src_list)
+                    else np.zeros(1)
+                )
+                ts_plateau = to_numpy(ts_list[mu_idx]).flatten().astype(np.int64)
+                ts_abs = (
+                    self._ts_to_absolute(ts_plateau)
+                    if self._full_source_mode
+                    else ts_plateau
+                )
+
+            motor_units.append(
+                MotorUnit(
+                    id=mu_idx,
+                    timestamps=ts_abs,
+                    source=source,
+                    port_name=port_name,
+                    mu_filter=filt,
+                )
+            )
+
+        etype = electrode_list[port_idx] if port_idx < len(electrode_list) else None
+        grid_cfg = get_grid_config(etype)
+
+        # Build corrected grid positions: maps new-0-based emg_port row -> (r, c).
+        # The raw positions dicts use 1-based channel keys (matching hardware numbering)
+        # while emg_port rows are 0-based and may have gaps due to rejected channels.
+        # muap_mapping converts original port-local index -> grid key.
+        corrected_positions = None
+        rejected_pos_set: set = set()
+        if grid_cfg is not None:
+            muap_map = grid_cfg.get("muap_mapping", {})
+            raw_pos = grid_cfg["positions"]
+            corrected_positions = {}
+            for new_idx, orig_idx in enumerate(local_active):
+                key = muap_map.get(int(orig_idx), int(orig_idx))
+                pos = raw_pos.get(key)
+                if pos is not None:
+                    corrected_positions[new_idx] = pos
+            # Positions of rejected channels for visual masking
+            for orig_idx in range(n_ch):
+                if orig_idx in set(local_active):
+                    continue
+                key = muap_map.get(orig_idx, orig_idx)
+                pos = raw_pos.get(key)
+                if pos is not None:
+                    rejected_pos_set.add(pos)
+
+        if motor_units:
+            props_ts = [mu.timestamps for mu in motor_units]
+            props_src = [mu.source for mu in motor_units]
+
+            props_list = compute_port_properties(
+                all_timestamps=props_ts,
+                all_sources=props_src,
+                emg_port=emg_port,
+                grid_positions=corrected_positions if corrected_positions is not None
+                               else (grid_cfg["positions"] if grid_cfg else None),
+                grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
+                fsamp=self._fsamp,
+            )
+            for mu, p in zip(motor_units, props_list):
+                mu.props = p
+
+        self._ports[port_name] = motor_units
+
+        # Restore flagged state persisted from a previous save
+        for idx in decomp_data.get("flagged_mus", {}).get(port_name, []):
+            if 0 <= idx < len(motor_units):
+                motor_units[idx].flagged_duplicate = True
+
+        self._grid_info[port_name] = grid_cfg
+        self._rejected_ch_positions[port_name] = rejected_pos_set
+        if emg_port is not None:
+            self._emg_data[port_name] = emg_port
+
+        logger.info("Port '%s': %d MUs, %d spikes%s",
+                    port_name, len(motor_units),
+                    sum(len(m.timestamps) for m in motor_units),
+                    " (full)" if self._full_source_mode else "")
+        return n_ch
 
     @staticmethod
     def _ensure_list_of_arrays(data) -> list:
@@ -2904,22 +2394,24 @@ class EditionTab(QWidget):
         pnr = mu.props.pnr_db if not np.isnan(mu.props.pnr_db) else -float("inf")
         return (sil, pnr, mu.props.n_spikes, -mu.id)
 
+    def _clear_duplicate_roles(self, kind: str):
+        """Clear `kind` duplicate roles/partners; un-flag MUs not also deleted by the other kind."""
+        other = "cross" if kind == "within" else "within"
+        for mus in self._ports.values():
+            for mu in mus:
+                prev_delete = getattr(mu, f"{kind}_duplicate_role") == "delete"
+                setattr(mu, f"{kind}_duplicate_role", None)
+                setattr(mu, f"{kind}_duplicate_partners", [])
+                if prev_delete and getattr(mu, f"{other}_duplicate_role") != "delete":
+                    mu.flagged_duplicate = False
+
     def _flag_within_duplicates(self):
         """Detect and flag lower-quality within-port duplicate MUs for deletion."""
         if not _SPIKE_COMP_AVAILABLE:
             self._update_status("motor_unit_toolbox not available — cannot detect duplicates")
             return
 
-        ROA_THRESHOLD = 0.3
-
-        # Clear own roles; conditionally clear flagged_duplicate
-        for mus in self._ports.values():
-            for mu in mus:
-                prev_delete = mu.within_duplicate_role == "delete"
-                mu.within_duplicate_role = None
-                mu.within_duplicate_partners = []
-                if prev_delete and mu.cross_duplicate_role != "delete":
-                    mu.flagged_duplicate = False
+        self._clear_duplicate_roles("within")
 
         for port_name, mus in self._ports.items():
             if len(mus) < 2:
@@ -2938,7 +2430,7 @@ class EditionTab(QWidget):
                     fs=int(round(self._fsamp)),
                 )
             except Exception as exc:
-                print(f"  [within-dup] RoA failed for {port_name}: {exc}")
+                logger.warning("Within-port RoA failed for %s: %s", port_name, exc)
                 continue
 
             n = len(mus)
@@ -2988,16 +2480,7 @@ class EditionTab(QWidget):
             self._update_status("Cross-port: only one port loaded — nothing to compare")
             return
 
-        ROA_THRESHOLD = 0.3
-
-        # Clear own roles; conditionally clear flagged_duplicate
-        for mus in self._ports.values():
-            for mu in mus:
-                prev_delete = mu.cross_duplicate_role == "delete"
-                mu.cross_duplicate_role = None
-                mu.cross_duplicate_partners = []
-                if prev_delete and mu.within_duplicate_role != "delete":
-                    mu.flagged_duplicate = False
+        self._clear_duplicate_roles("cross")
 
         for idx_a in range(len(port_names)):
             for idx_b in range(idx_a + 1, len(port_names)):
@@ -3027,7 +2510,7 @@ class EditionTab(QWidget):
                         fs=int(round(self._fsamp)),
                     )
                 except Exception as exc:
-                    print(f"  [cross-dup] RoA failed for {port_a} vs {port_b}: {exc}")
+                    logger.warning("Cross-port RoA failed for %s vs %s: %s", port_a, port_b, exc)
                     continue
 
                 na, nb = roa.shape[0], roa.shape[1]
@@ -3122,7 +2605,8 @@ class EditionTab(QWidget):
         aux_channels = []
         if self._original_decomp_data is not None:
             aux_channels = self._original_decomp_data.get("aux_channels") or []
-        self.source_plot.set_aux_data(aux_channels, self._fsamp)
+        file_stem = self._loaded_path.stem if self._loaded_path else ""
+        self.source_plot.set_aux_data(aux_channels, self._fsamp, file_stem)
 
     # ------------------------------------------------------------------
     # Plot updates
@@ -3160,30 +2644,16 @@ class EditionTab(QWidget):
         self.quality_bar.clear_properties()
 
     def _on_data_changed(self, msg: str = "Modified", source_changed: bool = False):
-        """Recompute properties after an edit. Preserves zoom unless source changed."""
+        """Immediate cheap updates; expensive recompute+render deferred 120 ms."""
         mu = self._current_mu()
         if mu is not None:
-            grid_cfg = self._grid_info.get(self._current_port)
-            emg_port = self._emg_data.get(self._current_port)
-
-            mu.props = recompute_unit_properties(
-                mu_props=mu.props or MUProperties(),
-                new_timestamps=mu.timestamps,
-                source=mu.source,
-                emg_port=emg_port,
-                grid_positions=grid_cfg["positions"] if grid_cfg else None,
-                grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
-                fsamp=self._fsamp,
-            )
-
             if source_changed:
-                self._update_plots()
-            else:
-                # Lightweight refresh — zoom preserved
-                self.source_plot.update_timestamps(mu.timestamps)
-                self.fr_plot.set_data(mu.timestamps)
-                self._plot_muap()
-                self._update_quality_panel(mu)
+                # Source signal changed (e.g. filter recalc) — redraw curve now
+                self.source_plot.set_data(mu.source, mu.timestamps)
+                if self._full_source_mode:
+                    self.source_plot.set_plateau_region(self._start_sample, self._end_sample)
+            self.fr_plot.set_data(mu.timestamps)
+            self.source_plot.update_timestamps(mu.timestamps)
 
         self._refresh_mu_combo()
         self.mu_combo.blockSignals(True)
@@ -3191,6 +2661,31 @@ class EditionTab(QWidget):
         self.mu_combo.blockSignals(False)
         self._update_status(msg)
         self.data_modified.emit()
+
+        # Accumulate source_changed across rapid edits, then flush once
+        self._pending_source_changed |= source_changed
+        self._props_timer.start()
+
+    def _flush_props_update(self):
+        """Runs after editing pauses: recomputes MU properties and refreshes MUAP + quality."""
+        mu = self._current_mu()
+        if mu is None:
+            self._pending_source_changed = False
+            return
+        grid_cfg = self._grid_info.get(self._current_port)
+        emg_port = self._emg_data.get(self._current_port)
+        mu.props = recompute_unit_properties(
+            mu_props=mu.props or MUProperties(),
+            new_timestamps=mu.timestamps,
+            source=mu.source,
+            emg_port=emg_port,
+            grid_positions=grid_cfg["positions"] if grid_cfg else None,
+            grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
+            fsamp=self._fsamp,
+        )
+        self._pending_source_changed = False
+        self._plot_muap()
+        self._update_quality_panel(mu)
 
     def _update_quality_panel(self, mu: Optional[MotorUnit]):
         if mu is None:
@@ -3268,22 +2763,13 @@ class EditionTab(QWidget):
 
         muap_grid = mu.props.muap_grid
         grid_cfg = self._grid_info.get(self._current_port)
+        rejected_pos = self._rejected_ch_positions.get(self._current_port, set())
+
         if grid_cfg is not None:
-            rows, cols = grid_cfg["grid_shape"]
-            positions = grid_cfg["positions"]
-            waveforms, ch_indices = [], []
-            for ch in range(rows * cols):
-                pos = positions.get(ch)
-                if pos is None:
-                    continue
-                r, c = pos
-                if r < rows and c < cols:
-                    waveforms.append(muap_grid[r, c])
-                    ch_indices.append(ch)
-            self._render_muap_grid(waveforms, ch_indices, grid_cfg)
+            self._render_muap_grid(muap_grid, grid_cfg, rejected_pos)
             if self._muap_popout and self._muap_popout.isVisible():
                 self._muap_popout.render_grid(
-                    waveforms, ch_indices, grid_cfg, self._current_mu_idx
+                    muap_grid, grid_cfg, rejected_pos, self._current_mu_idx
                 )
         else:
             n_ch = muap_grid.shape[0]
@@ -3294,22 +2780,58 @@ class EditionTab(QWidget):
                     waveforms, list(range(n_ch)), self._current_mu_idx
                 )
 
-    def _render_muap_grid(self, waveforms, ch_indices, grid_cfg):
-        self.muap_widget.clear()
-        rows, cols = grid_cfg["grid_shape"]
-        positions = grid_cfg["positions"]
-        valid = [w for w in waveforms if len(w) > 0]
-        amp = np.max(np.abs(np.concatenate(valid))) * 1.2 if valid else 1.0
-        n_samples = len(waveforms[0]) if valid else 409
+    def _render_muap_grid(self, muap_grid: np.ndarray, grid_cfg: dict, rejected_positions: set = None):
+        """Render MUAPs in physical grid layout (portrait, rows × cols).
 
-        # Transposed layout: data rows → display columns, data cols → display rows.
-        # Row 0: MU label.  Row 1: data-row number strip.  Rows 2…cols+1: data plots.
-        # Col 0: data-col number strip.  Cols 1…rows: data plots.
-        label = (
+        muap_grid: (rows, cols, n_samples) from compute_port_properties.
+        On the first call (or when grid shape changes) all PlotItems are built and
+        stored; on subsequent calls only waveform data and amplitudes are updated,
+        avoiding expensive scene teardown/rebuild.
+        """
+        if rejected_positions is None:
+            rejected_positions = set()
+
+        rows, cols = grid_cfg["grid_shape"]
+        electrode_positions = set(grid_cfg["positions"].values())
+        n_samples = muap_grid.shape[2] if muap_grid.ndim == 3 else 409
+
+        valid_wavs = [
+            muap_grid[r, c]
+            for r in range(min(rows, muap_grid.shape[0]))
+            for c in range(min(cols, muap_grid.shape[1]))
+            if (r, c) in electrode_positions
+            and (r, c) not in rejected_positions
+            and len(muap_grid[r, c]) > 0
+            and np.any(muap_grid[r, c] != 0)
+        ]
+        amp = np.max(np.abs(np.concatenate(valid_wavs))) * 1.2 if valid_wavs else 1.0
+        grid_key = (rows, cols, n_samples, frozenset(rejected_positions))
+
+        title_html = (
             f"<span style='color:{COLORS['foreground']};font-size:10pt;'>"
             f"MU {self._current_mu_idx}</span>"
         )
-        self.muap_widget.addLabel(label, row=0, col=0, colspan=rows + 1, justify="center")
+
+        if grid_key == self._muap_grid_key and self._muap_cell_plots:
+            # Fast path: only update amplitudes and waveform data in existing plots
+            for p in self._muap_cell_plots.values():
+                p.setYRange(-amp, amp, padding=0)
+            for (r, c), item in self._muap_waveform_items.items():
+                wav = (muap_grid[r, c]
+                       if r < muap_grid.shape[0] and c < muap_grid.shape[1]
+                       else None)
+                if wav is not None and len(wav) > 0 and np.any(wav != 0):
+                    item.setData(wav)
+                else:
+                    item.setData([])
+            if self._muap_title_label is not None:
+                self._muap_title_label.setText(title_html)
+            return
+
+        # Slow path: full rebuild
+        self.muap_widget.clear()
+        self._muap_cell_plots = {}
+        self._muap_waveform_items = {}
 
         lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:7pt;"
 
@@ -3319,16 +2841,23 @@ class EditionTab(QWidget):
             lbl.setMinimumHeight(0)
             return lbl
 
-        _add_lbl(self.muap_widget, f"<span style='{lbl_style}'><b>Ch</b></span>", 1, 0, justify="center")
+        # Row 0: title. Row 1: column headers. Rows 2+: data. Col 0: row labels.
+        self._muap_title_label = _add_lbl(
+            self.muap_widget, title_html, 0, 0, colspan=cols + 1, justify="center"
+        )
+        _add_lbl(self.muap_widget, f"<span style='{lbl_style}'></span>", 1, 0, justify="center")
+        for c in range(cols):
+            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{c + 1}</span>", 1, c + 1, justify="center")
         for r in range(rows):
-            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{r + 1}</span>", 1, r + 1, justify="center")
-        for c in range(cols):
-            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{c + 1}</span>", c + 2, 0, justify="center")
+            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{r + 1}</span>", r + 2, 0, justify="center")
 
+        _rej_bg = (50, 30, 30)
+        _empty_bg = (28, 28, 28)
         gl = self.muap_widget.ci.layout
-        for c in range(cols):
-            for r in range(rows):
-                p = self.muap_widget.addPlot(row=c + 2, col=r + 1)
+
+        for r in range(rows):
+            for c in range(cols):
+                p = self.muap_widget.addPlot(row=r + 2, col=c + 1)
                 p.hideAxis("left")
                 p.hideAxis("bottom")
                 p.setMouseEnabled(x=False, y=False)
@@ -3338,40 +2867,45 @@ class EditionTab(QWidget):
                 p.setLimits(xMin=0, xMax=n_samples, yMin=-amp, yMax=amp)
                 p.setMinimumWidth(0)
                 p.setMinimumHeight(0)
+                self._muap_cell_plots[(r, c)] = p
+
+                rc = (r, c)
+                if rc in rejected_positions:
+                    p.getViewBox().setBackgroundColor(_rej_bg)
+                    p.plot([0, n_samples], [0, 0], pen=pg.mkPen(color=(140, 60, 60), width=1))
+                elif rc not in electrode_positions:
+                    p.getViewBox().setBackgroundColor(_empty_bg)
+                else:
+                    # Pre-create waveform item; data filled below
+                    item = p.plot([], pen=pg.mkPen(color=COLORS["info"], width=1.5))
+                    self._muap_waveform_items[rc] = item
 
         gl.setSpacing(0)
-        gl.setColumnMinimumWidth(0, 0)
+        gl.setHorizontalSpacing(6)
+        gl.setColumnMinimumWidth(0, 14)
         gl.setColumnStretchFactor(0, 0)
-        for r in range(rows):
-            gl.setColumnMinimumWidth(r + 1, 0)
-            gl.setColumnStretchFactor(r + 1, 1)
+        for c in range(cols):
+            gl.setColumnMinimumWidth(c + 1, 0)
+            gl.setColumnStretchFactor(c + 1, 1)
         for r in range(2):
             gl.setRowMinimumHeight(r, 0)
             gl.setRowStretchFactor(r, 0)
-        for c in range(cols):
-            gl.setRowMinimumHeight(c + 2, 0)
-            gl.setRowStretchFactor(c + 2, 1)
+        for r in range(rows):
+            gl.setRowMinimumHeight(r + 2, 0)
+            gl.setRowStretchFactor(r + 2, 1)
 
-        for idx, wav in enumerate(waveforms):
-            if idx >= len(ch_indices):
-                break
-            pos = positions.get(int(idx))
-            if pos is None:
-                continue
-            r, c = pos
-            if r >= rows or c >= cols:
-                continue
-            item = self.muap_widget.getItem(c + 2, r + 1)
-            if item is not None and len(wav) > 0:
-                item.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=1.5))
+        for (r, c), item in self._muap_waveform_items.items():
+            if r < muap_grid.shape[0] and c < muap_grid.shape[1]:
+                wav = muap_grid[r, c]
+                if len(wav) > 0 and np.any(wav != 0):
+                    item.setData(wav)
 
-        # pyqtgraph's GraphicsView only updates its viewport transform in resizeEvent.
-        # Calling resizeEvent(None) recomputes the transform for the current widget
-        # size without requiring an actual geometry change.
-        self.muap_widget.resizeEvent(None)
+        self._muap_grid_key = grid_key
+
 
     def _render_muap_stacked(self, waveforms, ch_indices):
         self.muap_widget.clear()
+        self._muap_grid_key = None  # force grid rebuild on next _render_muap_grid call
         plot = self.muap_widget.addPlot(row=0, col=0)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:
@@ -3396,11 +2930,16 @@ class EditionTab(QWidget):
 
     def _clear_muap_plot(self, message: str = "Select a Motor Unit"):
         self.muap_widget.clear()
+        self._muap_grid_key = None
         p = self.muap_widget.addPlot(row=0, col=0)
-        t = pg.TextItem(message, color=(120, 120, 120), anchor=(0.5, 0.5))
-        t.setFont(QFont(FONT_FAMILY, 14))
-        p.addItem(t)
         p.hideAxis("left")
         p.hideAxis("bottom")
+        p.setMouseEnabled(x=False, y=False)
+        p.setXRange(0, 1)
+        p.setYRange(0, 1)
+        t = pg.TextItem(message, color=(120, 120, 120), anchor=(0.5, 0.5))
+        t.setFont(QFont(FONT_FAMILY, 14))
+        t.setPos(0.5, 0.5)
+        p.addItem(t)
         if self._muap_popout and self._muap_popout.isVisible():
             self._muap_popout.clear(message)

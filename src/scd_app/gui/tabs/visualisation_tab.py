@@ -6,6 +6,7 @@ X-axes are linked across all three inner tabs.
 AUX force channels can be overlaid on any plot and toggled via floating legend (top-right).
 """
 
+import re
 from typing import Dict, List, Optional, Set
 
 import numpy as np
@@ -27,6 +28,47 @@ from motor_unit_toolbox.props import get_inst_discharge_rate
 
 from scd_app.core.mu_model import MotorUnit
 from scd_app.gui.style.styling import COLORS, FONT_SIZES
+
+# ── Filename → active-aux helpers ────────────────────────────────────────────
+
+_FINGER_ABBREV = {"T": "Thumb", "I": "Index", "M": "Middle", "R": "Ring", "L": "Little"}
+_MOTION_ABBREV = {"ext": "Ext", "flex": "Flex"}
+_TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
+
+
+def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
+    """Return expected active unit strings (e.g. {'Index Ext'}) from the filename,
+    or None if the filename doesn't match the expected pattern."""
+    m = _TASK_PATTERN.search(file_stem)
+    if not m:
+        return None
+    motion = _MOTION_ABBREV.get(m.group(1).lower())
+    if not motion:
+        return None
+    targets = {
+        f"{_FINGER_ABBREV[c]} {motion}"
+        for c in m.group(2).upper()
+        if c in _FINGER_ABBREV
+    }
+    return targets or None
+
+
+def _default_aux_states(channels: list, file_stem: str) -> List[bool]:
+    """Return initial on/off states for aux channels based on the filename.
+    Falls back to all-on when the filename cannot be parsed or nothing matches."""
+    targets = _parse_task_targets(file_stem)
+    if not targets:
+        return [True] * len(channels)
+    states = []
+    for ch in channels:
+        meta = ch.get("meta", {})
+        unit = meta.get("unit") or ch.get("unit") or ""
+        states.append(unit in targets)
+    # If nothing matched, show all (avoids blank plots)
+    if not any(states):
+        return [True] * len(channels)
+    return states
+
 
 # ── Colour constants ──────────────────────────────────────────────────────────
 
@@ -107,11 +149,14 @@ class _VisAuxLegend(pg.LegendItem):
         self._names = []
         self._colors_hex = []
         for i, ch in enumerate(channels):
-            name = ch.get("name", ch.get("unit", f"AUX {i + 1}"))
+            meta = ch.get("meta", {})
+            name = meta.get("name") or ch.get("name") or f"AUX {i + 1}"
+            unit = meta.get("unit") or ch.get("unit") or ""
+            display = f"{name} ({unit})" if unit else name
             hex_color = _AUX_COLORS_HEX[i % len(_AUX_COLORS_HEX)]
-            self._names.append(name)
+            self._names.append(display)
             self._colors_hex.append(hex_color)
-            label = pg.LabelItem(f"● {name}", color=hex_color, justify="left")
+            label = pg.LabelItem(f"● {display}", color=hex_color, justify="left")
             self.layout.addItem(label, i, 0)
             self.items.append((None, label))
         self.updateSize()
@@ -159,6 +204,7 @@ class VisualisationTab(QWidget):
         self._fsamp: float = 2048.0
         self._start_sample: int = 0
         self._end_sample: int = 0
+        self._file_stem: str = ""
 
         # UI state
         self._disabled_mus: Set[tuple] = set()
@@ -442,10 +488,11 @@ class VisualisationTab(QWidget):
 
     def _rebuild_aux_controls(self):
         self._aux_on_states.clear()
-        for _ in self._aux_channels:
-            self._aux_on_states.append(True)
+        self._aux_on_states.extend(_default_aux_states(self._aux_channels, self._file_stem))
         for leg in self._aux_legends:
             leg.populate(self._aux_channels)
+        for leg in self._aux_legends:
+            leg.sync_labels()
 
     # ── Fetch data from edition tab ───────────────────────────────────────────
 
@@ -458,6 +505,7 @@ class VisualisationTab(QWidget):
         self._fsamp = d["fsamp"]
         self._start_sample = d["start_sample"]
         self._end_sample = d["end_sample"]
+        self._file_stem = d.get("file_stem", "")
         self._rebuild_sidebar_rows()
         self._rebuild_aux_controls()
 

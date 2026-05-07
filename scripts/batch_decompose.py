@@ -466,6 +466,7 @@ class _HeadlessWorker:
         self.save_path           = save_path
         self.time_masks_per_grid = time_masks_per_grid or []
         self.aux_configs         = []
+        self.emg_file_path       = None
         self._is_running         = True
 
     # Mimic Qt signals as no-ops so we can share the run() implementation

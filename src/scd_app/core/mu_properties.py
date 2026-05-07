@@ -26,9 +26,17 @@ Public API
 
 from __future__ import annotations
 
+import logging
+import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+
+from scd_app.core.constants import MIN_PEAK_SEP, MUAP_WIN_MS, ROA_THRESHOLD
+from scd_app.core.utils import to_numpy  # noqa: F401 — re-exported for callers
+
+logger = logging.getLogger(__name__)
 
 # ── toolbox imports ────────────────────────────────────────────────────────────
 try:
@@ -44,6 +52,28 @@ except ImportError:
         ImportWarning,
         stacklevel=2,
     )
+
+
+def _center_muaps(muaps: np.ndarray) -> np.ndarray:
+    """Center MUAPs so the peak-amplitude sample sits at the window midpoint.
+
+    Fixes a bug in tb_props.center_muaps where per-channel peak *sample*
+    indices are passed to np.unravel_index with the *spatial* grid shape,
+    causing an IndexError whenever a peak sample index >= rows*cols.
+    """
+    if muaps.ndim < 4 or muaps.size == 0:
+        return muaps
+    result = muaps.copy()
+    units, rows, cols, samples = muaps.shape
+    center = samples // 2
+    for u in range(units):
+        muap = muaps[u]  # (rows, cols, samples)
+        flat_idx = int(np.nanargmax(np.nanmax(np.abs(muap), axis=-1)))
+        ch_row, ch_col = np.unravel_index(flat_idx, (rows, cols))
+        peak_sample = int(np.nanargmax(np.abs(muap[ch_row, ch_col])))
+        result[u] = np.roll(muap, center - peak_sample, axis=-1)
+    return result
+
 
 @dataclass
 class MUProperties:
@@ -192,7 +222,7 @@ def timestamps_to_time_axis(
 def _compute_centroids(
     source: np.ndarray,
     timestamps: np.ndarray,
-    min_peak_sep: int = 30,
+    min_peak_sep: int = MIN_PEAK_SEP,
 ) -> tuple:
     """Return (spike_centroid, noise_centroid) from source² peak amplitudes.
 
@@ -238,7 +268,7 @@ def compute_unit_properties(
     fsamp: float,
     muap_grid: Optional[np.ndarray],  # (rows, cols, win_samples) or None
     fsamp_int: int,
-    win_ms: int = 25,
+    win_ms: int = MUAP_WIN_MS,
 ) -> MUProperties:
     """Compute all properties for a single motor unit.
 
@@ -270,42 +300,41 @@ def compute_unit_properties(
     try:
         dr = tb_props.get_discharge_rate(st1, time_axis)
         props.discharge_rate_hz = _nanval(dr, 0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("discharge_rate failed: %s", e)
 
     try:
         cov = tb_props.get_coefficient_of_variation(st1, time_axis)
         props.cov_pct = _nanval(cov, 0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("coefficient_of_variation failed: %s", e)
 
     try:
         if props.n_spikes >= 2:
             isi_samples = np.diff(np.sort(timestamps))
             if len(isi_samples) > 0:
                 props.min_isi_ms = float(np.min(isi_samples)) / fsamp * 1000.0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("min_isi failed: %s", e)
 
     # ── Quality metrics ───────────────────────────────────────────────────
     try:
         sil = tb_props.get_silhouette_measure(st1, ipts1)
         props.sil = _nanval(sil, 0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("silhouette_measure failed: %s", e)
 
     try:
         pnr = tb_props.get_pulse_to_noise_ratio(st1, ipts1)
         props.pnr_db = _nanval(pnr, 0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("pulse_to_noise_ratio failed: %s", e)
 
     props.spike_centroid, props.noise_centroid = _compute_centroids(source, timestamps)
 
     # ── MUAP features ─────────────────────────────────────────────────────
     if muap_grid is not None and muap_grid.ndim == 3:
         try:
-            # Wrap single-unit MUAP in a (1, rows, cols, win) array
             muap4 = muap_grid[np.newaxis]   # (1, rows, cols, win_samples)
 
             ptp = tb_props.get_muap_ptp(muap4, sel_chs_by=None)
@@ -326,8 +355,8 @@ def compute_unit_properties(
             mean_f = tb_props.get_muap_mean_frequency(muap4, sel_chs_by="iqr", fs=fsamp_int)
             props.muap_mean_freq_hz = float(np.nanmean(mean_f[np.isfinite(mean_f)]))
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("MUAP feature computation failed: %s", e)
 
     props.muap_grid = muap_grid
 
@@ -339,7 +368,8 @@ def compute_unit_properties(
         pnr_arr = np.array([props.pnr_db])
         reliable = tb_props.find_reliable_units(dr_arr, cov_arr, sil_arr, pnr_arr)
         props.is_reliable = bool(reliable[0])
-    except Exception:
+    except Exception as e:
+        logger.debug("find_reliable_units failed: %s", e)
         props.is_reliable = False
 
     return props
@@ -352,8 +382,8 @@ def compute_port_properties(
     grid_positions: Optional[Dict[int, Tuple[int, int]]],
     grid_shape: Optional[Tuple[int, int]],
     fsamp: float,
-    win_ms: int = 25,
-    roa_threshold: float = 0.3,
+    win_ms: int = MUAP_WIN_MS,
+    roa_threshold: float = ROA_THRESHOLD,
 ) -> List[MUProperties]:
     """Compute all properties for every motor unit in a port.
 
@@ -374,7 +404,6 @@ def compute_port_properties(
     if n_units == 0:
         return []
 
-    # Determine n_samples from the longest source or EMG
     n_samples = 0
     for src in all_sources:
         n_samples = max(n_samples, len(src))
@@ -385,52 +414,37 @@ def compute_port_properties(
 
     fsamp_int = int(round(fsamp))
 
-    # ── Build shared matrices ─────────────────────────────────────────────
-    spike_mat = build_spike_train_matrix(all_timestamps, n_samples)   # (n, m)
-    ipts_mat  = sources_to_ipts_matrix(all_sources, n_samples)         # (n, m)
-    time_axis = timestamps_to_time_axis(n_samples, fsamp)               # (n,)
+    spike_mat = build_spike_train_matrix(all_timestamps, n_samples)
+    ipts_mat  = sources_to_ipts_matrix(all_sources, n_samples)
+    time_axis = timestamps_to_time_axis(n_samples, fsamp)
 
-    # ── Build EMG grid and compute MUAPs ─────────────────────────────────
     muap_grids: List[Optional[np.ndarray]] = [None] * n_units
 
     if emg_port is None:
-        print("  [mu_props] emg_port is None — MUAP computation skipped "
-              "(PKL has no 'data' key or all channels were masked)")
+        logger.info("MUAP computation skipped — no EMG data for this port")
     elif not _TOOLBOX_AVAILABLE:
-        print("  [mu_props] motor_unit_toolbox not available — MUAP computation skipped")
+        logger.warning("motor_unit_toolbox not available — MUAP computation skipped")
     else:
         try:
             if grid_positions is not None and grid_shape is not None:
                 emg_grid = flat_channels_to_grid(emg_port, grid_positions, grid_shape)
             else:
-                # Fallback: treat channels as a (n_ch, 1) pseudo-grid
                 n_ch = emg_port.shape[0]
                 emg_grid = emg_port.reshape(n_ch, 1, -1)
                 grid_shape = (n_ch, 1)
-                print(f"  [mu_props] No grid config — using stacked fallback "
-                      f"({n_ch} ch × 1 col)")
+                logger.info("No grid config — using stacked fallback (%d ch × 1 col)", n_ch)
 
-            # Compute MUAPs via toolbox: returns (n_units, rows, cols, win)
             muaps_all = tb_props.get_muaps(
                 spike_mat, emg_grid, fs=fsamp_int, win_ms=win_ms
             )
-            # Center the MUAPs — wrap in try/except: center_muaps has a known
-            # bug where it uses the full flat index (spatial × temporal) but
-            # unravels with spatial size only → ValueError for some grids.
-            try:
-                muaps_all = tb_props.center_muaps(muaps_all)
-            except (ValueError, IndexError):
-                pass   # use uncentred MUAPs — still valid for display
+            muaps_all = _center_muaps(muaps_all)
 
             for i in range(n_units):
-                muap_grids[i] = muaps_all[i]   # (rows, cols, win)
+                muap_grids[i] = muaps_all[i]
 
         except Exception as exc:
-            import traceback
-            print(f"  [mu_props] MUAP computation failed: {exc}")
-            traceback.print_exc()
+            logger.error("MUAP computation failed: %s\n%s", exc, traceback.format_exc())
 
-    # ── Per-unit properties ────────────────────────────────────────────────
     results: List[MUProperties] = []
     for i in range(n_units):
         p = compute_unit_properties(
@@ -446,7 +460,6 @@ def compute_port_properties(
         )
         results.append(p)
 
-    # ── Duplicate detection (within-port RoA) ─────────────────────────────
     if _TOOLBOX_AVAILABLE and n_units > 1:
         try:
             roa, _ = tb_spike.rate_of_agreement_full(
@@ -454,13 +467,12 @@ def compute_port_properties(
                 spike_trains_test=spike_mat,
                 fs=fsamp_int,
             )
-            # roa is (n_units, n_units); skip diagonal (self-comparison)
             for i in range(n_units):
                 for j in range(n_units):
                     if i != j and roa[i, j] >= roa_threshold:
                         results[i].duplicate_candidates[j] = float(roa[i, j])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Within-port RoA computation failed: %s", e)
 
     return results
 
@@ -477,7 +489,7 @@ def recompute_unit_properties(
     grid_positions: Optional[Dict[int, Tuple[int, int]]],
     grid_shape: Optional[Tuple[int, int]],
     fsamp: float,
-    win_ms: int = 25,
+    win_ms: int = MUAP_WIN_MS,
 ) -> MUProperties:
     """Lightweight re-computation after a spike edit.
 
@@ -494,7 +506,6 @@ def recompute_unit_properties(
     spike_train_col = timestamps_to_spike_train(new_timestamps, n_samples)
     ipts_col = np.asarray(source, dtype=np.float64).flatten()[:n_samples]
 
-    # Recompute MUAP from EMG when spikes exist; clear it when there are none
     muap_grid = None if len(new_timestamps) == 0 else mu_props.muap_grid
     if len(new_timestamps) > 0 and emg_port is not None and _TOOLBOX_AVAILABLE:
         try:
@@ -506,13 +517,10 @@ def recompute_unit_properties(
 
             st1 = spike_train_col.reshape(-1, 1)
             muaps_new = tb_props.get_muaps(st1, emg_grid, fs=fsamp_int, win_ms=win_ms)
-            try:
-                muaps_new = tb_props.center_muaps(muaps_new)
-            except (ValueError, IndexError):
-                pass  # use uncentred MUAPs — still valid for display
+            muaps_new = _center_muaps(muaps_new)
             muap_grid = muaps_new[0]
         except Exception as e:
-            print(f"  [mu_props] MUAP recompute failed: {e}")
+            logger.debug("MUAP recompute failed: %s", e)
 
     return compute_unit_properties(
         timestamps=new_timestamps,

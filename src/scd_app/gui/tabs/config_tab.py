@@ -138,6 +138,12 @@ class GridCard(QFrame):
 
     ELECTRODE_CONFIGS = {
         "Surface": {
+            "Grid (GR04MM1305)": {
+                "rows": 13,
+                "cols": 5,
+                "spacing_mm": 4.0,
+                "n_channels": 64,
+            },
             "Grid (GR08MM1305)": {
                 "rows": 13,
                 "cols": 5,
@@ -493,14 +499,14 @@ class AuxChannelCard(QFrame):
         # Unit
         self.unit_edit = QLineEdit()
         self.unit_edit.setPlaceholderText("Unit")
-        self.unit_edit.setFixedWidth(60)
         self.unit_edit.textChanged.connect(self.changed.emit)
-        main_layout.addWidget(self.unit_edit)
+        main_layout.addWidget(self.unit_edit, stretch=2)
 
         # Status
         self.status_label = QLabel()
         self.status_label.setStyleSheet(get_label_style(size="small"))
-        main_layout.addWidget(self.status_label, stretch=1)
+        self.status_label.setMaximumWidth(80)
+        main_layout.addWidget(self.status_label)
 
         # Remove
         self.remove_btn = QPushButton("×")

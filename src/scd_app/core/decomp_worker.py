@@ -33,6 +33,7 @@ class DecompositionWorker(QThread):
         sampling_rate: int,
         save_path: Path,
         aux_configs: Optional[List[dict]] = None,
+        emg_file_path: Optional[Path] = None,
     ):
         super().__init__()
         self.emg_data = emg_data
@@ -42,6 +43,7 @@ class DecompositionWorker(QThread):
         self.sampling_rate = sampling_rate
         self.save_path = save_path
         self.aux_configs = aux_configs or []
+        self.emg_file_path = emg_file_path
         self._is_running = True
         self._partial_results = None  # (results_dict, total_mus) after each grid
 
@@ -313,19 +315,36 @@ class DecompositionWorker(QThread):
             else:
                 dewhitened_filters.append(None)
 
-        # 4. Aux channels — slice from full EMG array (source == "signal")
-        #    Each entry: {"data": np.ndarray (samples,), "meta": dict}
-        #    data is NOT time-cropped here; the full recording is preserved so
-        #    that force traces can be inspected outside the plateau window.
+        # 4. Aux channels — two source types:
+        #    "signal"   → slice from full EMG array (channels, samples)
+        #    "aux_file" → read .sip streams from the OTB+ archive
+        #    Each saved entry: {"data": np.ndarray (samples,), "meta": dict,
+        #                       "start_chan": int, "end_chan": int}
+        #    data is NOT time-cropped; the full recording is preserved so force
+        #    traces can be inspected outside the plateau window.
         aux_channels_saved = []
         if self.aux_configs:
             full_np = data_np  # already (channels, samples) — all time
             n_total_ch = full_np.shape[0]
             for a in self.aux_configs:
+                source = a.get("source", "signal")
+                if source == "aux_file":
+                    if self.emg_file_path is None:
+                        print(
+                            f"  [aux] Skipping '{a.get('name', '?')}': "
+                            "aux_file source requires emg_file_path"
+                        )
+                        continue
+                    entry = self._load_aux_file_channel(self.emg_file_path, a)
+                    if entry is not None:
+                        aux_channels_saved.append(entry)
+                    continue
+
+                # source == "signal": slice from the EMG data array
                 s, e = int(a.get("start_chan", 0)), int(a.get("end_chan", 0))
                 if s >= e or e > n_total_ch:
                     print(
-                        f"  [aux] Skipping {a.get('name', '?')}: "
+                        f"  [aux] Skipping '{a.get('name', '?')}': "
                         f"channel range [{s},{e}) out of range ({n_total_ch} ch)"
                     )
                     continue
@@ -386,6 +405,59 @@ class DecompositionWorker(QThread):
         with open(self.save_path, "wb") as f:
             pickle.dump(save_dict, f)
             print(f"File saved successfully: {self.save_path}")
+
+    def _load_aux_file_channel(self, file_path: Path, aux_config: dict) -> Optional[dict]:
+        """Load one aux channel from an OTB+ .sip stream."""
+        import tarfile
+
+        file_path = Path(file_path)
+        if file_path.suffix.lower() not in (".otb", ".otb+"):
+            print(
+                f"  [aux] '{aux_config.get('name', '?')}': "
+                f"aux_file source only supported for OTB+ files, got {file_path.suffix!r}"
+            )
+            return None
+
+        try:
+            with tarfile.open(str(file_path), "r") as tar:
+                members = {m.name: m for m in tar.getmembers()}
+                sip_names = sorted(n for n in members if n.endswith(".sip"))
+                if not sip_names:
+                    print(f"  [aux] No .sip channels found in {file_path.name}")
+                    return None
+                arrays = [
+                    np.frombuffer(
+                        tar.extractfile(members[n]).read(), dtype="float64"
+                    )
+                    for n in sip_names
+                ]
+            min_len = min(len(a) for a in arrays)
+            # (n_sip, samples) — channels-first to match the EMG convention
+            aux_np = np.column_stack([a[:min_len] for a in arrays]).T
+        except Exception as ex:
+            print(f"  [aux] Failed to read .sip from {file_path.name}: {ex}")
+            return None
+
+        s = int(aux_config.get("start_chan", 0))
+        e = int(aux_config.get("end_chan", s + 1))
+        if s >= e or e > aux_np.shape[0]:
+            print(
+                f"  [aux] Skipping '{aux_config.get('name', '?')}': "
+                f"sip range [{s},{e}) out of range ({aux_np.shape[0]} sip channels)"
+            )
+            return None
+
+        sig = aux_np[s:e, :].squeeze()
+        return {
+            "data": sig,
+            "meta": {
+                k: v
+                for k, v in aux_config.items()
+                if k not in ("start_chan", "end_chan")
+            },
+            "start_chan": s,
+            "end_chan": e,
+        }
 
     def stop(self):
         self._is_running = False

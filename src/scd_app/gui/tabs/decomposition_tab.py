@@ -3,7 +3,8 @@ Decomposition Tab - Manages EMG signal decomposition.
 """
 
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
+import re
 import numpy as np
 from PyQt5.QtWidgets import (
     QWidget,
@@ -47,6 +48,39 @@ from scd_app.gui.style.styling import (
 from scd_app.core.config import SessionConfig
 import torch
 from scd_app.core.decomp_worker import DecompositionWorker
+
+# ── Filename → active-aux helpers ────────────────────────────────────────────
+_FINGER_ABBREV: Dict[str, str] = {
+    "T": "Thumb", "I": "Index", "M": "Middle", "R": "Ring", "L": "Little"
+}
+_MOTION_ABBREV: Dict[str, str] = {"ext": "Ext", "flex": "Flex"}
+_TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
+
+
+def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
+    """Return expected active unit strings (e.g. {'Index Ext'}) from the filename."""
+    m = _TASK_PATTERN.search(file_stem)
+    if not m:
+        return None
+    motion = _MOTION_ABBREV.get(m.group(1).lower())
+    if not motion:
+        return None
+    targets = {
+        f"{_FINGER_ABBREV[c]} {motion}"
+        for c in m.group(2).upper()
+        if c in _FINGER_ABBREV
+    }
+    return targets or None
+
+
+def _filter_aux_for_task(aux_cfgs: list, file_stem: str) -> list:
+    """Return the subset of aux_cfgs whose unit label matches the task in the filename.
+    Falls back to showing all when the filename doesn't parse or nothing matches."""
+    targets = _parse_task_targets(file_stem)
+    if not targets:
+        return aux_cfgs
+    matched = [a for a in aux_cfgs if a.get("unit", "") in targets]
+    return matched if matched else aux_cfgs
 
 
 class DecompositionTab(QWidget):
@@ -587,72 +621,6 @@ class DecompositionTab(QWidget):
     #  Aux / force channel helpers                                        #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def _parse_filename_task(stem: str):
-        """Extract (direction, finger_names) from a recording filename stem.
-
-        Looks for:
-          mvc-<number><ext|flex>   → direction = "ext" | "flex"
-          fing-<LETTERS>           → finger codes → full names
-                                     T=thumb  I=index  M=middle  R=ring  L=little
-
-        Returns (direction, [finger_names]) or (None, []) if not parseable.
-        """
-        import re
-
-        _FINGER = {
-            "T": "thumb",
-            "I": "index",
-            "M": "middle",
-            "R": "ring",
-            "L": "little",
-        }
-        direction = None
-        fingers = []
-
-        mvc_m = re.search(r"mvc-([^_]+)", stem, re.IGNORECASE)
-        if mvc_m:
-            mvc_str = mvc_m.group(1).lower()
-            if "ext" in mvc_str:
-                direction = "ext"
-            elif "flex" in mvc_str:
-                direction = "flex"
-
-        fing_m = re.search(r"fing-([A-Za-z]+)", stem)
-        if fing_m:
-            fingers = [_FINGER[c] for c in fing_m.group(1).upper() if c in _FINGER]
-
-        return direction, fingers
-
-    @staticmethod
-    def _select_aux_for_task(aux_cfgs: list, direction, fingers: list) -> list:
-        """Decide which aux channels to overlay according to the three cases:
-
-        Case 2 – no aux configs at all         → return []  (nothing to show)
-        Case 3 – aux configs have no unit label → return all configs
-        Case 1 – aux configs have unit labels   → return those whose label
-                  contains the finger name AND direction (case-insensitive);
-                  if none match, fall back to showing all labelled ones.
-        """
-        if not aux_cfgs:
-            return []  # Case 2
-
-        labeled = [a for a in aux_cfgs if a.get("unit", "").strip()]
-        unlabeled = [a for a in aux_cfgs if not a.get("unit", "").strip()]
-
-        if not labeled:
-            return aux_cfgs  # Case 3 – no labels
-
-        if direction is None or not fingers:
-            return labeled  # can't match → show all
-
-        matched = [
-            a
-            for a in labeled
-            if any(f in a["unit"].lower() for f in fingers)
-            and direction in a["unit"].lower()
-        ]
-        return matched if matched else labeled  # Case 1 (fallback = all)
 
     @staticmethod
     def _downsample_for_display(data: np.ndarray, canvas_width_px: int) -> tuple:
@@ -688,14 +656,7 @@ class DecompositionTab(QWidget):
         # ── Aux / force overlay setup ─────────────────────────────────────
         _aux_cfgs = getattr(self.config, "aux_channels", []) if self.config else []
         _stem = self.emg_path.stem if self.emg_path else ""
-        _direction, _fingers = self._parse_filename_task(_stem)
-        _aux_to_show = self._select_aux_for_task(_aux_cfgs, _direction, _fingers)
-
-        if _aux_to_show:
-            print(
-                f"  [force overlay] direction={_direction!r}  "
-                f"fingers={_fingers}  channels={[a.get('unit') for a in _aux_to_show]}"
-            )
+        _aux_to_show = _filter_aux_for_task(_aux_cfgs, _stem)
 
         import time
 
@@ -1368,9 +1329,7 @@ class DecompositionTab(QWidget):
             visible=False,
         )
 
-        # Pre-fill text boxes with full range as a convenience hint,
-        # but leave _selection_state as "idle" so the user must explicitly
-        # confirm (click or type) before the Confirm & Run button enables.
+        # Pre-fill text boxes with the full range as a convenience hint.
         if self._selection_state == "idle":
             self.sel_start = 0.0
             self.sel_end = total_duration
@@ -1500,23 +1459,19 @@ class DecompositionTab(QWidget):
         if getattr(self, "_awaiting_time_confirmation", False):
             if not self._use_full_file:
                 if (
-                    self._selection_state != "complete"
-                    or self.sel_start is None
-                    or self.sel_end is None
+                    self._selection_state == "complete"
+                    and self.sel_start is not None
+                    and self.sel_end is not None
                 ):
-                    QMessageBox.warning(
-                        self,
-                        "Time Window",
-                        "Please select a time window on the EMG plot\n"
-                        "(enter Start/End times or click directly on the plot).",
+                    self.plateau_coords = np.array(
+                        [
+                            int(self.sel_start * self.sampling_rate),
+                            int(self.sel_end * self.sampling_rate),
+                        ]
                     )
-                    return
-                self.plateau_coords = np.array(
-                    [
-                        int(self.sel_start * self.sampling_rate),
-                        int(self.sel_end * self.sampling_rate),
-                    ]
-                )
+                else:
+                    # No selection made — use the full file as default
+                    self.plateau_coords = np.array([0, self.emg_data.shape[0]])
             self._awaiting_time_confirmation = False
             self._run_current_file()
             return
@@ -1553,10 +1508,20 @@ class DecompositionTab(QWidget):
             f"File {self._file_idx + 1}/{n_total}: {file_path.name}"
         )
 
-        # Load this file's EMG data
+        # Load this file's EMG data — remove any channel filter so that
+        # force/aux "signal" channels (which may sit beyond the EMG grid range)
+        # are included in the array and available for the worker to save.
         try:
+            import copy
             layout = getattr(self.config, "data_layout", None)
-            emg = load_field(file_path, layout, "emg")
+            layout_full = copy.deepcopy(layout) if layout else layout
+            if (
+                layout_full
+                and "fields" in layout_full
+                and "emg" in layout_full["fields"]
+            ):
+                layout_full["fields"]["emg"].pop("channels", None)
+            emg = load_field(file_path, layout_full, "emg")
             self.emg_data = emg
             self.emg_path = file_path
         except Exception as e:
@@ -1597,7 +1562,7 @@ class DecompositionTab(QWidget):
             self.stop_btn.setVisible(False)
             self._awaiting_time_confirmation = True
             self.start_btn.setText("▶  Confirm && Run")
-            self.start_btn.setEnabled(False)
+            self.start_btn.setEnabled(True)
             self.time_sel_widget.setVisible(True)
             self.cancel_setup_btn.setVisible(True)
 
@@ -1640,6 +1605,7 @@ class DecompositionTab(QWidget):
             self.sampling_rate,
             save_path,
             aux_configs=aux_configs,
+            emg_file_path=file_path,
         )
         self.worker.progress.connect(self._update_grid_indicator)
         self.worker.finished.connect(self._on_file_decomposition_finished)
@@ -1918,15 +1884,10 @@ class DecompositionTab(QWidget):
         self.global_widgets["downsample_display"].setEnabled(True)
 
     def _update_confirm_btn_visibility(self):
-        """Enable Confirm & Run button only when start AND end are explicitly set."""
+        """Keep Confirm & Run enabled while awaiting time confirmation."""
         if not getattr(self, "_awaiting_time_confirmation", False):
             return
-        ready = (
-            self._selection_state == "complete"
-            and self.sel_start is not None
-            and self.sel_end is not None
-        )
-        self.start_btn.setEnabled(ready)
+        self.start_btn.setEnabled(True)
         self.start_btn.setVisible(True)
 
     def _cancel_setup(self):
