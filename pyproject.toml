@@ -23,7 +23,7 @@ classifiers = [
 keywords = ["EMG", "decomposition", "GUI", "spike editing", "motor units"]
 
 dependencies = [
-    "swarm-contrastive-decomposition", # SCD package from PyPI
+    "swarm-contrastive-decomposition>=0.1.7", # SCD package from PyPI
     "motor_unit_toolbox @ git+https://github.com/imendezguerra/motor_unit_toolbox.git",
     "numpy>=1.20.0",
     "torch>=1.9.0",

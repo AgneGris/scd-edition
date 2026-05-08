@@ -236,7 +236,7 @@ class DecompositionWorker(QThread):
             high_pass_cutoff=int(params["highpass_hz"]),
             notch_params=self._create_notch_params(params),
             # Algorithm parameters
-            clamp_percentile=params["clamp"],
+            clamp_sources=params["clamp"],
             use_coeff_var_fitness=(params["fitness"] == "CoV"),
             # Additional parameters
             peel_off=params["peel_off"],
