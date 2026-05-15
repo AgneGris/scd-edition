@@ -92,6 +92,18 @@ cd scd-edition
 pip install -e .
 ```
 
+### Using uv 
+For Windows/Linux, CUDA-enabled PyTorch build is recommended. Otherwise use --extra cpu
+```bash
+uv sync --extra cuda
+.venv\Scripts\Activate.ps1
+```
+For macOS 
+```bash
+uv sync --extra cpu
+.venv\Scripts\Activate.ps1
+```
+
 ## Usage 🚀
 
 ### Launch the GUI

@@ -7,6 +7,8 @@ import pickle
 from pathlib import Path
 from typing import Optional
 
+import torch  
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication,
