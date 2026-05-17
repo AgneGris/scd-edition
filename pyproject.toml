@@ -26,7 +26,6 @@ dependencies = [
     "swarm-contrastive-decomposition>=0.1.8",
     "motor_unit_toolbox @ git+https://github.com/imendezguerra/motor_unit_toolbox.git",
     "numpy>=1.20.0",
-    "torch>=1.9.0",
     "scipy>=1.7.0",
     "matplotlib>=3.5.0",
     "pyqtgraph>=0.13.0",
@@ -38,6 +37,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cpu = [
+    "torch>=2.11.0",
+]
+cuda = [
+    "torch>=2.11.0",
+]
 dev = [
     "pytest>=7.0",
     "black>=23.0",
@@ -49,6 +54,33 @@ scd-edition = "scd_app.gui.main_window:main"
 [project.urls]
 Homepage = "https://github.com/AgneGris/scd-edition"
 Repository = "https://github.com/AgneGris/scd-edition"
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cuda" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cuda" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

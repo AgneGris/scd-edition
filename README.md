@@ -60,9 +60,19 @@ cd scd-edition
 pip install -e .
 ```
 
-**Requirements:** Python 3.10 or later. A CUDA-enabled GPU is recommended for fast decomposition but not required — a CPU fallback is available.
+### Using uv 
+For Windows/Linux, CUDA-enabled PyTorch build is recommended. Otherwise use --extra cpu
+```bash
+uv sync --extra cuda
+.venv\Scripts\Activate.ps1
+```
+For macOS 
+```bash
+uv sync --extra cpu
+.venv\Scripts\Activate.ps1
+```
 
----
+## Usage 🚀
 
 ## Launching the app
 
