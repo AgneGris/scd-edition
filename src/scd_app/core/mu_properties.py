@@ -360,17 +360,13 @@ def compute_unit_properties(
 
     props.muap_grid = muap_grid
 
-    # ── Reliability ───────────────────────────────────────────────────────
-    try:
-        dr_arr = np.array([props.discharge_rate_hz])
-        cov_arr = np.array([props.cov_pct])
-        sil_arr = np.array([props.sil])
-        pnr_arr = np.array([props.pnr_db])
-        reliable = tb_props.find_reliable_units(dr_arr, cov_arr, sil_arr, pnr_arr)
-        props.is_reliable = bool(reliable[0])
-    except Exception as e:
-        logger.debug("find_reliable_units failed: %s", e)
-        props.is_reliable = False
+    # ── Reliability: SIL >= 0.8 AND PNR >= 32 dB ─────────────────────────
+    sil = props.sil
+    pnr = props.pnr_db
+    props.is_reliable = (
+        not np.isnan(sil) and sil >= 0.8
+        and not np.isnan(pnr) and pnr >= 32
+    )
 
     return props
 
