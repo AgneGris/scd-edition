@@ -36,7 +36,23 @@ pip install git+https://github.com/AgneGris/scd-edition.git
 
 All dependencies install automatically.
 
-### From source (for development)
+### From source with uv (recommended for development)
+
+[uv](https://github.com/astral-sh/uv) manages the virtual environment and dependencies automatically.
+
+**Windows / Linux — CUDA-enabled (recommended if you have an NVIDIA GPU):**
+```bash
+uv sync --extra cuda
+.venv\Scripts\Activate.ps1
+```
+
+**macOS or CPU-only:**
+```bash
+uv sync --extra cpu
+source .venv/bin/activate
+```
+
+### From source with pip
 
 ```bash
 git clone https://github.com/AgneGris/scd-edition
@@ -44,7 +60,7 @@ cd scd-edition
 pip install -e .
 ```
 
-**Requirements:** Python 3.10 or later, a working CUDA installation is recommended for GPU-accelerated decomposition but not mandatory (CPU fallback is available).
+**Requirements:** Python 3.10 or later. A CUDA-enabled GPU is recommended for fast decomposition but not required — a CPU fallback is available.
 
 ---
 
