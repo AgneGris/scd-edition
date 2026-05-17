@@ -28,6 +28,19 @@ _MIN_RUBBERBAND_PX = 5  # drags smaller than this are ignored in selection-arm m
 _AUX_COLORS_HEX = ["#FFD700", "#C0EFFF", "#FFB347"]
 _AUX_COLORS_RGB = [(255, 215, 0), (192, 239, 255), (255, 179, 71)]
 
+
+def _nice_tick_step(max_val: float) -> float:
+    """Return a round tick interval giving ~4-6 ticks up to max_val."""
+    if max_val <= 10:
+        return 2.0
+    if max_val <= 25:
+        return 5.0
+    if max_val <= 50:
+        return 10.0
+    if max_val <= 100:
+        return 20.0
+    return 50.0
+
 # ── Filename → active-aux helpers ────────────────────────────────────────────
 _FINGER_ABBREV: Dict[str, str] = {
     "T": "Thumb", "I": "Index", "M": "Middle", "R": "Ring", "L": "Little"
@@ -184,6 +197,8 @@ class SourcePlotWidget(pg.PlotWidget):
         self._fsamp = 1.0
         self._edit_mode = EditMode.VIEW
         self._sel_arm = SelectionArm.NONE
+        self._plateau_start: int = 0
+        self._force_offset: int = 0  # sample index where mu.source starts in the recording
 
         self._source: Optional[np.ndarray] = None
         self._timestamps: Optional[np.ndarray] = None
@@ -200,6 +215,7 @@ class SourcePlotWidget(pg.PlotWidget):
 
         self._aux_curves: list = []
         self._aux_raw: list = []
+        self._aux_mvc: list = []
         self._legend = _AuxLegend()
         self._legend.setParentItem(self.plotItem.vb)
 
@@ -247,7 +263,13 @@ class SourcePlotWidget(pg.PlotWidget):
         self._update_spike_markers()
         self._redraw_aux()
 
+    def set_force_offset(self, start_sample: int):
+        """Tell the widget the sample offset of mu.source within the full recording.
+        Used to align the force overlay: 0 in full-source mode, start_sample otherwise."""
+        self._force_offset = start_sample
+
     def set_plateau_region(self, start_sample: int, end_sample: int):
+        self._plateau_start = start_sample
         if self._plateau_region is not None:
             self.removeItem(self._plateau_region)
         t0 = start_sample / self._fsamp
@@ -266,11 +288,14 @@ class SourcePlotWidget(pg.PlotWidget):
             self.removeItem(curve)
         self._aux_curves.clear()
         self._aux_raw.clear()
+        self._aux_mvc.clear()
         initial_states = _default_aux_states(channels, file_stem)
         for i, ch in enumerate(channels):
             raw = np.asarray(ch["data"]).squeeze()
             raw = np.nan_to_num(raw, nan=0.0)
             self._aux_raw.append(raw)
+            mvc = ch.get("mvc")
+            self._aux_mvc.append(float(mvc) if mvc is not None and float(mvc) > 0 else None)
             r, g, b = _AUX_COLORS_RGB[i % len(_AUX_COLORS_RGB)]
             on = initial_states[i] if i < len(initial_states) else True
             alpha = 70 if on else 5
@@ -287,16 +312,59 @@ class SourcePlotWidget(pg.PlotWidget):
             src_max = float(self._source.max())
         else:
             src_min, src_max = 0.0, 1.0
-        src_range = max(src_max * 1.05 - src_min, 1e-9)
+        src_range = max(src_max - src_min, 1e-9)
         n_src = len(self._source) if self._source is not None else 0
-        for raw, curve in zip(self._aux_raw, self._aux_curves):
-            sig = raw - float(raw.min())
-            sig_range = max(float(sig.max()), 1e-9)
-            sig_scaled = (sig / sig_range) * src_range + src_min
-            n_plot = min(len(sig_scaled), n_src) if n_src > 0 else len(sig_scaled)
+
+        # Pass 1: normalise all channels and find the global peak %MVC.
+        has_mvc = False
+        force_peak_pct = 0.0
+        normalised: list = []
+        for raw, mvc in zip(self._aux_raw, self._aux_mvc):
+            baseline = float(np.percentile(raw, 2))
+            sig = raw - baseline
+            if mvc is not None:
+                sig_norm = sig / mvc
+                has_mvc = True
+                peak_pct = float(np.percentile(np.clip(sig_norm, 0, None), 99)) * 100.0
+                force_peak_pct = max(force_peak_pct, peak_pct)
+            else:
+                sig_range = max(float(sig.max()), 1e-9)
+                sig_norm = sig / sig_range
+            normalised.append(sig_norm)
+
+        # Scale so the actual peak fills ~87 % of the source amplitude range,
+        # leaving 15 % headroom; at least 5 % range so the axis is never empty.
+        display_max_pct = max(force_peak_pct * 1.15, 5.0) if has_mvc else 100.0
+        scale_factor = 100.0 / display_max_pct
+
+        # Pass 2: scale to source coordinates and update curves.
+        for sig_norm, curve in zip(normalised, self._aux_curves):
+            sig_scaled = sig_norm * scale_factor * src_range + src_min
+            p_start = min(self._force_offset, len(sig_scaled))
+            p_end = min(p_start + n_src, len(sig_scaled)) if n_src > 0 else len(sig_scaled)
+            sig_slice = sig_scaled[p_start:p_end]
+            n_plot = len(sig_slice)
             step = max(1, n_plot // 2000)
             t = np.arange(0, n_plot, step) / self._fsamp
-            curve.setData(t, sig_scaled[:n_plot:step])
+            curve.setData(t, sig_slice[::step])
+
+        # Right y-axis: auto-ranged % MVC ticks.
+        right = self.getAxis("right")
+        if has_mvc and src_range > 1e-9:
+            self.showAxis("right")
+            tick_step = _nice_tick_step(display_max_pct)
+            tick_vals = np.arange(0, display_max_pct + tick_step * 0.5, tick_step)
+            # p% maps to src_min + (p / display_max_pct) * src_range
+            major = [
+                (src_min + (p / display_max_pct) * src_range, f"{int(p)}%")
+                for p in tick_vals
+            ]
+            right.setTicks([major])
+            right.setLabel("Force (% MVC)", color=_AUX_COLORS_HEX[0])
+            right.setTextPen(pg.mkPen(color=_AUX_COLORS_HEX[0]))
+            right.setPen(pg.mkPen(color=_AUX_COLORS_HEX[0], width=1))
+        else:
+            self.showAxis("right", show=False)
 
     def update_timestamps(self, timestamps: np.ndarray):
         self._timestamps = timestamps

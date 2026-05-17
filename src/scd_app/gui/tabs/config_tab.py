@@ -6,6 +6,8 @@ import copy
 import json
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+import numpy as np
 from scd_app.io.data_loader import load_layout, load_field
 
 from PyQt5.QtWidgets import (
@@ -26,7 +28,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QIntValidator
+from PyQt5.QtGui import QFont, QIntValidator
 
 from scd_app.core.config import (
     ConfigManager,
@@ -126,6 +128,12 @@ class ChannelAllocationBar(QFrame):
                 label_font = QFont(FONT_FAMILY, 8, QFont.Bold)
                 painter.setFont(label_font)
                 painter.drawText(segment_rect, Qt.AlignCenter, name)
+
+
+class _NoScrollSpinBox(QSpinBox):
+    """QSpinBox that ignores touchpad/mouse-wheel scrolling."""
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 class GridCard(QFrame):
@@ -270,12 +278,12 @@ class GridCard(QFrame):
         main_layout.addWidget(self.config_combo, stretch=2)
 
         # Channel range — managed externally by ConfigTab._recalculate_all_channel_ranges
-        self.start_spin = QSpinBox()
+        self.start_spin = _NoScrollSpinBox()
         self.start_spin.setRange(0, 2048)
         self.start_spin.setValue(0)
         main_layout.addWidget(self.start_spin, stretch=1)
 
-        self.end_spin = QSpinBox()
+        self.end_spin = _NoScrollSpinBox()
         self.end_spin.setRange(0, 2048)
         self.end_spin.setValue(64)
         main_layout.addWidget(self.end_spin, stretch=1)
@@ -484,13 +492,13 @@ class AuxChannelCard(QFrame):
         main_layout.addWidget(self.source_combo, stretch=2)
 
         # Channel range (for signal channels)
-        self.start_spin = QSpinBox()
+        self.start_spin = _NoScrollSpinBox()
         self.start_spin.setRange(0, 2048)
         self.start_spin.setValue(0)
         self.start_spin.valueChanged.connect(self.changed.emit)
         main_layout.addWidget(self.start_spin, stretch=1)
 
-        self.end_spin = QSpinBox()
+        self.end_spin = _NoScrollSpinBox()
         self.end_spin.setRange(0, 2048)
         self.end_spin.setValue(0)
         self.end_spin.valueChanged.connect(self.changed.emit)
@@ -501,6 +509,39 @@ class AuxChannelCard(QFrame):
         self.unit_edit.setPlaceholderText("Unit")
         self.unit_edit.textChanged.connect(self.changed.emit)
         main_layout.addWidget(self.unit_edit, stretch=2)
+
+        # MVC value
+        mvc_label = QLabel("MVC:")
+        mvc_label.setFixedWidth(32)
+        mvc_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        mvc_label.setStyleSheet(
+            f"color: {COLORS['text_dim']}; font-size: {FONT_SIZES['small']};"
+        )
+        main_layout.addWidget(mvc_label)
+
+        self.mvc_edit = QLineEdit()
+        self.mvc_edit.setPlaceholderText("e.g. 70")
+        self.mvc_edit.setFixedWidth(72)
+        self.mvc_edit.setToolTip(
+            "Maximum Voluntary Contraction value in mV (same units as the loaded signal).\n"
+            "OTB displays force in Volts — multiply by 1000 to get mV (e.g. 0.049 V → 49).\n"
+            "Used to normalise force as % MVC. Leave blank to use relative normalisation."
+        )
+        self.mvc_edit.textChanged.connect(self.changed.emit)
+        main_layout.addWidget(self.mvc_edit)
+
+        mvc_browse = QPushButton("...")
+        mvc_browse.setFixedSize(24, 24)
+        mvc_browse.setToolTip("Load MVC: opens a data file and uses its maximum as the MVC value")
+        mvc_browse.clicked.connect(self._browse_mvc_file)
+        mvc_browse.setStyleSheet(
+            f"QPushButton {{ background: {COLORS['background_input']}; "
+            f"color: {COLORS['text_muted']}; border: 1px solid {COLORS['border']}; "
+            f"border-radius: 3px; font-size: {FONT_SIZES['small']}; }}"
+            f"QPushButton:hover {{ background: {COLORS['background_hover']}; "
+            f"color: {COLORS['foreground']}; }}"
+        )
+        main_layout.addWidget(mvc_browse)
 
         # Status
         self.status_label = QLabel()
@@ -551,6 +592,31 @@ class AuxChannelCard(QFrame):
         self.end_spin.setVisible(is_signal)
         self.changed.emit()
 
+    def _browse_mvc_file(self):
+        """Open a data file and use its maximum value as the MVC."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load MVC Signal",
+            "",
+            "Data Files (*.npy *.mat *.csv *.txt);;All Files (*.*)",
+        )
+        if not path:
+            return
+        try:
+            p = Path(path)
+            if p.suffix == ".npy":
+                data = np.load(path)
+            elif p.suffix == ".mat":
+                import scipy.io
+                mat = scipy.io.loadmat(path)
+                data = next(v for k, v in mat.items() if not k.startswith("_"))
+            else:
+                data = np.loadtxt(path)
+            mvc_val = float(np.asarray(data).flatten().max())
+            self.mvc_edit.setText(f"{mvc_val:g}")
+        except Exception as e:
+            QMessageBox.warning(self, "Load Failed", f"Could not load MVC from file:\n{e}")
+
     def update_index(self, index: int):
         self.index = index
         if self.name_edit.text().startswith("Aux_"):
@@ -573,7 +639,7 @@ class AuxChannelCard(QFrame):
         return self.start_spin.value(), self.end_spin.value()
 
     def get_data(self) -> dict:
-        return {
+        d = {
             "index": self.index,
             "name": self.name_edit.text(),
             "type": self.type_combo.currentText().lower(),
@@ -582,6 +648,13 @@ class AuxChannelCard(QFrame):
             "end_chan": self.end_spin.value(),
             "unit": self.unit_edit.text(),
         }
+        mvc_text = self.mvc_edit.text().strip()
+        if mvc_text:
+            try:
+                d["mvc"] = float(mvc_text)
+            except ValueError:
+                pass
+        return d
 
     def set_values(
         self,
@@ -591,6 +664,7 @@ class AuxChannelCard(QFrame):
         start: int = 0,
         end: int = 0,
         unit: str = "",
+        mvc: Optional[float] = None,
     ):
         self.name_edit.setText(name)
         type_idx = self.type_combo.findText(aux_type, Qt.MatchFixedString)
@@ -600,6 +674,10 @@ class AuxChannelCard(QFrame):
         self.start_spin.setValue(start)
         self.end_spin.setValue(end)
         self.unit_edit.setText(unit)
+        if mvc is not None:
+            self.mvc_edit.setText(f"{mvc:g}")
+        else:
+            self.mvc_edit.clear()
 
 
 class ConfigTab(QWidget):
@@ -1345,10 +1423,13 @@ class ConfigTab(QWidget):
         # Defaults to True for configs saved before this field existed
         self.skip_quaternions_cb.setChecked(cfg.get("skip_quaternions", True))
 
-        # File path (don't auto-load, just set the path)
+        # File path: only apply if no file has been selected yet.
+        # If the user already loaded a file, keep it — the config's saved path
+        # is just a reference from when the config was created.
         file_path = cfg.get("file_path")
-        if file_path and Path(file_path).exists():
+        if file_path and Path(file_path).exists() and self.emg_path is None:
             self.emg_path = Path(file_path)
+            self.emg_paths = [self.emg_path]
             self.path_edit.setText(file_path)
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
@@ -1405,6 +1486,7 @@ class ConfigTab(QWidget):
                 start=a.get("start_chan", 0),
                 end=a.get("end_chan", 0),
                 unit=a.get("unit", ""),
+                mvc=a.get("mvc"),
             )
 
         self.output_dir_edit.setText(self.output_dir_edit.text())
@@ -1423,8 +1505,9 @@ class ConfigTab(QWidget):
                 json.dump(cfg, f, indent=2)
 
     def _load_config(self):
+        start_dir = str(self.emg_path.parent) if self.emg_path else str(Path.cwd())
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load Channel Configuration", str(Path.cwd()), "JSON Files (*.json)"
+            self, "Load Channel Configuration", start_dir, "JSON Files (*.json)"
         )
         if path:
             with open(path, "r") as f:
