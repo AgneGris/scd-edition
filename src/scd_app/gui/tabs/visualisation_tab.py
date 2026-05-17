@@ -10,6 +10,7 @@ import re
 from typing import Dict, List, Optional, Set
 
 import numpy as np
+import cmcrameri.cm as cmc
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtWidgets import (
     QWidget,
@@ -75,20 +76,38 @@ def _default_aux_states(channels: list, file_stem: str) -> List[bool]:
 _AUX_COLORS = [(255, 215, 0), (192, 239, 255), (255, 179, 71)]
 _AUX_COLORS_HEX = ["#FFD700", "#C0EFFF", "#FFB347"]
 
+
+def _nice_tick_step(max_val: float) -> float:
+    """Return a round tick interval that gives ~4-6 ticks up to max_val."""
+    if max_val <= 10:
+        return 2.0
+    if max_val <= 25:
+        return 5.0
+    if max_val <= 50:
+        return 10.0
+    if max_val <= 100:
+        return 20.0
+    return 50.0
+
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 
 
-def _blue_palette(n: int) -> List[tuple]:
-    """Generate n colours linearly interpolated from #63B3ED to #003E74."""
+def _batlow_palette(n: int) -> List[tuple]:
+    """Generate n colours from Crameri's *batlow* scientific colormap.
+
+    Samples are drawn from the middle 80 % of the map (0.1–0.9) to avoid the
+    very dark and very bright extremes, keeping all traces legible on the dark
+    background.  batlow is perceptually uniform and colorblind-friendly.
+    """
     if n == 0:
         return []
     if n == 1:
-        return [(0x63, 0xB3, 0xED)]
-    light = np.array([0x63, 0xB3, 0xED], dtype=float)
-    dark = np.array([0x00, 0x3E, 0x74], dtype=float)
+        rgba = cmc.batlow(0.5)
+        return [(int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255))]
+    samples = np.linspace(0.1, 0.9, n)
     return [
-        tuple(int(v) for v in light * (1 - i / (n - 1)) + dark * (i / (n - 1)))
-        for i in range(n)
+        (int(r * 255), int(g * 255), int(b * 255))
+        for r, g, b, *_ in cmc.batlow(samples)
     ]
 
 
@@ -256,7 +275,24 @@ class VisualisationTab(QWidget):
         self._inner_tabs.addTab(self._idr_plot, "IDR")
         self._inner_tabs.addTab(self._cst_plot, "CST")
 
-        # One floating AUX legend per plot; all share _aux_on_states
+        # Quality tab: SIL and PNR bar charts side by side
+        quality_widget = QWidget()
+        quality_layout = QHBoxLayout(quality_widget)
+        quality_layout.setContentsMargins(0, 0, 0, 0)
+        quality_layout.setSpacing(4)
+        self._sil_plot = self._make_plot_widget("SIL", "Motor Unit")
+        self._pnr_plot = self._make_plot_widget("PNR (dB)", "Motor Unit")
+        quality_layout.addWidget(self._sil_plot)
+        quality_layout.addWidget(self._pnr_plot)
+        self._inner_tabs.addTab(quality_widget, "Quality")
+
+        # Gain tab: instantaneous DR vs normalised force per MU
+        self._gain_plot = self._make_plot_widget("Mean DR (pps)", "Recruitment Force (% MVC)")
+        self._inner_tabs.addTab(self._gain_plot, "DR vs Force")
+
+        # Onion-skin tab: recruitment time vs mean DR
+
+        # AUX floating legends on the three time-domain plots only
         for pw in (self._raster_plot, self._idr_plot, self._cst_plot):
             leg = _VisAuxLegend(self._aux_on_states, self._on_aux_toggled)
             leg.setParentItem(pw.plotItem.vb)
@@ -432,7 +468,7 @@ class VisualisationTab(QWidget):
         self._sidebar_rows.clear()
         self._sidebar_port_rows.clear()
 
-        default_color = (0x63, 0xB3, 0xED)
+        default_color = _batlow_palette(1)[0]
         insert_pos = 0
 
         for port_name, mus in self._ports.items():
@@ -461,12 +497,12 @@ class VisualisationTab(QWidget):
                 insert_pos += 1
 
     def _update_sidebar_colours(self, sorted_active: List[tuple]):
-        palette = _blue_palette(len(sorted_active))
+        palette = _batlow_palette(len(sorted_active))
         color_map: Dict[tuple, tuple] = {}
         for rank, (port_name, mu) in enumerate(sorted_active):
             color_map[(port_name, mu.id)] = palette[rank]
 
-        default_color = (0x63, 0xB3, 0xED)
+        default_color = _batlow_palette(1)[0]
         for key, btn in self._sidebar_rows.items():
             port_name, mu_id = key
             active = key not in self._disabled_mus
@@ -508,6 +544,27 @@ class VisualisationTab(QWidget):
         self._file_stem = d.get("file_stem", "")
         self._rebuild_sidebar_rows()
         self._rebuild_aux_controls()
+        self._print_force_ranges()
+
+    def _print_force_ranges(self):
+        """Print force channel amplitude ranges to console for MVC calibration."""
+        force_chs = [ch for ch in self._aux_channels if ch.get("type") == "force"]
+        if not force_chs:
+            return
+        print("\n── Force channel ranges (in mV as stored in file) ──")
+        for ch in force_chs:
+            raw = np.asarray(ch.get("data", [])).squeeze()
+            if raw.ndim != 1 or raw.size == 0:
+                continue
+            raw = raw.astype(float)
+            baseline = float(np.percentile(raw, 2))
+            peak = float(raw.max())
+            mvc_cfg = ch.get("mvc")
+            mvc_str = f"  config MVC={mvc_cfg}" if mvc_cfg is not None else "  (no MVC set)"
+            label = ch.get("unit") or ch.get("name", "?")
+            print(f"  {label:20s}  peak={peak:.5f} mV  baseline≈{baseline:.5f} mV  net={peak-baseline:.5f} mV{mvc_str}")
+        print("  → Use 'net' value as MVC in the config (these are mV from the Quattrocento ADC conversion)")
+        print()
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -538,6 +595,8 @@ class VisualisationTab(QWidget):
             idr = get_inst_discharge_rate(spike_matrix, int(display_fs))
         self._render_idr(sorted_active, idr, t_axis)
         self._render_cst(idr, t_axis)
+        self._render_quality(sorted_active)
+        self._render_gain(sorted_active)
         self._update_sidebar_colours(sorted_active)
 
     # Maximum sampling rate used internally for IDR/CST computation.
@@ -586,7 +645,7 @@ class VisualisationTab(QWidget):
         if not sorted_mus:
             return
 
-        palette = _blue_palette(len(sorted_mus))
+        palette = _batlow_palette(len(sorted_mus))
         fsamp = self._fsamp
         ticks = []
         for rank, (port_name, mu) in enumerate(sorted_mus):
@@ -637,7 +696,7 @@ class VisualisationTab(QWidget):
         if idr is None or t_axis is None or not sorted_mus:
             return
 
-        palette = _blue_palette(len(sorted_mus))
+        palette = _batlow_palette(len(sorted_mus))
         y_max = 0.0
         for rank, (port_name, mu) in enumerate(sorted_mus):
             dr_trace = idr[:, rank]
@@ -683,8 +742,153 @@ class VisualisationTab(QWidget):
 
         self._draw_aux_overlay(pw, y_min=0.0, y_max=y_max)
 
+    def _show_no_data(self, pw: pg.PlotWidget, msg: str):
+        pw.clear()
+        pw.setXRange(0, 1)
+        pw.setYRange(0, 1)
+        pw.getAxis("bottom").setTicks([[]])
+        pw.getAxis("left").setTicks([[]])
+        text = pg.TextItem(msg, color=COLORS.get("text_muted", "#888888"), anchor=(0.5, 0.5))
+        text.setPos(0.5, 0.5)
+        pw.addItem(text)
+
+    def _render_quality(self, sorted_mus: List[tuple]):
+        """SIL and PNR bar charts with reliability threshold lines."""
+        n = len(sorted_mus)
+        palette = _batlow_palette(n)
+        ticks = [(i, f"MU {mu.id}") for i, (_, mu) in enumerate(sorted_mus)]
+        xs = np.arange(n, dtype=float)
+
+        for pw, attr, threshold, y_top_min in (
+            (self._sil_plot,  "sil",    0.8,  1.05),
+            (self._pnr_plot,  "pnr_db", 32.0, 40.0),
+        ):
+            pw.clear()
+            if n == 0:
+                continue
+
+            vals = np.array([
+                getattr(mu.props, attr)
+                if (mu.props is not None and not np.isnan(getattr(mu.props, attr)))
+                else 0.0
+                for _, mu in sorted_mus
+            ])
+            brushes = [pg.mkBrush(r, g, b, 200) for r, g, b in palette]
+            pw.addItem(pg.BarGraphItem(x=xs, height=vals, width=0.7, brushes=brushes))
+
+            pw.addItem(pg.InfiniteLine(
+                pos=threshold, angle=0,
+                pen=pg.mkPen(color="#ff6b6b", width=1.5, style=Qt.DashLine),
+            ))
+            pw.getAxis("bottom").setTicks([ticks])
+            pw.setXRange(-0.5, n - 0.5, padding=0)
+            y_top = max(float(vals.max()) * 1.15, y_top_min) if vals.max() > 0 else y_top_min
+            pw.setYRange(0, y_top)
+
+    def _render_gain(self, sorted_mus: List[tuple]):
+        """Mean DR vs recruitment-threshold force — one point per MU."""
+        pw = self._gain_plot
+        pw.clear()
+
+        if not sorted_mus:
+            return
+
+        # Use first active AUX channel as force signal
+        force_raw = None
+        force_mvc = None
+        for i, ch in enumerate(self._aux_channels):
+            if i < len(self._aux_on_states) and self._aux_on_states[i]:
+                raw = np.asarray(ch.get("data", [])).squeeze()
+                if raw.ndim == 1 and raw.size > 0:
+                    force_raw = raw.astype(float)
+                    force_mvc = ch.get("mvc")
+                    break
+
+        if force_raw is None:
+            self._show_no_data(pw, "No force channel — enable an AUX channel to show this plot")
+            return
+
+        f_baseline = float(np.percentile(force_raw, 2))
+        if force_mvc is not None and float(force_mvc) > 0:
+            force_norm = (force_raw - f_baseline) / float(force_mvc) * 100.0
+        else:
+            f_range = max(float(force_raw.max()) - f_baseline, 1e-9)
+            force_norm = (force_raw - f_baseline) / f_range * 100.0
+
+        palette = _batlow_palette(len(sorted_mus))
+        spots = []
+        labels = []
+
+        for rank, (port_name, mu) in enumerate(sorted_mus):
+            ts = mu.timestamps.copy()
+            if self._end_sample > self._start_sample:
+                ts = ts[(ts >= self._start_sample) & (ts < self._end_sample)]
+            if len(ts) < 2:
+                continue
+
+            # Recruitment force: force at the first spike
+            recruit_sample = int(np.clip(ts[0], 0, len(force_norm) - 1))
+            recruit_force = float(force_norm[recruit_sample])
+
+            # Mean DR from mean ISI over the plateau window
+            isis_s = np.diff(ts.astype(float)) / self._fsamp
+            mean_dr = float(1.0 / np.mean(np.clip(isis_s, 0.01, None)))
+
+            r, g, b = palette[rank]
+            spots.append({
+                "pos": (recruit_force, mean_dr),
+                "brush": pg.mkBrush(r, g, b, 220),
+                "pen": pg.mkPen("w", width=1),
+                "size": 10,
+                "symbol": "o",
+            })
+            labels.append((recruit_force, mean_dr, f"MU {mu.id}", (r, g, b)))
+
+        if not spots:
+            self._show_no_data(pw, "Not enough spikes per MU in the plateau window")
+            return
+
+        scatter = pg.ScatterPlotItem()
+        scatter.addPoints(spots)
+        pw.addItem(scatter)
+
+        for x, y, label, (r, g, b) in labels:
+            text = pg.TextItem(label, color=(r, g, b), anchor=(0.5, 1.3))
+            text.setPos(x, y)
+            pw.addItem(text)
+
+        xs = np.array([s["pos"][0] for s in spots])
+        ys = np.array([s["pos"][1] for s in spots])
+
+        # Population regression line if we have enough MUs
+        if len(spots) >= 3:
+            coeffs = np.polyfit(xs, ys, 1)
+            x_fit = np.array([float(xs.min()), float(xs.max())])
+            pw.plot(x_fit, np.polyval(coeffs, x_fit),
+                    pen=pg.mkPen(color=COLORS["text_muted"], width=1.5,
+                                 style=Qt.DashLine))
+
+        # Set y-range with 10 % headroom around the IQR so one outlier
+        # doesn't compress everything else into a sliver
+        y_pad = max(float(np.percentile(ys, 75) - np.percentile(ys, 25)), 1.0)
+        pw.setYRange(float(ys.min()) - y_pad * 0.5,
+                     float(ys.max()) + y_pad * 1.5)
+
     def _draw_aux_overlay(self, pw: pg.PlotWidget, y_min: float, y_max: float):
-        y_range = max(y_max * 1.05 - y_min, 1e-9)
+        """Overlay AUX force channels on *pw*.
+
+        The full signal (not just the decomposed window) is shown so resting
+        baseline and ramp are visible even when decomposition covers only part
+        of the recording.  The right y-axis is auto-ranged to the actual peak
+        %MVC rather than always showing 0–100 %.
+        """
+        y_range = max(y_max - y_min, 1e-9)
+
+        # ── Pass 1: normalise every channel, find global peak %MVC ───────────
+        has_mvc = False
+        force_peak_pct = 0.0
+        prepared: list = []
+
         for i, ch in enumerate(self._aux_channels):
             if i >= len(self._aux_on_states) or not self._aux_on_states[i]:
                 continue
@@ -692,20 +896,57 @@ class VisualisationTab(QWidget):
             if raw.size == 0:
                 continue
             raw = np.nan_to_num(raw.astype(float), nan=0.0)
-            sig = raw - float(raw.min())
-            sig_range = max(float(sig.max()), 1e-9)
-            sig_scaled = (sig / sig_range) * y_range + y_min
+            n_full = len(raw)
 
-            n = len(sig_scaled)
-            step = max(1, n // 4000)
-            t_aux = np.arange(0, n, step) / self._fsamp
+            baseline = float(np.percentile(raw, 2))
+            sig = raw - baseline
+            mvc = ch.get("mvc")
+            if mvc is not None and float(mvc) > 0:
+                sig_norm = sig / float(mvc)
+                has_mvc = True
+                # 99th-percentile to be robust against single-sample artefacts
+                peak_pct = float(np.percentile(np.clip(sig_norm, 0, None), 99)) * 100.0
+                force_peak_pct = max(force_peak_pct, peak_pct)
+            else:
+                sig_range = max(float(sig.max()), 1e-9)
+                sig_norm = sig / sig_range
 
+            prepared.append((i, n_full, sig_norm))
+
+        # Display ceiling: 15 % headroom above the actual peak, at least 5 %
+        display_max_pct = max(force_peak_pct * 1.15, 5.0) if has_mvc else 100.0
+        # Maps display_max_pct → full plot height; actual peak sits at ~87 %
+        scale_factor = 100.0 / display_max_pct
+
+        # ── Pass 2: scale to plot coordinates and draw ───────────────────────
+        for i, n_full, sig_norm in prepared:
+            sig_scaled = sig_norm * scale_factor * y_range + y_min
+            step = max(1, n_full // 4000)
+            t_aux = np.arange(0, n_full, step) / self._fsamp  # t=0 → start of file
             r, g, b = _AUX_COLORS[i % len(_AUX_COLORS)]
             pw.plot(
                 t_aux,
-                sig_scaled[:n:step],
+                sig_scaled[::step],
                 pen=pg.mkPen(color=(r, g, b, 100), width=2),
             )
+
+        # ── Right y-axis: auto-ranged % MVC ticks ────────────────────────────
+        right = pw.getAxis("right")
+        if has_mvc:
+            pw.showAxis("right")
+            tick_step = _nice_tick_step(display_max_pct)
+            tick_vals = np.arange(0, display_max_pct + tick_step * 0.5, tick_step)
+            # p % maps to y_min + (p / display_max_pct) * y_range
+            major = [
+                (y_min + (p / display_max_pct) * y_range, f"{int(p)}%")
+                for p in tick_vals
+            ]
+            right.setTicks([major])
+            right.setLabel("Force (% MVC)", color=_AUX_COLORS_HEX[0])
+            right.setTextPen(pg.mkPen(color=_AUX_COLORS_HEX[0]))
+            right.setPen(pg.mkPen(color=_AUX_COLORS_HEX[0], width=1))
+        else:
+            pw.showAxis("right", show=False)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 

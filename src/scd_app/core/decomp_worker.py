@@ -243,7 +243,7 @@ class DecompositionWorker(QThread):
             peel_off_window_size_ms=params["muap_window_ms"],
             peel_off_repeats=params.get("peel_off_repeats", True),
             swarm=params["swarm"],
-            fixed_exponent=3,
+            fixed_exponent=params.get("fixed_exponent", 2),
             bad_channels=None,
             remove_bad_fr=False,
         )
@@ -349,18 +349,9 @@ class DecompositionWorker(QThread):
                     )
                     continue
                 sig = full_np[s:e, :].squeeze()  # (samples,) for single-ch aux
-                aux_channels_saved.append(
-                    {
-                        "data": sig,
-                        "meta": {
-                            k: v
-                            for k, v in a.items()
-                            if k not in ("start_chan", "end_chan")
-                        },
-                        "start_chan": s,
-                        "end_chan": e,
-                    }
-                )
+                entry = {k: v for k, v in a.items()}  # flat copy of full aux config
+                entry["data"] = sig
+                aux_channels_saved.append(entry)
             print(f"  [aux] Saved {len(aux_channels_saved)} aux channel(s).")
 
         # 5. Build save dict
@@ -448,16 +439,9 @@ class DecompositionWorker(QThread):
             return None
 
         sig = aux_np[s:e, :].squeeze()
-        return {
-            "data": sig,
-            "meta": {
-                k: v
-                for k, v in aux_config.items()
-                if k not in ("start_chan", "end_chan")
-            },
-            "start_chan": s,
-            "end_chan": e,
-        }
+        entry = {k: v for k, v in aux_config.items()}  # flat copy
+        entry["data"] = sig
+        return entry
 
     def stop(self):
         self._is_running = False

@@ -7,7 +7,7 @@ is shown as a shaded band on the source plot.
 """
 
 import logging
-from typing import Optional, List, Dict, Set, Tuple
+from typing import Optional, List, Dict, Tuple
 from pathlib import Path
 import pickle
 import traceback
@@ -23,7 +23,6 @@ from PyQt5.QtWidgets import (
     QSplitter,
     QToolBar,
     QAction,
-    QActionGroup,
     QComboBox,
     QLabel,
     QPushButton,
@@ -846,33 +845,6 @@ class EditionTab(QWidget):
         self.action_reset.triggered.connect(self._reset_view)
         tb.addAction(self.action_reset)
 
-        # ── Edit mode (point-click) ───────────────────────────────────
-        tb.addSeparator()
-        tb.addWidget(QLabel("  Mode: "))
-        self.mode_group = QActionGroup(self)
-
-        self.action_view = QAction("👁 View", self)
-        self.action_view.setCheckable(True)
-        self.action_view.setChecked(True)
-        self.action_view.setShortcut(QKeySequence("V"))
-        self.action_view.triggered.connect(lambda: self._set_mode(EditMode.VIEW))
-        self.mode_group.addAction(self.action_view)
-        tb.addAction(self.action_view)
-
-        self.action_add = QAction("➕ Add", self)
-        self.action_add.setCheckable(True)
-        self.action_add.setShortcut(QKeySequence("A"))
-        self.action_add.triggered.connect(lambda: self._set_mode(EditMode.ADD))
-        self.mode_group.addAction(self.action_add)
-        tb.addAction(self.action_add)
-
-        self.action_delete = QAction("➖ Delete", self)
-        self.action_delete.setCheckable(True)
-        self.action_delete.setShortcut(QKeySequence("D"))
-        self.action_delete.triggered.connect(lambda: self._set_mode(EditMode.DELETE))
-        self.mode_group.addAction(self.action_delete)
-        tb.addAction(self.action_delete)
-
         # ── Rubberband-drag selection toggles ─────────────────────────
         tb.addSeparator()
         tb.addWidget(QLabel("  Select & "))
@@ -931,6 +903,13 @@ class EditionTab(QWidget):
         self.btn_recalc_filter.setStyleSheet(self._warn_toolbar_btn_style())
         tb.addWidget(self.btn_recalc_filter)
 
+        self.btn_flag_delete = QPushButton("⚑ Flag Unit")
+        self.btn_flag_delete.setToolTip("Toggle deletion flag for the current MU [X]")
+        self.btn_flag_delete.clicked.connect(self._toggle_flag_delete)
+        self.btn_flag_delete.setEnabled(False)
+        self.btn_flag_delete.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_flag_delete)
+
         self.btn_remove_outliers = QPushButton("⚡ Remove Outliers")
         self.btn_remove_outliers.setShortcut(QKeySequence("O"))
         self.btn_remove_outliers.setToolTip(
@@ -941,13 +920,6 @@ class EditionTab(QWidget):
         self.btn_remove_outliers.setEnabled(False)
         self.btn_remove_outliers.setStyleSheet(self._warn_toolbar_btn_style())
         tb.addWidget(self.btn_remove_outliers)
-
-        self.btn_flag_delete = QPushButton("🗑 Flag to Delete")
-        self.btn_flag_delete.setToolTip("Toggle deletion flag for the current MU [X]")
-        self.btn_flag_delete.clicked.connect(self._toggle_flag_delete)
-        self.btn_flag_delete.setEnabled(False)
-        self.btn_flag_delete.setStyleSheet(self._warn_toolbar_btn_style())
-        tb.addWidget(self.btn_flag_delete)
 
         self.btn_auto_edit_mu = QPushButton("⚙ Auto-Edit MU")
         self.btn_auto_edit_mu.setShortcut(QKeySequence("E"))
@@ -1032,18 +1004,7 @@ class EditionTab(QWidget):
             QLabel("SESSION", styleSheet=get_section_header_style("warning", margin_top=0))
         )
 
-        self.btn_auto_flag = QPushButton("⚠ Auto-Flag Unreliable")
-        self.btn_auto_flag.setIcon(self._make_warning_icon())
-        self.btn_auto_flag.setStyleSheet(base_btn_style)
-        self.btn_auto_flag.setToolTip(
-            "Flag all MUs with SIL < 0.9 across all ports for deletion.\n"
-            "Units with SIL ≥ 0.9 are left for manual review."
-        )
-        self.btn_auto_flag.clicked.connect(self._auto_flag_unreliable)
-        self.btn_auto_flag.setEnabled(False)
-        lay.addWidget(self.btn_auto_flag)
-
-        self.btn_flag_within_dups = QPushButton("⧉ Within-Port Dups")
+        self.btn_flag_within_dups = QPushButton("⧉ Within-Port Duplicates")
         self.btn_flag_within_dups.setStyleSheet(base_btn_style)
         self.btn_flag_within_dups.setToolTip(
             "Flag lower-quality duplicate MUs within each grid/probe for deletion.\n"
@@ -1053,7 +1014,7 @@ class EditionTab(QWidget):
         self.btn_flag_within_dups.setEnabled(False)
         lay.addWidget(self.btn_flag_within_dups)
 
-        self.btn_flag_cross_dups = QPushButton("⧉ Cross-Port Dups")
+        self.btn_flag_cross_dups = QPushButton("⧉ Cross-Port Duplicates")
         self.btn_flag_cross_dups.setStyleSheet(base_btn_style)
         self.btn_flag_cross_dups.setToolTip(
             "Flag lower-quality duplicate MUs across different grids/probes for deletion.\n"
@@ -1386,6 +1347,21 @@ class EditionTab(QWidget):
         self._rejected_ch_positions.clear()
         self._undo_stack.clear()
         self._redo_stack.clear()
+        # Normalise aux channel structure: older saves nest metadata under "meta";
+        # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
+        for ch in decomp_data.get("aux_channels", []):
+            meta = ch.pop("meta", None)
+            if isinstance(meta, dict):
+                for k, v in meta.items():
+                    ch.setdefault(k, v)
+            # Old files stored mvc in Volts (OTB display units); signal is in mV.
+            # Any legitimate force MVC will be ≥ 1 mV, so mvc < 1.0 means it's in V.
+            mvc = ch.get("mvc")
+            if mvc is not None and 0 < float(mvc) < 1.0:
+                corrected = float(mvc) * 1000.0
+                print(f"  [load] mvc unit fix: {ch.get('unit','?')} {mvc} V → {corrected} mV")
+                ch["mvc"] = corrected
+
         self._original_decomp_data = decomp_data
 
         fsamp = decomp_data.get("sampling_rate", decomp_data.get("fsamp", self._fsamp))
@@ -1476,7 +1452,6 @@ class EditionTab(QWidget):
             self.btn_auto_edit_mu,
             self.btn_sel_add,
             self.btn_sel_delete,
-            self.btn_auto_flag,
             self.btn_flag_within_dups,
             self.btn_flag_cross_dups,
         ):
@@ -1845,12 +1820,7 @@ class EditionTab(QWidget):
     def _set_mode(self, mode: EditMode):
         self._edit_mode = mode
         self.source_plot.set_edit_mode(mode)
-        {
-            EditMode.VIEW: self.action_view,
-            EditMode.ADD: self.action_add,
-            EditMode.DELETE: self.action_delete,
-        }[mode].setChecked(True)
-        # Entering any point-click mode disarms the rubberband selection
+        # Entering view mode disarms the rubberband selection
         self._disarm_selection()
         self._update_status()
 
@@ -2143,7 +2113,7 @@ class EditionTab(QWidget):
         mu = self._current_mu()
         if mu:
             self.btn_flag_delete.setText(
-                "Unflag" if mu.flagged_duplicate else "🗑 Flag to Delete"
+                "Unflag Unit" if mu.flagged_duplicate else "⚑ Flag Unit"
             )
         self._update_plots(reset_view=True)
         self._update_status()
@@ -2625,6 +2595,9 @@ class EditionTab(QWidget):
             had_custom_range = not vb.autoRangeEnabled()[0]
 
         self.source_plot.set_data(mu.source, mu.timestamps)
+        # In full-source mode mu.source covers the whole recording (offset = 0);
+        # otherwise it covers only the plateau window (offset = _start_sample).
+        self.source_plot.set_force_offset(0 if self._full_source_mode else self._start_sample)
         if self._full_source_mode:
             self.source_plot.set_plateau_region(self._start_sample, self._end_sample)
         self.fr_plot.set_data(mu.timestamps)
@@ -2650,6 +2623,7 @@ class EditionTab(QWidget):
             if source_changed:
                 # Source signal changed (e.g. filter recalc) — redraw curve now
                 self.source_plot.set_data(mu.source, mu.timestamps)
+                self.source_plot.set_force_offset(0 if self._full_source_mode else self._start_sample)
                 if self._full_source_mode:
                     self.source_plot.set_plateau_region(self._start_sample, self._end_sample)
             self.fr_plot.set_data(mu.timestamps)
@@ -2719,13 +2693,6 @@ class EditionTab(QWidget):
             parts.append("⬜ Drag to ADD  (armed)")
         elif self._sel_arm == SelectionArm.DELETE:
             parts.append("⬜ Drag to DELETE  (armed)")
-        else:
-            hints = {
-                EditMode.VIEW: "View [V]",
-                EditMode.ADD: "Add [A]  — click",
-                EditMode.DELETE: "Delete [D]  — click",
-            }
-            parts.append(hints[self._edit_mode])
 
         if self._undo_stack:
             parts.append(f"Undo: {len(self._undo_stack)}")
