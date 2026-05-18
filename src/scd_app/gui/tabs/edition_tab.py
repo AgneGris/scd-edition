@@ -1110,6 +1110,7 @@ class EditionTab(QWidget):
         QShortcut(QKeySequence("F"), self, self.btn_recalc_filter.click)
         QShortcut(QKeySequence("O"), self, self.btn_remove_outliers.click)
         QShortcut(QKeySequence("E"), self, self.btn_auto_edit_mu.click)
+        print("[DEBUG] shortcuts E/F/O registered as QShortcut")
 
     # ------------------------------------------------------------------
     # Sampling rate
