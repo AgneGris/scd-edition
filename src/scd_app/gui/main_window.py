@@ -244,10 +244,6 @@ def main():
     # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
     args, qt_argv = parser.parse_known_args()
 
-    import scd_app.gui.tabs.edition_tab as _et
-    print(f"[DEBUG] edition_tab loaded from: {_et.__file__}")
-    print(f"[DEBUG] AA_EnableHighDpiScaling: active")
-
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication([sys.argv[0]] + qt_argv)
