@@ -827,6 +827,9 @@ class EditionTab(QWidget):
                 background-color: {COLORS.get('info','#89b4fa')}30;
                 border-color: {COLORS.get('info','#89b4fa')};
             }}
+            QToolButton:disabled {{
+                color: {COLORS.get('text_muted','#5a6169')};
+            }}
         """
         )
 
