@@ -827,9 +827,6 @@ class EditionTab(QWidget):
                 background-color: {COLORS.get('info','#89b4fa')}30;
                 border-color: {COLORS.get('info','#89b4fa')};
             }}
-            QToolButton:disabled {{
-                color: {COLORS.get('text_muted','#5a6169')};
-            }}
         """
         )
 
@@ -896,13 +893,14 @@ class EditionTab(QWidget):
         # ── Per-MU editing ────────────────────────────────────────────
         tb.addSeparator()
 
-        self.action_recalc_filter = QAction("⟳ Recalc Filter", self)
-        self.action_recalc_filter.setToolTip(
+        self.btn_recalc_filter = QPushButton("⟳ Recalc Filter")
+        self.btn_recalc_filter.setToolTip(
             "Replay peel-off and recompute filter + source + timestamps [F]"
         )
-        self.action_recalc_filter.triggered.connect(self._recalculate_filter)
-        self.action_recalc_filter.setEnabled(False)
-        tb.addAction(self.action_recalc_filter)
+        self.btn_recalc_filter.clicked.connect(self._recalculate_filter)
+        self.btn_recalc_filter.setEnabled(False)
+        self.btn_recalc_filter.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_recalc_filter)
 
         self.btn_flag_delete = QPushButton("⚑ Flag Unit")
         self.btn_flag_delete.setToolTip("Toggle deletion flag for the current MU [X]")
@@ -911,23 +909,25 @@ class EditionTab(QWidget):
         self.btn_flag_delete.setStyleSheet(self._warn_toolbar_btn_style())
         tb.addWidget(self.btn_flag_delete)
 
-        self.action_remove_outliers = QAction("⚡ Remove Outliers", self)
-        self.action_remove_outliers.setToolTip(
+        self.btn_remove_outliers = QPushButton("⚡ Remove Outliers")
+        self.btn_remove_outliers.setToolTip(
             "Remove spikes causing outlier instantaneous firing rate [O]\n"
             "Uses Tukey fence (Q75 + 1.5×IQR) on the IFR distribution."
         )
-        self.action_remove_outliers.triggered.connect(self._remove_outliers)
-        self.action_remove_outliers.setEnabled(False)
-        tb.addAction(self.action_remove_outliers)
+        self.btn_remove_outliers.clicked.connect(self._remove_outliers)
+        self.btn_remove_outliers.setEnabled(False)
+        self.btn_remove_outliers.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_remove_outliers)
 
-        self.action_auto_edit_mu = QAction("⚙ Auto-Edit MU", self)
-        self.action_auto_edit_mu.setToolTip(
+        self.btn_auto_edit_mu = QPushButton("⚙ Auto-Edit MU")
+        self.btn_auto_edit_mu.setToolTip(
             "Apply rule-based auto-editing to the current MU [E]\n"
             "Removes low/high-IPT spikes; adds missed spikes by FR/IPT criteria."
         )
-        self.action_auto_edit_mu.triggered.connect(self._run_auto_edit_current)
-        self.action_auto_edit_mu.setEnabled(False)
-        tb.addAction(self.action_auto_edit_mu)
+        self.btn_auto_edit_mu.clicked.connect(self._run_auto_edit_current)
+        self.btn_auto_edit_mu.setEnabled(False)
+        self.btn_auto_edit_mu.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_auto_edit_mu)
 
         return tb
 
@@ -1107,21 +1107,9 @@ class EditionTab(QWidget):
         )
         QShortcut(QKeySequence("Escape"), self, lambda: self._set_mode(EditMode.VIEW))
         QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
-        QShortcut(
-            QKeySequence("F"),
-            self,
-            lambda: self.action_recalc_filter.trigger() if self.action_recalc_filter.isEnabled() else None,
-        )
-        QShortcut(
-            QKeySequence("O"),
-            self,
-            lambda: self.action_remove_outliers.trigger() if self.action_remove_outliers.isEnabled() else None,
-        )
-        QShortcut(
-            QKeySequence("E"),
-            self,
-            lambda: self.action_auto_edit_mu.trigger() if self.action_auto_edit_mu.isEnabled() else None,
-        )
+        QShortcut(QKeySequence("F"), self, self.btn_recalc_filter.click)
+        QShortcut(QKeySequence("O"), self, self.btn_remove_outliers.click)
+        QShortcut(QKeySequence("E"), self, self.btn_auto_edit_mu.click)
 
     # ------------------------------------------------------------------
     # Sampling rate
@@ -1453,15 +1441,15 @@ class EditionTab(QWidget):
 
         ok, reason = supports_filter_recalculation(decomp_data)
         self._filter_recalc_available = ok
-        self.action_recalc_filter.setEnabled(ok)
+        self.btn_recalc_filter.setEnabled(ok)
         if not ok:
-            self.action_recalc_filter.setToolTip(f"Unavailable: {reason}")
+            self.btn_recalc_filter.setToolTip(f"Unavailable: {reason}")
 
         for btn in (
-            self.action_remove_outliers,
+            self.btn_remove_outliers,
             self.btn_flag_delete,
             self.btn_delete_flagged,
-            self.action_auto_edit_mu,
+            self.btn_auto_edit_mu,
             self.btn_sel_add,
             self.btn_sel_delete,
             self.btn_flag_within_dups,
