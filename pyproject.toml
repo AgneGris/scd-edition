@@ -34,6 +34,7 @@ dependencies = [
     "mat73>=0.59",
     "pyyaml>=6.0",
     "cmcrameri>=1.0",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]

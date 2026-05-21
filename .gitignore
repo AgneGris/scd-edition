@@ -41,6 +41,9 @@ tests/
 export/
 docs/
 bats/
+scripts/add_force_to_decomp.py
+scripts/assign_edition.py
+scripts/patch_mvc.py
 
 resources/loaders_configs/loader_dynamic.yaml
 
