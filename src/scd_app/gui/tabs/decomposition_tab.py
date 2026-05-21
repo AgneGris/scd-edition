@@ -52,7 +52,11 @@ from scd_app.core.decomp_worker import DecompositionWorker
 
 # ── Filename → active-aux helpers ────────────────────────────────────────────
 _FINGER_ABBREV: Dict[str, str] = {
-    "T": "Thumb", "I": "Index", "M": "Middle", "R": "Ring", "L": "Little"
+    "T": "Thumb",
+    "I": "Index",
+    "M": "Middle",
+    "R": "Ring",
+    "L": "Little",
 }
 _MOTION_ABBREV: Dict[str, str] = {"ext": "Ext", "flex": "Flex"}
 _TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
@@ -552,7 +556,7 @@ class DecompositionTab(QWidget):
                 "notch_harmonics": False,
                 "sil_threshold": 0.9,
                 "peel_off": True,
-                "muap_window_ms": 40.0 if is_surface else 20.0,
+                "muap_window_ms": 20.0,
             }
 
             electrode_type_label = "Surface" if is_surface else "Intramuscular"
@@ -672,7 +676,6 @@ class DecompositionTab(QWidget):
     # ------------------------------------------------------------------ #
     #  Aux / force channel helpers                                        #
     # ------------------------------------------------------------------ #
-
 
     @staticmethod
     def _downsample_for_display(data: np.ndarray, canvas_width_px: int) -> tuple:
@@ -816,7 +819,9 @@ class DecompositionTab(QWidget):
             raw_data = self.emg_data[:, channels].numpy()
 
             # Apply the per-grid filters (bandpass + notch) for display
-            raw_data = self._apply_emg_filters(raw_data, self.sampling_rate, grid_params)
+            raw_data = self._apply_emg_filters(
+                raw_data, self.sampling_rate, grid_params
+            )
 
             # Downsample for display option (if enabled, does not affect actual decomposition data)
             use_downsample = self.global_widgets["downsample_display"].isChecked()
@@ -1416,7 +1421,10 @@ class DecompositionTab(QWidget):
             "Time (s)", color=COLORS["foreground"], fontsize=12, weight="bold"
         )
         ax.set_ylabel(
-            "RMS Amplitude (filtered)", color=COLORS["foreground"], fontsize=12, weight="bold"
+            "RMS Amplitude (filtered)",
+            color=COLORS["foreground"],
+            fontsize=12,
+            weight="bold",
         )
         ax.tick_params(colors=COLORS["foreground"])
         ax.set_xlim(0, total_duration)
@@ -1647,6 +1655,7 @@ class DecompositionTab(QWidget):
         # are included in the array and available for the worker to save.
         try:
             import copy
+
             layout = getattr(self.config, "data_layout", None)
             layout_full = copy.deepcopy(layout) if layout else layout
             if (
@@ -1702,7 +1711,9 @@ class DecompositionTab(QWidget):
 
     def _run_current_file(self):
         """Start the decomposition worker for the current file."""
-        file_path = self.emg_path  # set by _prepare_current_file or _batch_decompose_next_file
+        file_path = (
+            self.emg_path
+        )  # set by _prepare_current_file or _batch_decompose_next_file
 
         self._cleanup_matplotlib_widgets()
         self.start_btn.setEnabled(False)
@@ -1777,6 +1788,7 @@ class DecompositionTab(QWidget):
         # Load EMG
         try:
             import copy
+
             layout = getattr(self.config, "data_layout", None)
             layout_full = copy.deepcopy(layout) if layout else layout
             if (
@@ -1819,12 +1831,14 @@ class DecompositionTab(QWidget):
         self._show_rms_plot()
 
         if self._use_full_file:
-            self._file_setups.append({
-                "file_path": file_path,
-                "emg_data": self.emg_data,
-                "rejected_channels": rejected_snapshot,
-                "plateau_coords": np.array([0, self.emg_data.shape[0]]),
-            })
+            self._file_setups.append(
+                {
+                    "file_path": file_path,
+                    "emg_data": self.emg_data,
+                    "rejected_channels": rejected_snapshot,
+                    "plateau_coords": np.array([0, self.emg_data.shape[0]]),
+                }
+            )
             self._setup_idx += 1
             self._batch_setup_next_file()
         else:
@@ -1847,19 +1861,23 @@ class DecompositionTab(QWidget):
             and self.sel_start is not None
             and self.sel_end is not None
         ):
-            plateau = np.array([
-                int(self.sel_start * self.sampling_rate),
-                int(self.sel_end * self.sampling_rate),
-            ])
+            plateau = np.array(
+                [
+                    int(self.sel_start * self.sampling_rate),
+                    int(self.sel_end * self.sampling_rate),
+                ]
+            )
         else:
             plateau = np.array([0, self.emg_data.shape[0]])
 
-        self._file_setups.append({
-            "file_path": file_path,
-            "emg_data": self.emg_data,
-            "rejected_channels": self._batch_setup_rejected_snapshot,
-            "plateau_coords": plateau,
-        })
+        self._file_setups.append(
+            {
+                "file_path": file_path,
+                "emg_data": self.emg_data,
+                "rejected_channels": self._batch_setup_rejected_snapshot,
+                "plateau_coords": plateau,
+            }
+        )
 
         self._awaiting_batch_setup = False
         self.time_sel_widget.setVisible(False)

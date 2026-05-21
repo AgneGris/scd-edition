@@ -16,8 +16,14 @@ from typing import Optional
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QFrame, QGridLayout, QLabel, QSizePolicy, QWidget, QHBoxLayout,
-    QVBoxLayout, QGroupBox,
+    QFrame,
+    QGridLayout,
+    QLabel,
+    QSizePolicy,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QGroupBox,
 )
 from PyQt5.QtGui import QFont
 
@@ -29,15 +35,15 @@ from scd_app.core.mu_properties import MUProperties
 
 # ── colour helpers ─────────────────────────────────────────────────────────────
 
-_C_OK   = COLORS.get("success", "#a6e3a1")
+_C_OK = COLORS.get("success", "#a6e3a1")
 _C_WARN = COLORS.get("warning", "#f9e2af")
-_C_ERR  = COLORS.get("error",   "#f38ba8")
-_C_DIM  = COLORS.get("text_dim","#6c7086")
-_C_FG   = COLORS.get("foreground", "#cdd6f4")
-_C_BG   = COLORS.get("background", "#1e1e2e")
-_C_BGS  = COLORS.get("background_light", "#2a2a3c")
+_C_ERR = COLORS.get("error", "#f38ba8")
+_C_DIM = COLORS.get("text_dim", "#6c7086")
+_C_FG = COLORS.get("foreground", "#cdd6f4")
+_C_BG = COLORS.get("background", "#1e1e2e")
+_C_BGS = COLORS.get("background_light", "#2a2a3c")
 _C_BORD = COLORS.get("border", "#45475a")
-_C_INFO = COLORS.get("info",   "#89b4fa")
+_C_INFO = COLORS.get("info", "#89b4fa")
 
 
 def _color_for_flag(ok: bool, na: bool = False) -> str:
@@ -54,6 +60,7 @@ def _fmt(value: float, decimals: int = 2, unit: str = "") -> str:
 
 
 # ── small reusable widgets ─────────────────────────────────────────────────────
+
 
 class _MetricRow(QWidget):
     """One label + value row inside the properties grid."""
@@ -100,7 +107,8 @@ class _Section(QGroupBox):
 
     def __init__(self, title: str, parent=None):
         super().__init__(title, parent)
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             QGroupBox {{
                 color: {_C_INFO};
                 font-size: {FONT_SIZES.get('small','9pt')};
@@ -116,7 +124,8 @@ class _Section(QGroupBox):
                 left: 8px;
                 padding: 0 4px;
             }}
-        """)
+        """
+        )
         self._inner = QGridLayout(self)
         self._inner.setContentsMargins(8, 4, 8, 6)
         self._inner.setSpacing(2)
@@ -133,6 +142,7 @@ class _Section(QGroupBox):
 # ══════════════════════════════════════════════════════════════════════════════
 # Main panel
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class MUPropertiesPanel(QFrame):
     """Scrollable panel that shows all MU properties.
@@ -183,31 +193,35 @@ class MUPropertiesPanel(QFrame):
 
         # — Firing —
         sec_firing = _Section("Firing")
-        self._r_nspikes  = _MetricRow("N spikes")
-        self._r_dr       = _MetricRow("Discharge rate")
-        self._r_cov      = _MetricRow("CoV ISI")
-        self._r_min_isi  = _MetricRow("Min ISI")
+        self._r_nspikes = _MetricRow("N spikes")
+        self._r_dr = _MetricRow("Discharge rate")
+        self._r_cov = _MetricRow("CoV ISI")
+        self._r_min_isi = _MetricRow("Min ISI")
         for r in (self._r_nspikes, self._r_dr, self._r_cov, self._r_min_isi):
             sec_firing.add_row(r)
         sections_layout.addWidget(sec_firing)
 
         # — Quality —
         sec_quality = _Section("Quality")
-        self._r_sil             = _MetricRow("SIL")
-        self._r_pnr             = _MetricRow("PNR")
-        self._r_spike_centroid  = _MetricRow("Spike centroid")
-        self._r_noise_centroid  = _MetricRow("Noise centroid")
-        for r in (self._r_sil, self._r_pnr,
-                  self._r_spike_centroid, self._r_noise_centroid):
+        self._r_sil = _MetricRow("SIL")
+        self._r_pnr = _MetricRow("PNR")
+        self._r_spike_centroid = _MetricRow("Spike centroid")
+        self._r_noise_centroid = _MetricRow("Noise centroid")
+        for r in (
+            self._r_sil,
+            self._r_pnr,
+            self._r_spike_centroid,
+            self._r_noise_centroid,
+        ):
             sec_quality.add_row(r)
         sections_layout.addWidget(sec_quality)
 
         # — MUAP —
         sec_muap = _Section("MUAP features")
-        self._r_ptp      = _MetricRow("Max PTP")
-        self._r_wl       = _MetricRow("Max WL")
-        self._r_peak_f   = _MetricRow("Peak freq")
-        self._r_med_f    = _MetricRow("Median freq")
+        self._r_ptp = _MetricRow("Max PTP")
+        self._r_wl = _MetricRow("Max WL")
+        self._r_peak_f = _MetricRow("Peak freq")
+        self._r_med_f = _MetricRow("Median freq")
         for r in (self._r_ptp, self._r_wl, self._r_peak_f, self._r_med_f):
             sec_muap.add_row(r)
         sections_layout.addWidget(sec_muap)
@@ -230,27 +244,25 @@ class MUPropertiesPanel(QFrame):
 
         # — Firing —
         self._r_nspikes.set_value(
-            str(props.n_spikes),
-            _color_for_flag(flags["n_spikes"])
+            str(props.n_spikes), _color_for_flag(flags["n_spikes"])
         )
         self._r_dr.set_value(
             _fmt(props.discharge_rate_hz, 1, "Hz"),
-            _color_for_flag(flags["dr"], na=math.isnan(props.discharge_rate_hz))
+            _color_for_flag(flags["dr"], na=math.isnan(props.discharge_rate_hz)),
         )
         self._r_cov.set_value(
             _fmt(props.cov_pct, 1, "%"),
-            _color_for_flag(flags["cov"], na=math.isnan(props.cov_pct))
+            _color_for_flag(flags["cov"], na=math.isnan(props.cov_pct)),
         )
         self._r_min_isi.set_value(_fmt(props.min_isi_ms, 1, "ms"))
 
         # — Quality —
         self._r_sil.set_value(
-            _fmt(props.sil, 3),
-            _color_for_flag(flags["sil"], na=math.isnan(props.sil))
+            _fmt(props.sil, 3), _color_for_flag(flags["sil"], na=math.isnan(props.sil))
         )
         self._r_pnr.set_value(
             _fmt(props.pnr_db, 1, "dB"),
-            _color_for_flag(flags["pnr"], na=math.isnan(props.pnr_db))
+            _color_for_flag(flags["pnr"], na=math.isnan(props.pnr_db)),
         )
         self._r_spike_centroid.set_value(_fmt(props.spike_centroid, 3))
         self._r_noise_centroid.set_value(_fmt(props.noise_centroid, 3))
@@ -308,9 +320,18 @@ class MUPropertiesPanel(QFrame):
 
     def clear_properties(self):
         for row in (
-            self._r_nspikes, self._r_dr, self._r_cov, self._r_min_isi,
-            self._r_sil, self._r_pnr, self._r_spike_centroid, self._r_noise_centroid,
-            self._r_ptp, self._r_wl, self._r_peak_f, self._r_med_f,
+            self._r_nspikes,
+            self._r_dr,
+            self._r_cov,
+            self._r_min_isi,
+            self._r_sil,
+            self._r_pnr,
+            self._r_spike_centroid,
+            self._r_noise_centroid,
+            self._r_ptp,
+            self._r_wl,
+            self._r_peak_f,
+            self._r_med_f,
         ):
             row.clear()
         self._reliability_badge.setText("● —")
@@ -324,16 +345,18 @@ class MUPropertiesPanel(QFrame):
 
 # ── backwards-compatible thin bar  (for easy migration) ───────────────────────
 
+
 class QualityBar(MUPropertiesPanel):
     """Kept for import compatibility; routes to MUPropertiesPanel."""
 
     def set_metrics(self, sil: float, cov: float, fr: float, n_spikes: int):
         """Legacy API — builds a minimal MUProperties and forwards it."""
         from core.mu_properties import MUProperties
+
         p = MUProperties(
             n_spikes=n_spikes,
             sil=sil,
-            cov_pct=cov * 100,       # old code passed 0–1 range
+            cov_pct=cov * 100,  # old code passed 0–1 range
             discharge_rate_hz=fr,
         )
         self.set_properties(p)

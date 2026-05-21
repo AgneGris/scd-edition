@@ -42,15 +42,24 @@ logger = logging.getLogger(__name__)
 # SCD module loader
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def _get_scd_modules():
     try:
         from scd.processing.preprocess import (
-            whiten, autocorrelation_whiten, extend, time_differentiate,
-            notch_filter, low_pass_filter, high_pass_filter,
+            whiten,
+            autocorrelation_whiten,
+            extend,
+            time_differentiate,
+            notch_filter,
+            low_pass_filter,
+            high_pass_filter,
         )
         from scd.models.timestamping import (
-            spike_triggered_average, peel_off_source, source_to_timestamps,
+            spike_triggered_average,
+            peel_off_source,
+            source_to_timestamps,
         )
+
         return {
             "whiten": whiten,
             "autocorrelation_whiten": autocorrelation_whiten,
@@ -70,7 +79,7 @@ def _get_scd_modules():
 
 
 def _replace_bad_channels(
-    raw_port: np.ndarray,          # (n_ch, samples)
+    raw_port: np.ndarray,  # (n_ch, samples)
     decomp_data: dict,
     port_idx: int,
     seed: int = 42,
@@ -86,7 +95,7 @@ def _replace_bad_channels(
         return raw_port
 
     mask = np.asarray(mask_list[port_idx]).flatten()
-    bad_ch  = np.where(mask == 1)[0]
+    bad_ch = np.where(mask == 1)[0]
     if len(bad_ch) == 0:
         return raw_port
 
@@ -96,18 +105,23 @@ def _replace_bad_channels(
     # Fixed seed so the noise is identical across load / recalculate calls
     gen = torch.Generator()
     gen.manual_seed(seed)
-    noise = torch.randn(len(bad_ch), raw_port.shape[1], generator=gen).numpy() * noise_std
+    noise = (
+        torch.randn(len(bad_ch), raw_port.shape[1], generator=gen).numpy() * noise_std
+    )
     raw_port[bad_ch, :] = noise
 
-    logger.debug("Port %d: replaced %d bad channel(s) with noise (std=%.4f)",
-                 port_idx, len(bad_ch), noise_std)
+    logger.debug(
+        "Port %d: replaced %d bad channel(s) with noise (std=%.4f)",
+        port_idx,
+        len(bad_ch),
+        noise_std,
+    )
     return raw_port
 
 
 def _get_plateau_bounds(decomp_data: dict, full_samples: int) -> Tuple[int, int]:
     """Extract plateau start/end from decomp_data."""
-    sel_pts = decomp_data.get("plateau_coords",
-                              decomp_data.get("selected_points"))
+    sel_pts = decomp_data.get("plateau_coords", decomp_data.get("selected_points"))
     start, end = 0, full_samples
     if sel_pts is not None:
         try:
@@ -136,7 +150,8 @@ def _normalise_filters(port_filters_raw, n_units: int) -> List[Optional[np.ndarr
 
 
 def _partition_peel_sequence(
-    peel_sequence: list, units_per_port: List[int],
+    peel_sequence: list,
+    units_per_port: List[int],
 ) -> List[list]:
     """Split global peel_off_sequence into per-port sub-sequences."""
     boundaries = []
@@ -162,20 +177,22 @@ def _partition_peel_sequence(
 # Preprocessing
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def preprocess_emg(
-    raw_emg: torch.Tensor,        # (samples, active_channels)
+    raw_emg: torch.Tensor,  # (samples, active_channels)
     config: Dict[str, Any],
     device: torch.device,
     w_mat: Optional[np.ndarray] = None,
 ) -> torch.Tensor:
     """Preprocess raw EMG exactly as SCD does. Returns (samples, ext_ch)."""
-    fn  = _get_scd_modules()
+    fn = _get_scd_modules()
     emg = raw_emg.to(device).float()
-    fs  = float(config["sampling_frequency"])
+    fs = float(config["sampling_frequency"])
 
     if config.get("notch_params") is not None:
-        emg = fn["notch_filter"](emg, fs, config["notch_params"],
-                                 config.get("low_pass_cutoff"))
+        emg = fn["notch_filter"](
+            emg, fs, config["notch_params"], config.get("low_pass_cutoff")
+        )
     if config.get("low_pass_cutoff") is not None:
         emg = fn["low_pass_filter"](emg, fs, config["low_pass_cutoff"])
     if config.get("high_pass_cutoff") is not None:
@@ -208,7 +225,7 @@ def _apply_filter_torch(
     filt_t = torch.from_numpy(filt.astype(np.float32)).to(device)
     source = torch.matmul(emg, filt_t).squeeze(-1)
     sl = source[norm_slice] if norm_slice is not None else source
-    mu  = sl.mean()
+    mu = sl.mean()
     std = sl.std().clamp(min=1e-8)
     return (source - mu) / std
 
@@ -222,9 +239,10 @@ def _extract_timestamps(
     """Run source_to_timestamps and return absolute sample indices."""
     source_clean = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
     if square_source:
-        source_clean = source_clean ** 2
+        source_clean = source_clean**2
     locs, _heights, _sil = fn["source_to_timestamps"](
-        source_clean, min_peak_separation=min_peak_sep,
+        source_clean,
+        min_peak_separation=min_peak_sep,
     )
     return locs.cpu().numpy().astype(np.int64)
 
@@ -232,6 +250,7 @@ def _extract_timestamps(
 # ═══════════════════════════════════════════════════════════════════════════════
 # Peel-off helpers
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _peel_with_original(
     emg: torch.Tensor,
@@ -272,8 +291,8 @@ def _process_saved_peel_entry(
     """
     plateau_norm = slice(start_sample, end_sample)
     ts_saved = _to_numpy(np.asarray(entry["timestamps"])).flatten().astype(np.int64)
-    ts_peel  = ts_saved + start_sample
-    ts_peel  = ts_peel[(ts_peel >= 0) & (ts_peel < emg_running.shape[0])]
+    ts_peel = ts_saved + start_sample
+    ts_peel = ts_peel[(ts_peel >= 0) & (ts_peel < emg_running.shape[0])]
 
     new_filt_np = None
     source_t = None
@@ -281,25 +300,31 @@ def _process_saved_peel_entry(
     if recalculate_filters and len(ts_peel) >= 2:
         # Recompute filter via STA so the displayed source is consistent with
         # the spike train.  Updates port_filters in-place for later edits.
-        ts_t  = torch.from_numpy(ts_peel).to(device)
-        sta   = fn["spike_triggered_average"](emg_running, ts_t, 1)
-        norm  = sta.abs().sum().clamp(min=1e-8)
+        ts_t = torch.from_numpy(ts_peel).to(device)
+        sta = fn["spike_triggered_average"](emg_running, ts_t, 1)
+        norm = sta.abs().sum().clamp(min=1e-8)
         new_filt = sta.t() / norm
         new_filt_np = new_filt.detach().cpu().numpy()
         if 0 <= local_idx < len(port_filters):
             port_filters[local_idx] = new_filt_np
-        source_t  = torch.matmul(emg_running, new_filt).squeeze(-1)
+        source_t = torch.matmul(emg_running, new_filt).squeeze(-1)
         plateau_sl = source_t[plateau_norm]
-        source_t  = (source_t - plateau_sl.mean()) / plateau_sl.std().clamp(min=1e-8)
-        source_t  = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
+        source_t = (source_t - plateau_sl.mean()) / plateau_sl.std().clamp(min=1e-8)
+        source_t = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
     elif filt is not None:
-        source_t = _apply_filter_torch(emg_running, filt, device, norm_slice=plateau_norm)
+        source_t = _apply_filter_torch(
+            emg_running, filt, device, norm_slice=plateau_norm
+        )
         source_t = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
 
-    source_np = source_t.cpu().numpy().astype(np.float64) if source_t is not None else None
+    source_np = (
+        source_t.cpu().numpy().astype(np.float64) if source_t is not None else None
+    )
 
     if redetect_timestamps and source_t is not None:
-        ts_display = _extract_timestamps(source_t, fn, min_peak_sep, square_source=square_source)
+        ts_display = _extract_timestamps(
+            source_t, fn, min_peak_sep, square_source=square_source
+        )
     else:
         ts_display = ts_peel
 
@@ -325,7 +350,9 @@ def _process_recalc_entry(
     Returns (source_np, ts_abs).
     """
     source_t = _apply_filter_torch(emg_running, filt, device)
-    ts_abs   = _extract_timestamps(source_t, fn, min_peak_sep, square_source=square_source)
+    ts_abs = _extract_timestamps(
+        source_t, fn, min_peak_sep, square_source=square_source
+    )
     if len(ts_abs) > 0:
         ts_t = torch.from_numpy(ts_abs).to(device)
         fn["peel_off_source"](emg_running, ts_t, window_size)
@@ -333,10 +360,10 @@ def _process_recalc_entry(
 
 
 def _replay_peel_off_for_port(
-    emg_full: torch.Tensor,                    # (full_samples, ext_ch) — will be cloned
-    port_peel_seq: list,                       # this port's peel_off_sequence entries
+    emg_full: torch.Tensor,  # (full_samples, ext_ch) — will be cloned
+    port_peel_seq: list,  # this port's peel_off_sequence entries
     port_filters: List[Optional[np.ndarray]],  # current filters for this port
-    global_offset: int,                        # sum of units in earlier ports
+    global_offset: int,  # sum of units in earlier ports
     start_sample: int,
     end_sample: int,
     window_size: int,
@@ -369,7 +396,9 @@ def _replay_peel_off_for_port(
 
         if uid is None:
             # Rejected repeat — peel with original timestamps
-            _peel_with_original(emg_running, entry, start_sample, window_size, device, fn)
+            _peel_with_original(
+                emg_running, entry, start_sample, window_size, device, fn
+            )
             continue
 
         local_idx = uid - global_offset
@@ -381,19 +410,38 @@ def _replay_peel_off_for_port(
 
         if use_saved_peel_timestamps:
             source_np, ts_display, new_filt_np = _process_saved_peel_entry(
-                emg_running, entry, filt, port_filters, local_idx,
-                start_sample, end_sample, window_size, min_peak_sep,
-                device, fn, recalculate_filters, redetect_timestamps, square_source,
+                emg_running,
+                entry,
+                filt,
+                port_filters,
+                local_idx,
+                start_sample,
+                end_sample,
+                window_size,
+                min_peak_sep,
+                device,
+                fn,
+                recalculate_filters,
+                redetect_timestamps,
+                square_source,
             )
             results_dict[local_idx] = (source_np, ts_display, new_filt_np)
         elif filt is not None:
             source_np, ts_abs = _process_recalc_entry(
-                emg_running, filt, window_size, min_peak_sep, device, fn, square_source,
+                emg_running,
+                filt,
+                window_size,
+                min_peak_sep,
+                device,
+                fn,
+                square_source,
             )
             results_dict[local_idx] = (source_np, ts_abs, None)
         else:
             results_dict[local_idx] = (None, None, None)
-            _peel_with_original(emg_running, entry, start_sample, window_size, device, fn)
+            _peel_with_original(
+                emg_running, entry, start_sample, window_size, device, fn
+            )
 
     return emg_running, results_dict
 
@@ -402,8 +450,9 @@ def compute_all_full_sources(
     decomp_data: dict,
     device: Optional[torch.device] = None,
     redetect_timestamps: bool = True,
-) -> Tuple[Dict[int, List[Tuple[Optional[np.ndarray], Optional[np.ndarray]]]],
-           int, int, str]:
+) -> Tuple[
+    Dict[int, List[Tuple[Optional[np.ndarray], Optional[np.ndarray]]]], int, int, str
+]:
     """Compute full-length sources and timestamps for all MUs.
 
     redetect_timestamps: when True (default) re-detect spike times from the
@@ -414,33 +463,41 @@ def compute_all_full_sources(
     if device is None:
         device = torch.device("cpu")
 
-    for key in ("preprocessing_config", "peel_off_sequence", "data", "mu_filters", "ports"):
+    for key in (
+        "preprocessing_config",
+        "peel_off_sequence",
+        "data",
+        "mu_filters",
+        "ports",
+    ):
         if key not in decomp_data:
             return {}, 0, 0, f"Missing key '{key}'."
 
-    config_raw   = decomp_data["preprocessing_config"]
+    config_raw = decomp_data["preprocessing_config"]
     peel_seq_raw = decomp_data["peel_off_sequence"]
 
     # Detect format:
     #   New: config_raw is list[dict], peel_seq_raw is list[list]  (one per port)
     #   Old: config_raw is dict,       peel_seq_raw is flat list   (port-0 only)
     _is_per_port_config = isinstance(config_raw, list)
-    _is_per_port_peel   = (isinstance(peel_seq_raw, list) and
-                           len(peel_seq_raw) > 0 and
-                           isinstance(peel_seq_raw[0], list))
+    _is_per_port_peel = (
+        isinstance(peel_seq_raw, list)
+        and len(peel_seq_raw) > 0
+        and isinstance(peel_seq_raw[0], list)
+    )
 
     raw_full = _to_numpy(decomp_data["data"])
     if raw_full.ndim == 2 and raw_full.shape[0] > raw_full.shape[1]:
-        raw_full = raw_full.T                                   # (ch, samples)
+        raw_full = raw_full.T  # (ch, samples)
 
     start_sample, end_sample = _get_plateau_bounds(decomp_data, raw_full.shape[1])
 
-    ports               = decomp_data["ports"]
+    ports = decomp_data["ports"]
     chans_per_electrode = decomp_data.get("chans_per_electrode", [])
     channel_indices_all = decomp_data.get("channel_indices")
-    mu_filters_all      = decomp_data.get("mu_filters", [])
-    w_mat_list          = decomp_data.get("w_mat")
-    discharge_times     = decomp_data.get("discharge_times", [])
+    mu_filters_all = decomp_data.get("mu_filters", [])
+    w_mat_list = decomp_data.get("w_mat")
+    discharge_times = decomp_data.get("discharge_times", [])
 
     units_per_port = []
     for pidx in range(len(ports)):
@@ -458,7 +515,11 @@ def compute_all_full_sources(
     ch_offset = 0
 
     for port_idx, port_name in enumerate(ports):
-        n_ch    = int(chans_per_electrode[port_idx]) if port_idx < len(chans_per_electrode) else 64
+        n_ch = (
+            int(chans_per_electrode[port_idx])
+            if port_idx < len(chans_per_electrode)
+            else 64
+        )
         n_units = units_per_port[port_idx]
 
         if n_units == 0:
@@ -466,28 +527,34 @@ def compute_all_full_sources(
             ch_offset += n_ch
             continue
 
-        config = config_raw[port_idx] if _is_per_port_config and port_idx < len(config_raw) else (
-            config_raw[0] if _is_per_port_config else config_raw
+        config = (
+            config_raw[port_idx]
+            if _is_per_port_config and port_idx < len(config_raw)
+            else (config_raw[0] if _is_per_port_config else config_raw)
         )
-        window_size   = int(config["peel_off_window_size"])
-        min_peak_sep  = int(config.get("min_peak_separation", MIN_PEAK_SEP))
+        window_size = int(config["peel_off_window_size"])
+        min_peak_sep = int(config.get("min_peak_separation", MIN_PEAK_SEP))
         # square_sources_spike_det not saved by SCD; default True for back-compat
         square_source = bool(config.get("square_sources_spike_det", True))
 
         if _is_per_port_peel:
-            port_peel_seq = peel_seq_raw[port_idx] if port_idx < len(peel_seq_raw) else []
+            port_peel_seq = (
+                peel_seq_raw[port_idx] if port_idx < len(peel_seq_raw) else []
+            )
             global_offset = 0
         else:
             port_peel_seq = _port_peel_seqs_old[port_idx]
             global_offset = sum(units_per_port[:port_idx])
 
-        if (channel_indices_all is not None
-                and port_idx < len(channel_indices_all)
-                and channel_indices_all[port_idx] is not None):
+        if (
+            channel_indices_all is not None
+            and port_idx < len(channel_indices_all)
+            and channel_indices_all[port_idx] is not None
+        ):
             ch_idx = np.asarray(channel_indices_all[port_idx], dtype=int)
             raw_port = raw_full[ch_idx, :].copy()
         else:
-            raw_port = raw_full[ch_offset:ch_offset+n_ch, :].copy()
+            raw_port = raw_full[ch_offset : ch_offset + n_ch, :].copy()
         _replace_bad_channels(raw_port, decomp_data, port_idx)
 
         w_mat = None
@@ -509,10 +576,19 @@ def compute_all_full_sources(
             continue
 
         _, results_dict = _replay_peel_off_for_port(
-            emg_proc, port_peel_seq, port_filters,
-            global_offset, start_sample, end_sample, window_size, min_peak_sep, device,
-            stop_before_local_idx=None, square_source=square_source,
-            use_saved_peel_timestamps=True, recalculate_filters=True,
+            emg_proc,
+            port_peel_seq,
+            port_filters,
+            global_offset,
+            start_sample,
+            end_sample,
+            window_size,
+            min_peak_sep,
+            device,
+            stop_before_local_idx=None,
+            square_source=square_source,
+            use_saved_peel_timestamps=True,
+            recalculate_filters=True,
             redetect_timestamps=redetect_timestamps,
         )
 
@@ -528,11 +604,11 @@ def compute_all_full_sources(
 
 
 def recalculate_unit_filter(
-    raw_port_channels: np.ndarray,             # (n_ch, full_samples)
+    raw_port_channels: np.ndarray,  # (n_ch, full_samples)
     decomp_data: dict,
     port_idx: int,
     local_mu_idx: int,
-    edited_timestamps_abs: np.ndarray,         # absolute timestamps from editor
+    edited_timestamps_abs: np.ndarray,  # absolute timestamps from editor
     global_unit_idx: int,
     start_sample: int,
     end_sample: int,
@@ -547,17 +623,19 @@ def recalculate_unit_filter(
         if key not in decomp_data:
             raise KeyError(f"'{key}' not found in decomp_data.")
 
-    config_raw   = decomp_data["preprocessing_config"]
+    config_raw = decomp_data["preprocessing_config"]
     peel_seq_raw = decomp_data["peel_off_sequence"]
 
     _is_per_port_config = isinstance(config_raw, list)
-    _is_per_port_peel   = (isinstance(peel_seq_raw, list) and
-                           len(peel_seq_raw) > 0 and
-                           isinstance(peel_seq_raw[0], list))
+    _is_per_port_peel = (
+        isinstance(peel_seq_raw, list)
+        and len(peel_seq_raw) > 0
+        and isinstance(peel_seq_raw[0], list)
+    )
 
     config = config_raw[port_idx] if _is_per_port_config else config_raw
-    window_size   = int(config["peel_off_window_size"])
-    min_peak_sep  = int(config.get("min_peak_separation", MIN_PEAK_SEP))
+    window_size = int(config["peel_off_window_size"])
+    min_peak_sep = int(config.get("min_peak_separation", MIN_PEAK_SEP))
     square_source = bool(config.get("square_sources_spike_det", True))
 
     w_mat_list = decomp_data.get("w_mat")
@@ -582,8 +660,8 @@ def recalculate_unit_filter(
             else:
                 units_per_port.append(0)
         port_peel_seqs = _partition_peel_sequence(peel_seq_raw, units_per_port)
-        port_peel_seq  = port_peel_seqs[port_idx]
-        global_offset  = sum(units_per_port[:port_idx])
+        port_peel_seq = port_peel_seqs[port_idx]
+        global_offset = sum(units_per_port[:port_idx])
 
     # ── Step 1: Preprocess FULL EMG ───────────────────────────────────────
     raw_port_channels = raw_port_channels.copy()
@@ -593,22 +671,32 @@ def recalculate_unit_filter(
 
     # ── Step 2: Replay peel-off up to this unit ───────────────────────────
     emg_peeled, _ = _replay_peel_off_for_port(
-        emg_proc, port_peel_seq, current_port_filters,
-        global_offset, start_sample, end_sample, window_size, min_peak_sep, device,
-        stop_before_local_idx=local_mu_idx, square_source=square_source,
+        emg_proc,
+        port_peel_seq,
+        current_port_filters,
+        global_offset,
+        start_sample,
+        end_sample,
+        window_size,
+        min_peak_sep,
+        device,
+        stop_before_local_idx=local_mu_idx,
+        square_source=square_source,
     )
 
     # ── Step 3: STA filter from edited timestamps (plateau only) ──────────
     ts_in_plateau = edited_timestamps_abs[
-        (edited_timestamps_abs >= start_sample) &
-        (edited_timestamps_abs < end_sample) &
-        (edited_timestamps_abs < emg_peeled.shape[0])
+        (edited_timestamps_abs >= start_sample)
+        & (edited_timestamps_abs < end_sample)
+        & (edited_timestamps_abs < emg_peeled.shape[0])
     ]
     if len(ts_in_plateau) < 2:
-        raise ValueError("Need at least 2 spikes within the plateau for filter recalculation.")
+        raise ValueError(
+            "Need at least 2 spikes within the plateau for filter recalculation."
+        )
 
     ts_tensor = torch.from_numpy(np.asarray(ts_in_plateau, dtype=np.int64)).to(device)
-    sta  = fn["spike_triggered_average"](emg_peeled, ts_tensor, 1)
+    sta = fn["spike_triggered_average"](emg_peeled, ts_tensor, 1)
     filt = sta.t()
     filt = filt / filt.abs().sum().clamp(min=1e-8)
 
@@ -631,8 +719,11 @@ def recalculate_unit_filter(
 
 
 def supports_filter_recalculation(decomp_data: dict) -> Tuple[bool, str]:
-    missing = [k for k in ("preprocessing_config", "peel_off_sequence", "data")
-               if k not in decomp_data]
+    missing = [
+        k
+        for k in ("preprocessing_config", "peel_off_sequence", "data")
+        if k not in decomp_data
+    ]
     if missing:
         return False, f"Missing keys: {missing}."
     peel = decomp_data["peel_off_sequence"]
@@ -645,8 +736,11 @@ def supports_filter_recalculation(decomp_data: dict) -> Tuple[bool, str]:
 
 
 def supports_full_source_computation(decomp_data: dict) -> Tuple[bool, str]:
-    missing = [k for k in ("preprocessing_config", "peel_off_sequence", "data",
-                            "mu_filters") if k not in decomp_data]
+    missing = [
+        k
+        for k in ("preprocessing_config", "peel_off_sequence", "data", "mu_filters")
+        if k not in decomp_data
+    ]
     if missing:
         return False, f"Missing keys: {missing}."
     if decomp_data.get("mu_filters") is None:

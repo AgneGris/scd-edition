@@ -41,9 +41,14 @@ def _nice_tick_step(max_val: float) -> float:
         return 20.0
     return 50.0
 
+
 # ── Filename → active-aux helpers ────────────────────────────────────────────
 _FINGER_ABBREV: Dict[str, str] = {
-    "T": "Thumb", "I": "Index", "M": "Middle", "R": "Ring", "L": "Little"
+    "T": "Thumb",
+    "I": "Index",
+    "M": "Middle",
+    "R": "Ring",
+    "L": "Little",
 }
 _MOTION_ABBREV: Dict[str, str] = {"ext": "Ext", "flex": "Flex"}
 _TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
@@ -80,6 +85,7 @@ def _default_aux_states(channels: list, file_stem: str) -> List[bool]:
 
 class SelectionArm:
     """Which (if any) rubberband-selection operation is currently armed."""
+
     NONE = "none"
     ADD = "add"
     DELETE = "delete"
@@ -120,12 +126,18 @@ class _AuxLegend(pg.LegendItem):
         self.items = []
         self.updateSize()
 
-    def populate(self, channels: list, curves: list, initial_states: Optional[List[bool]] = None):
+    def populate(
+        self, channels: list, curves: list, initial_states: Optional[List[bool]] = None
+    ):
         self.clear()
         self._curves = list(curves)
         self._names = []
         self._colors = []
-        self._on_states = list(initial_states) if initial_states is not None else [True] * len(channels)
+        self._on_states = (
+            list(initial_states)
+            if initial_states is not None
+            else [True] * len(channels)
+        )
         for i, (ch, _curve) in enumerate(zip(channels, curves)):
             meta = ch.get("meta", {})
             name = meta.get("name") or ch.get("name") or f"AUX {i + 1}"
@@ -198,7 +210,9 @@ class SourcePlotWidget(pg.PlotWidget):
         self._edit_mode = EditMode.VIEW
         self._sel_arm = SelectionArm.NONE
         self._plateau_start: int = 0
-        self._force_offset: int = 0  # sample index where mu.source starts in the recording
+        self._force_offset: int = (
+            0  # sample index where mu.source starts in the recording
+        )
 
         self._source: Optional[np.ndarray] = None
         self._timestamps: Optional[np.ndarray] = None
@@ -207,8 +221,11 @@ class SourcePlotWidget(pg.PlotWidget):
         self._signal_curve.setDownsampling(auto=True, method="peak")
         self._signal_curve.setClipToView(True)
         self._spike_scatter = pg.ScatterPlotItem(
-            size=10, pen=pg.mkPen(None), brush=pg.mkBrush("#ed8936"),
-            symbol="o", hoverable=True,
+            size=10,
+            pen=pg.mkPen(None),
+            brush=pg.mkBrush("#ed8936"),
+            symbol="o",
+            hoverable=True,
         )
         self.addItem(self._spike_scatter)
         self._plateau_region: Optional[pg.LinearRegionItem] = None
@@ -265,7 +282,8 @@ class SourcePlotWidget(pg.PlotWidget):
 
     def set_force_offset(self, start_sample: int):
         """Tell the widget the sample offset of mu.source within the full recording.
-        Used to align the force overlay: 0 in full-source mode, start_sample otherwise."""
+        Used to align the force overlay: 0 in full-source mode, start_sample otherwise.
+        """
         self._force_offset = start_sample
 
     def set_plateau_region(self, start_sample: int, end_sample: int):
@@ -295,7 +313,9 @@ class SourcePlotWidget(pg.PlotWidget):
             raw = np.nan_to_num(raw, nan=0.0)
             self._aux_raw.append(raw)
             mvc = ch.get("mvc")
-            self._aux_mvc.append(float(mvc) if mvc is not None and float(mvc) > 0 else None)
+            self._aux_mvc.append(
+                float(mvc) if mvc is not None and float(mvc) > 0 else None
+            )
             r, g, b = _AUX_COLORS_RGB[i % len(_AUX_COLORS_RGB)]
             on = initial_states[i] if i < len(initial_states) else True
             alpha = 70 if on else 5
@@ -341,7 +361,9 @@ class SourcePlotWidget(pg.PlotWidget):
         for sig_norm, curve in zip(normalised, self._aux_curves):
             sig_scaled = sig_norm * scale_factor * src_range + src_min
             p_start = min(self._force_offset, len(sig_scaled))
-            p_end = min(p_start + n_src, len(sig_scaled)) if n_src > 0 else len(sig_scaled)
+            p_end = (
+                min(p_start + n_src, len(sig_scaled)) if n_src > 0 else len(sig_scaled)
+            )
             sig_slice = sig_scaled[p_start:p_end]
             n_plot = len(sig_slice)
             step = max(1, n_plot // 2000)
@@ -404,9 +426,11 @@ class SourcePlotWidget(pg.PlotWidget):
             super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
-        if (self._rb_widget is not None
-                and self._rb_widget.isVisible()
-                and self._rb_origin is not None):
+        if (
+            self._rb_widget is not None
+            and self._rb_widget.isVisible()
+            and self._rb_origin is not None
+        ):
             self._rb_widget.setGeometry(QRect(self._rb_origin, ev.pos()).normalized())
             ev.accept()
         else:
@@ -423,7 +447,10 @@ class SourcePlotWidget(pg.PlotWidget):
         if self._sel_arm != SelectionArm.NONE and self._rb_widget is not None:
             rect_px = QRect(origin, ev.pos()).normalized()
             self._rb_widget.hide()
-            if rect_px.width() > _MIN_RUBBERBAND_PX and rect_px.height() > _MIN_RUBBERBAND_PX:
+            if (
+                rect_px.width() > _MIN_RUBBERBAND_PX
+                and rect_px.height() > _MIN_RUBBERBAND_PX
+            ):
                 vb = self.getViewBox()
                 tl = vb.mapSceneToView(self.mapToScene(rect_px.topLeft()))
                 br = vb.mapSceneToView(self.mapToScene(rect_px.bottomRight()))
@@ -435,7 +462,10 @@ class SourcePlotWidget(pg.PlotWidget):
 
         if self._edit_mode in (EditMode.ADD, EditMode.DELETE):
             rect_px = QRect(origin, ev.pos()).normalized()
-            if rect_px.width() <= _MIN_RUBBERBAND_PX and rect_px.height() <= _MIN_RUBBERBAND_PX:
+            if (
+                rect_px.width() <= _MIN_RUBBERBAND_PX
+                and rect_px.height() <= _MIN_RUBBERBAND_PX
+            ):
                 vb = self.getViewBox()
                 pos = vb.mapSceneToView(self.mapToScene(ev.pos()))
                 sample = int(pos.x() * self._fsamp)
@@ -458,9 +488,11 @@ class SourcePlotWidget(pg.PlotWidget):
             self._rb_widget.hide()
 
     def _update_spike_markers(self):
-        if (self._source is None
-                or self._timestamps is None
-                or len(self._timestamps) == 0):
+        if (
+            self._source is None
+            or self._timestamps is None
+            or len(self._timestamps) == 0
+        ):
             self._spike_scatter.setData([], [])
             return
         valid = self._timestamps[self._timestamps < len(self._source)]

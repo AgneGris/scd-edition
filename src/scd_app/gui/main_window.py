@@ -7,7 +7,7 @@ import pickle
 from pathlib import Path
 from typing import Optional
 
-import torch  
+import torch
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
@@ -109,7 +109,9 @@ class MainWindow(QMainWindow):
 
         # View Menu
         view_menu = menubar.addMenu("&View")
-        for i, name in enumerate(["Configuration", "Decomposition", "Edition", "Visualisation"]):
+        for i, name in enumerate(
+            ["Configuration", "Decomposition", "Edition", "Visualisation"]
+        ):
             action = QAction(f"&{i+1}. {name}", self)
             action.setShortcut(QKeySequence(f"Ctrl+{i+1}"))
             action.triggered.connect(
@@ -158,8 +160,9 @@ class MainWindow(QMainWindow):
         """Handle the 'Apply' event from the Configuration tab."""
         self.config = config
 
-        # Update Edition tab sampling rate
+        # Update Edition tab sampling rate and aux channel configs (for MVC lookup on load)
         self.edition_tab.set_fsamp(config.sampling_frequency)
+        self.edition_tab.set_aux_configs(config.aux_channels)
 
         # Configure Decomposition Tab
         if hasattr(self.decomp_tab, "setup_session"):
@@ -203,7 +206,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         # Check if edition tab has unsaved edits via undo stack
-        has_edits = len(self.edition_tab._undo_stack) > 0
+        has_edits = any(self.edition_tab._undo_stack.values())
         if has_edits:
             reply = QMessageBox.question(
                 self,
@@ -230,15 +233,21 @@ def main():
         description="SCD EMG Decomposition & Edition GUI",
     )
     parser.add_argument(
-        "--open", dest="open_path", metavar="FILE",
+        "--open",
+        dest="open_path",
+        metavar="FILE",
         help="PKL decomposition file to load directly into the Edition tab on startup",
     )
     parser.add_argument(
-        "--output", dest="output_path", metavar="FILE",
+        "--output",
+        dest="output_path",
+        metavar="FILE",
         help="Default output path used when saving (skips the save dialog)",
     )
     parser.add_argument(
-        "--quit-after-save", dest="quit_after_save", action="store_true",
+        "--quit-after-save",
+        dest="quit_after_save",
+        action="store_true",
         help="Close the application automatically after the file is saved",
     )
     # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
@@ -261,6 +270,7 @@ def main():
         open_path = Path(args.open_path)
         # Defer until the event loop is running so the window is fully shown
         from PyQt5.QtCore import QTimer
+
         QTimer.singleShot(0, lambda: _open_on_startup(window, open_path))
 
     window.show()
@@ -274,6 +284,7 @@ def _open_on_startup(window: "MainWindow", path: Path):
     except Exception as e:
         print(f"ERROR: Could not open file '{path}': {e}", file=sys.stderr)
         from PyQt5.QtWidgets import QMessageBox
+
         QMessageBox.critical(window, "Load Error", f"Could not open file:\n{e}")
         sys.exit(1)
 

@@ -69,6 +69,7 @@ import numpy as np
 
 # ── OTB loaders ───────────────────────────────────────────────────────────────
 
+
 def _read_otb_emg_all(data_path: Path) -> np.ndarray:
     """Read every adapter channel from an OTB+ file. Returns (samples, channels).
 
@@ -79,18 +80,18 @@ def _read_otb_emg_all(data_path: Path) -> np.ndarray:
     import xml.etree.ElementTree as ET
 
     with tarfile.open(str(data_path), "r") as tar:
-        members  = {m.name: m for m in tar.getmembers()}
+        members = {m.name: m for m in tar.getmembers()}
         sig_name = next((n for n in members if n.endswith(".sig")), None)
         if sig_name is None:
             raise FileNotFoundError(f"No .sig file in {data_path.name}")
 
-        xml_name  = sig_name.rsplit(".", 1)[0] + ".xml"
+        xml_name = sig_name.rsplit(".", 1)[0] + ".xml"
         xml_bytes = tar.extractfile(members[xml_name]).read()
-        xml_root  = ET.fromstring(xml_bytes)
-        device    = xml_root.attrib
+        xml_root = ET.fromstring(xml_bytes)
+        device = xml_root.attrib
 
-        nADbit       = int(device["ad_bits"])
-        nchans       = int(device["DeviceTotalChannels"])
+        nADbit = int(device["ad_bits"])
+        nchans = int(device["DeviceTotalChannels"])
         power_supply = 5  # V
 
         sig_bytes = tar.extractfile(members[sig_name]).read()
@@ -101,7 +102,7 @@ def _read_otb_emg_all(data_path: Path) -> np.ndarray:
         )
 
         adapters = xml_root.findall(".//Adapter")
-        active   = []
+        active = []
         for i in range(len(adapters) - 1):
             s_ch = int(adapters[i].attrib["ChannelStartIndex"])
             e_ch = int(adapters[i + 1].attrib["ChannelStartIndex"])
@@ -113,13 +114,13 @@ def _read_otb_emg_all(data_path: Path) -> np.ndarray:
             raise ValueError(f"No active adapters in {data_path.name}")
 
         total = sum(n for _, _, n in active)
-        emg   = np.zeros((raw.shape[0], total))
-        col   = 0
+        emg = np.zeros((raw.shape[0], total))
+        col = 0
         for idx, raw_start, n_ch in active:
-            gain  = float(adapters[idx].attrib["Gain"])
-            scale = (power_supply * 1000) / (2 ** nADbit * gain)
+            gain = float(adapters[idx].attrib["Gain"])
+            scale = (power_supply * 1000) / (2**nADbit * gain)
             emg[:, col : col + n_ch] = raw[:, raw_start : raw_start + n_ch] * scale
-            col  += n_ch
+            col += n_ch
 
     return emg  # (samples, channels)
 
@@ -127,7 +128,7 @@ def _read_otb_emg_all(data_path: Path) -> np.ndarray:
 def _read_otb_sip(data_path: Path) -> np.ndarray:
     """Return .sip auxiliary channels from an OTB+ file as (n_sip, samples)."""
     with tarfile.open(str(data_path), "r") as tar:
-        members   = {m.name: m for m in tar.getmembers()}
+        members = {m.name: m for m in tar.getmembers()}
         sip_names = sorted(n for n in members if n.endswith(".sip"))
         if not sip_names:
             raise FileNotFoundError(f"No .sip channels in {data_path.name}")
@@ -140,6 +141,7 @@ def _read_otb_sip(data_path: Path) -> np.ndarray:
 
 
 # ── channel extractors ────────────────────────────────────────────────────────
+
 
 def _load_signal_channels(
     data_paths: List[Path],
@@ -166,6 +168,7 @@ def _load_signal_channels(
                 )
             sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
             from scd_app.io.data_loader import load_field, load_layout
+
             layout = copy.deepcopy(load_layout(layout_path))
             if "fields" in layout and "emg" in layout["fields"]:
                 layout["fields"]["emg"].pop("channels", None)
@@ -210,6 +213,7 @@ def _load_aux_file_channels(
 
 # ── concat-stem parser ────────────────────────────────────────────────────────
 
+
 def _find_source_files_for_concat(
     concat_stem: str,
     data_dir: Path,
@@ -243,15 +247,15 @@ def _find_source_files_for_concat(
     if suffix_start >= len(parts):
         return None  # no trailing digit tokens → can't decode
 
-    prefix   = "_".join(parts[:suffix_start])   # e.g. "sub-01_..._run-0"
-    suffixes = parts[suffix_start:]              # e.g. ["1", "2"]
+    prefix = "_".join(parts[:suffix_start])  # e.g. "sub-01_..._run-0"
+    suffixes = parts[suffix_start:]  # e.g. ["1", "2"]
 
     if len(suffixes) < 2:
         return None  # need at least two source files
 
     source_files: List[Path] = []
     for suf in suffixes:
-        stem = prefix + suf                      # e.g. "sub-01_..._run-01"
+        stem = prefix + suf  # e.g. "sub-01_..._run-01"
         found = None
         for ext in extensions:
             candidate = data_dir / (stem + ext)
@@ -259,13 +263,14 @@ def _find_source_files_for_concat(
                 found = candidate
                 break
         if found is None:
-            return None   # at least one source file missing → abort
+            return None  # at least one source file missing → abort
         source_files.append(found)
 
     return source_files
 
 
 # ── core processing ───────────────────────────────────────────────────────────
+
 
 def build_aux_channels(
     data_paths: List[Path],
@@ -275,10 +280,10 @@ def build_aux_channels(
     """Load force data for every aux-channel entry. Returns the save-ready list."""
     result = []
     for a in aux_cfgs:
-        name   = a.get("name", "?")
+        name = a.get("name", "?")
         source = a.get("source", "signal")
-        s      = int(a.get("start_chan", 0))
-        e      = int(a.get("end_chan", s + 1))
+        s = int(a.get("start_chan", 0))
+        e = int(a.get("end_chan", s + 1))
         try:
             sig = (
                 _load_aux_file_channels(data_paths, a)
@@ -290,12 +295,16 @@ def build_aux_channels(
             continue
 
         arr = np.asarray(sig, dtype=np.float64)
-        result.append({
-            "data":       arr,
-            "meta":       {k: v for k, v in a.items() if k not in ("start_chan", "end_chan")},
-            "start_chan": s,
-            "end_chan":   e,
-        })
+        result.append(
+            {
+                "data": arr,
+                "meta": {
+                    k: v for k, v in a.items() if k not in ("start_chan", "end_chan")
+                },
+                "start_chan": s,
+                "end_chan": e,
+            }
+        )
         print(f"    [ok]   '{name}'  source={source}  ch=[{s},{e})  shape={arr.shape}")
     return result
 
@@ -312,7 +321,9 @@ def process_one(
         decomp = pickle.load(f)
 
     if decomp.get("aux_channels"):
-        print(f"  Warning: already has {len(decomp['aux_channels'])} aux channel(s) — replacing.")
+        print(
+            f"  Warning: already has {len(decomp['aux_channels'])} aux channel(s) — replacing."
+        )
 
     with open(config_path) as f:
         chan_cfg = json.load(f)
@@ -336,6 +347,7 @@ def process_one(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Backfill force/aux-channel data into decomposition pkl files.",
@@ -344,17 +356,20 @@ def main():
     # single-file args
     parser.add_argument("--decomp", help="Single decomposition .pkl to update")
     parser.add_argument(
-        "--data", nargs="+",
+        "--data",
+        nargs="+",
         help="Original recording file(s). Pass multiple for concat decompositions.",
     )
     parser.add_argument("--output", help="Output path (default: overwrite --decomp)")
     # batch args
     parser.add_argument("--decomp-dir", help="Directory of decomposition .pkl files")
-    parser.add_argument("--data-dir",   help="Directory of original recording files")
+    parser.add_argument("--data-dir", help="Directory of original recording files")
     parser.add_argument("--output-dir", help="Output directory for updated pkls")
     # shared
-    parser.add_argument("--config",  required=True, help="Channel-config JSON")
-    parser.add_argument("--layout",  default=None,  help="Data-layout YAML (non-OTB only)")
+    parser.add_argument("--config", required=True, help="Channel-config JSON")
+    parser.add_argument(
+        "--layout", default=None, help="Data-layout YAML (non-OTB only)"
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -371,8 +386,8 @@ def main():
             sys.exit("Batch mode requires --decomp-dir, --data-dir, and --output-dir.")
 
         decomp_dir = Path(args.decomp_dir)
-        data_dir   = Path(args.data_dir)
-        out_dir    = Path(args.output_dir)
+        data_dir = Path(args.data_dir)
+        out_dir = Path(args.output_dir)
 
         pkls = sorted(decomp_dir.glob("*.pkl"))
         if not pkls:
@@ -455,8 +470,8 @@ def main():
         )
 
     decomp_path = Path(args.decomp)
-    data_paths  = [Path(p) for p in args.data]
-    out_path    = Path(args.output) if args.output else decomp_path
+    data_paths = [Path(p) for p in args.data]
+    out_path = Path(args.output) if args.output else decomp_path
 
     if not decomp_path.exists():
         sys.exit(f"Error: --decomp not found: {decomp_path}")

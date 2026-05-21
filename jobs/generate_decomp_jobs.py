@@ -22,18 +22,18 @@ import yaml
 
 # ── HPC / environment settings (edit as needed) ──────────────────────────────
 
-CONDA_ENV    = "scd"                                        # conda environment
+CONDA_ENV = "scd"  # conda environment
 PATH_TO_LOGS = Path(os.environ.get("EPHEMERAL", "/tmp"), "thinfilm_logs_dir")
 
 # ── decomposition parameters ─────────────────────────────────────────────────
 
 SIL_THRESHOLD = 0.85
-ITERATIONS    = 150
+ITERATIONS = 150
 
 # ── paths ────────────────────────────────────────────────────────────────────
 
 TEMPLATE_PATH = Path("jobs/batch_decomp_template.sh")
-JOB_OUTPUTS   = Path("jobs/job_outputs")
+JOB_OUTPUTS = Path("jobs/job_outputs")
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -42,11 +42,11 @@ def generate_jobs(yaml_path: Path) -> None:
     with open(yaml_path) as f:
         fl = yaml.safe_load(f)
 
-    subject      = fl["subject"]
-    data_dir     = Path(fl["data_dir"])
-    channel_cfg  = fl["channel_config"]
-    rejections   = fl["output_rejections"]
-    output_dir   = fl["output_dir"]
+    subject = fl["subject"]
+    data_dir = Path(fl["data_dir"])
+    channel_cfg = fl["channel_config"]
+    rejections = fl["output_rejections"]
+    output_dir = fl["output_dir"]
 
     with open(TEMPLATE_PATH) as f:
         template = f.read()
@@ -55,8 +55,8 @@ def generate_jobs(yaml_path: Path) -> None:
 
     generated = []
     for group in fl["decompositions"]:
-        name        = group["name"]
-        files       = group["files"]
+        name = group["name"]
+        files = group["files"]
         concatenate = group["concatenate"]
 
         run_name = f"{subject.replace('-', '')}_{name}"  # e.g. sub01_5ext_I
@@ -75,18 +75,18 @@ def generate_jobs(yaml_path: Path) -> None:
         concat_bool = str(concatenate)
 
         job_script = template
-        job_script = job_script.replace("%RUN_NAME%",        run_name)
-        job_script = job_script.replace("%CHANNEL_CONFIG%",  channel_cfg)
-        job_script = job_script.replace("%FILES_BASH_ARRAY%",files_bash_array)
-        job_script = job_script.replace("%FILES_ECHO%",      files_echo)
-        job_script = job_script.replace("%CONCAT_FLAG%",    concat_flag)
-        job_script = job_script.replace("%CONCAT_BOOL%",    concat_bool)
-        job_script = job_script.replace("%REJECTIONS_FILE%",rejections)
-        job_script = job_script.replace("%OUTPUT_DIR%",     output_dir)
-        job_script = job_script.replace("%PATH_TO_LOGS%",   str(PATH_TO_LOGS))
-        job_script = job_script.replace("%ENVIRONMENT%",    CONDA_ENV)
-        job_script = job_script.replace("%SIL_THRESHOLD%",  str(SIL_THRESHOLD))
-        job_script = job_script.replace("%ITERATIONS%",     str(ITERATIONS))
+        job_script = job_script.replace("%RUN_NAME%", run_name)
+        job_script = job_script.replace("%CHANNEL_CONFIG%", channel_cfg)
+        job_script = job_script.replace("%FILES_BASH_ARRAY%", files_bash_array)
+        job_script = job_script.replace("%FILES_ECHO%", files_echo)
+        job_script = job_script.replace("%CONCAT_FLAG%", concat_flag)
+        job_script = job_script.replace("%CONCAT_BOOL%", concat_bool)
+        job_script = job_script.replace("%REJECTIONS_FILE%", rejections)
+        job_script = job_script.replace("%OUTPUT_DIR%", output_dir)
+        job_script = job_script.replace("%PATH_TO_LOGS%", str(PATH_TO_LOGS))
+        job_script = job_script.replace("%ENVIRONMENT%", CONDA_ENV)
+        job_script = job_script.replace("%SIL_THRESHOLD%", str(SIL_THRESHOLD))
+        job_script = job_script.replace("%ITERATIONS%", str(ITERATIONS))
 
         out_path = Path("jobs") / f"batch_decomp_{run_name}.sh"
         with open(out_path, "w") as f:
@@ -108,7 +108,9 @@ def generate_jobs(yaml_path: Path) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("yaml", help="Path to file-list YAML (e.g. jobs/file_lists/sub01_day01.yaml)")
+    ap.add_argument(
+        "yaml", help="Path to file-list YAML (e.g. jobs/file_lists/sub01_day01.yaml)"
+    )
     args = ap.parse_args()
 
     generate_jobs(Path(args.yaml))

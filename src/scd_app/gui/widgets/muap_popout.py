@@ -74,9 +74,19 @@ class MuapPopoutDialog(QDialog):
 
         _add_lbl(f"<span style='{lbl_style}'></span>", 1, 0, justify="center")
         for c in range(cols):
-            _add_lbl(f"<span style='{lbl_style}'><b>{c + 1}</b></span>", 1, c + 1, justify="center")
+            _add_lbl(
+                f"<span style='{lbl_style}'><b>{c + 1}</b></span>",
+                1,
+                c + 1,
+                justify="center",
+            )
         for r in range(rows):
-            _add_lbl(f"<span style='{lbl_style}'><b>{r + 1}</b></span>", r + 2, 0, justify="center")
+            _add_lbl(
+                f"<span style='{lbl_style}'><b>{r + 1}</b></span>",
+                r + 2,
+                0,
+                justify="center",
+            )
 
         _rej_bg = (50, 30, 30)
         _empty_bg = (28, 28, 28)
@@ -99,7 +109,11 @@ class MuapPopoutDialog(QDialog):
                 rc = (r, c)
                 if rc in rejected_positions:
                     p.getViewBox().setBackgroundColor(_rej_bg)
-                    p.plot([0, n_samples], [0, 0], pen=pg.mkPen(color=(140, 60, 60), width=1))
+                    p.plot(
+                        [0, n_samples],
+                        [0, 0],
+                        pen=pg.mkPen(color=(140, 60, 60), width=1),
+                    )
                 elif rc not in electrode_positions:
                     p.getViewBox().setBackgroundColor(_empty_bg)
 

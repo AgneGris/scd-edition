@@ -42,10 +42,12 @@ logger = logging.getLogger(__name__)
 try:
     from motor_unit_toolbox import props as tb_props
     from motor_unit_toolbox import spike_comp as tb_spike
+
     _TOOLBOX_AVAILABLE = True
 except ImportError:
     _TOOLBOX_AVAILABLE = False
     import warnings
+
     warnings.warn(
         "motor_unit_toolbox not installed – quality metrics will be unavailable. "
         "Install with: pip install git+https://github.com/imendezguerra/motor_unit_toolbox.git",
@@ -82,25 +84,26 @@ class MUProperties:
     Naming follows motor_unit_toolbox conventions where possible.
     Values are NaN when computation failed or data was insufficient.
     """
+
     # ── firing properties ──────────────────────────────────────────────────
     n_spikes: int = 0
-    discharge_rate_hz: float = float("nan")    # mean DR (active period)
-    cov_pct: float = float("nan")              # CoV of ISI × 100  (%)
-    min_isi_ms: float = float("nan")           # minimum ISI in ms
+    discharge_rate_hz: float = float("nan")  # mean DR (active period)
+    cov_pct: float = float("nan")  # CoV of ISI × 100  (%)
+    min_isi_ms: float = float("nan")  # minimum ISI in ms
 
     # ── quality metrics ───────────────────────────────────────────────────
-    sil: float = float("nan")                  # silhouette measure  [0-1]
-    pnr_db: float = float("nan")               # pulse-to-noise ratio  (dB)
-    spike_centroid: float = float("nan")       # mean source² at spike peaks
-    noise_centroid: float = float("nan")       # mean source² at non-spike peaks
+    sil: float = float("nan")  # silhouette measure  [0-1]
+    pnr_db: float = float("nan")  # pulse-to-noise ratio  (dB)
+    spike_centroid: float = float("nan")  # mean source² at spike peaks
+    noise_centroid: float = float("nan")  # mean source² at non-spike peaks
 
     # ── MUAP features (scalar summaries over the selected channels) ────────
-    muap_max_ptp_uv: float = float("nan")      # max PTP across channels
-    muap_max_energy: float = float("nan")      # max energy across channels
-    muap_max_wl: float = float("nan")          # max waveform length
-    muap_peak_freq_hz: float = float("nan")    # peak spectral freq (IQR chs)
+    muap_max_ptp_uv: float = float("nan")  # max PTP across channels
+    muap_max_energy: float = float("nan")  # max energy across channels
+    muap_max_wl: float = float("nan")  # max waveform length
+    muap_peak_freq_hz: float = float("nan")  # peak spectral freq (IQR chs)
     muap_median_freq_hz: float = float("nan")  # median spectral freq
-    muap_mean_freq_hz: float = float("nan")    # mean spectral freq
+    muap_mean_freq_hz: float = float("nan")  # mean spectral freq
 
     # ── reliability flag  (from toolbox thresholds) ────────────────────────
     is_reliable: bool = False
@@ -119,8 +122,11 @@ class MUProperties:
             "sil": self.sil >= 0.9 if not np.isnan(self.sil) else False,
             "pnr": self.pnr_db >= 30 if not np.isnan(self.pnr_db) else False,
             "cov": self.cov_pct <= 40 if not np.isnan(self.cov_pct) else False,
-            "dr": (3 <= self.discharge_rate_hz <= 40)
-                  if not np.isnan(self.discharge_rate_hz) else False,
+            "dr": (
+                (3 <= self.discharge_rate_hz <= 40)
+                if not np.isnan(self.discharge_rate_hz)
+                else False
+            ),
             "n_spikes": self.n_spikes >= 10,
         }
 
@@ -128,6 +134,7 @@ class MUProperties:
 # ══════════════════════════════════════════════════════════════════════════════
 # Format-conversion helpers
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def timestamps_to_spike_train(
     timestamps: np.ndarray,
@@ -219,6 +226,7 @@ def timestamps_to_time_axis(
 # Core computation
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _compute_centroids(
     source: np.ndarray,
     timestamps: np.ndarray,
@@ -245,7 +253,9 @@ def _compute_centroids(
     all_peaks, _ = find_peaks(src_sq, distance=min_peak_sep)
     spike_set = set(ts.tolist())
     noise_peaks = all_peaks[np.array([p not in spike_set for p in all_peaks])]
-    noise_centroid = float(np.mean(src_sq[noise_peaks])) if len(noise_peaks) > 0 else float("nan")
+    noise_centroid = (
+        float(np.mean(src_sq[noise_peaks])) if len(noise_peaks) > 0 else float("nan")
+    )
 
     return spike_centroid, noise_centroid
 
@@ -262,9 +272,9 @@ def _nanval(arr: np.ndarray, idx: int) -> float:
 def compute_unit_properties(
     timestamps: np.ndarray,
     source: np.ndarray,
-    spike_train_col: np.ndarray,      # (n_samples,) bool — column for this unit
-    ipts_col: np.ndarray,             # (n_samples,) float — column for this unit
-    time_axis: np.ndarray,            # (n_samples,) float  seconds
+    spike_train_col: np.ndarray,  # (n_samples,) bool — column for this unit
+    ipts_col: np.ndarray,  # (n_samples,) float — column for this unit
+    time_axis: np.ndarray,  # (n_samples,) float  seconds
     fsamp: float,
     muap_grid: Optional[np.ndarray],  # (rows, cols, win_samples) or None
     fsamp_int: int,
@@ -335,7 +345,7 @@ def compute_unit_properties(
     # ── MUAP features ─────────────────────────────────────────────────────
     if muap_grid is not None and muap_grid.ndim == 3:
         try:
-            muap4 = muap_grid[np.newaxis]   # (1, rows, cols, win_samples)
+            muap4 = muap_grid[np.newaxis]  # (1, rows, cols, win_samples)
 
             ptp = tb_props.get_muap_ptp(muap4, sel_chs_by=None)
             props.muap_max_ptp_uv = float(np.nanmax(ptp))
@@ -346,13 +356,19 @@ def compute_unit_properties(
             wl = tb_props.get_muap_waveform_length(muap4, sel_chs_by=None)
             props.muap_max_wl = float(np.nanmax(wl))
 
-            peak_f = tb_props.get_muap_peak_frequency(muap4, sel_chs_by="iqr", fs=fsamp_int)
+            peak_f = tb_props.get_muap_peak_frequency(
+                muap4, sel_chs_by="iqr", fs=fsamp_int
+            )
             props.muap_peak_freq_hz = float(np.nanmean(peak_f[np.isfinite(peak_f)]))
 
-            med_f = tb_props.get_muap_median_frequency(muap4, sel_chs_by="iqr", fs=fsamp_int)
+            med_f = tb_props.get_muap_median_frequency(
+                muap4, sel_chs_by="iqr", fs=fsamp_int
+            )
             props.muap_median_freq_hz = float(np.nanmean(med_f[np.isfinite(med_f)]))
 
-            mean_f = tb_props.get_muap_mean_frequency(muap4, sel_chs_by="iqr", fs=fsamp_int)
+            mean_f = tb_props.get_muap_mean_frequency(
+                muap4, sel_chs_by="iqr", fs=fsamp_int
+            )
             props.muap_mean_freq_hz = float(np.nanmean(mean_f[np.isfinite(mean_f)]))
 
         except Exception as e:
@@ -364,8 +380,7 @@ def compute_unit_properties(
     sil = props.sil
     pnr = props.pnr_db
     props.is_reliable = (
-        not np.isnan(sil) and sil >= 0.8
-        and not np.isnan(pnr) and pnr >= 32
+        not np.isnan(sil) and sil >= 0.8 and not np.isnan(pnr) and pnr >= 32
     )
 
     return props
@@ -374,7 +389,7 @@ def compute_unit_properties(
 def compute_port_properties(
     all_timestamps: List[np.ndarray],
     all_sources: List[np.ndarray],
-    emg_port: Optional[np.ndarray],          # (n_channels, n_samples)
+    emg_port: Optional[np.ndarray],  # (n_channels, n_samples)
     grid_positions: Optional[Dict[int, Tuple[int, int]]],
     grid_shape: Optional[Tuple[int, int]],
     fsamp: float,
@@ -411,7 +426,7 @@ def compute_port_properties(
     fsamp_int = int(round(fsamp))
 
     spike_mat = build_spike_train_matrix(all_timestamps, n_samples)
-    ipts_mat  = sources_to_ipts_matrix(all_sources, n_samples)
+    ipts_mat = sources_to_ipts_matrix(all_sources, n_samples)
     time_axis = timestamps_to_time_axis(n_samples, fsamp)
 
     muap_grids: List[Optional[np.ndarray]] = [None] * n_units
@@ -428,7 +443,9 @@ def compute_port_properties(
                 n_ch = emg_port.shape[0]
                 emg_grid = emg_port.reshape(n_ch, 1, -1)
                 grid_shape = (n_ch, 1)
-                logger.info("No grid config — using stacked fallback (%d ch × 1 col)", n_ch)
+                logger.info(
+                    "No grid config — using stacked fallback (%d ch × 1 col)", n_ch
+                )
 
             muaps_all = tb_props.get_muaps(
                 spike_mat, emg_grid, fs=fsamp_int, win_ms=win_ms
@@ -476,6 +493,7 @@ def compute_port_properties(
 # ══════════════════════════════════════════════════════════════════════════════
 # Single-unit recomputation  (after an edit)
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def recompute_unit_properties(
     mu_props: MUProperties,

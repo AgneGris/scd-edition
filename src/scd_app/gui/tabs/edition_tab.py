@@ -69,6 +69,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from motor_unit_toolbox import spike_comp as _tb_spike_comp
+
     _SPIKE_COMP_AVAILABLE = True
 except ImportError:
     _SPIKE_COMP_AVAILABLE = False
@@ -215,45 +216,45 @@ GRID_POSITIONS_20x2 = {
     # Col 0 = Side A (pads 1-20), Col 1 = Side B (pads 21-40)
     # Row 0 = pad 1/21 (proximal end), Row 19 = pad 20/40 (distal end)
     # Derived from DEMOVE->OTBio connector mapping table
-    0: (18, 1),   # OTBio 1  -> DEMOVE 39 -> Side B pad 19
-    1: (17, 1),   # OTBio 2  -> DEMOVE 38 -> Side B pad 18
-    2: (16, 1),   # OTBio 3  -> DEMOVE 37 -> Side B pad 17
-    3: (19, 1),   # OTBio 4  -> DEMOVE 40 -> Side B pad 20
-    4: (12, 1),   # OTBio 5  -> DEMOVE 33 -> Side B pad 13
-    5: (15, 1),   # OTBio 6  -> DEMOVE 36 -> Side B pad 16
-    6: (14, 1),   # OTBio 7  -> DEMOVE 35 -> Side B pad 15
-    7: (13, 1),   # OTBio 8  -> DEMOVE 34 -> Side B pad 14
-    8: (10, 1),   # OTBio 9  -> DEMOVE 31 -> Side B pad 11
-    9: (9, 1),    # OTBio 10 -> DEMOVE 30 -> Side B pad 10
-    10: (6, 1),   # OTBio 11 -> DEMOVE 27 -> Side B pad 7
-    11: (5, 1),   # OTBio 12 -> DEMOVE 26 -> Side B pad 6
-    12: (2, 1),   # OTBio 13 -> DEMOVE 23 -> Side B pad 3
-    13: (1, 1),   # OTBio 14 -> DEMOVE 22 -> Side B pad 2
+    0: (18, 1),  # OTBio 1  -> DEMOVE 39 -> Side B pad 19
+    1: (17, 1),  # OTBio 2  -> DEMOVE 38 -> Side B pad 18
+    2: (16, 1),  # OTBio 3  -> DEMOVE 37 -> Side B pad 17
+    3: (19, 1),  # OTBio 4  -> DEMOVE 40 -> Side B pad 20
+    4: (12, 1),  # OTBio 5  -> DEMOVE 33 -> Side B pad 13
+    5: (15, 1),  # OTBio 6  -> DEMOVE 36 -> Side B pad 16
+    6: (14, 1),  # OTBio 7  -> DEMOVE 35 -> Side B pad 15
+    7: (13, 1),  # OTBio 8  -> DEMOVE 34 -> Side B pad 14
+    8: (10, 1),  # OTBio 9  -> DEMOVE 31 -> Side B pad 11
+    9: (9, 1),  # OTBio 10 -> DEMOVE 30 -> Side B pad 10
+    10: (6, 1),  # OTBio 11 -> DEMOVE 27 -> Side B pad 7
+    11: (5, 1),  # OTBio 12 -> DEMOVE 26 -> Side B pad 6
+    12: (2, 1),  # OTBio 13 -> DEMOVE 23 -> Side B pad 3
+    13: (1, 1),  # OTBio 14 -> DEMOVE 22 -> Side B pad 2
     14: (18, 0),  # OTBio 15 -> DEMOVE 19 -> Side A pad 19
     15: (17, 0),  # OTBio 16 -> DEMOVE 18 -> Side A pad 18
     16: (14, 0),  # OTBio 17 -> DEMOVE 15 -> Side A pad 15
     17: (13, 0),  # OTBio 18 -> DEMOVE 14 -> Side A pad 14
     18: (10, 0),  # OTBio 19 -> DEMOVE 11 -> Side A pad 11
-    19: (9, 0),   # OTBio 20 -> DEMOVE 10 -> Side A pad 10
-    20: (6, 0),   # OTBio 21 -> DEMOVE 7  -> Side A pad 7
-    21: (5, 0),   # OTBio 22 -> DEMOVE 6  -> Side A pad 6
-    22: (2, 0),   # OTBio 23 -> DEMOVE 3  -> Side A pad 3
-    23: (1, 0),   # OTBio 24 -> DEMOVE 2  -> Side A pad 2
-    24: (0, 0),   # OTBio 25 -> DEMOVE 1  -> Side A pad 1
-    25: (3, 0),   # OTBio 26 -> DEMOVE 4  -> Side A pad 4
-    26: (4, 0),   # OTBio 27 -> DEMOVE 5  -> Side A pad 5
-    27: (7, 0),   # OTBio 28 -> DEMOVE 8  -> Side A pad 8
-    28: (8, 0),   # OTBio 29 -> DEMOVE 9  -> Side A pad 9
+    19: (9, 0),  # OTBio 20 -> DEMOVE 10 -> Side A pad 10
+    20: (6, 0),  # OTBio 21 -> DEMOVE 7  -> Side A pad 7
+    21: (5, 0),  # OTBio 22 -> DEMOVE 6  -> Side A pad 6
+    22: (2, 0),  # OTBio 23 -> DEMOVE 3  -> Side A pad 3
+    23: (1, 0),  # OTBio 24 -> DEMOVE 2  -> Side A pad 2
+    24: (0, 0),  # OTBio 25 -> DEMOVE 1  -> Side A pad 1
+    25: (3, 0),  # OTBio 26 -> DEMOVE 4  -> Side A pad 4
+    26: (4, 0),  # OTBio 27 -> DEMOVE 5  -> Side A pad 5
+    27: (7, 0),  # OTBio 28 -> DEMOVE 8  -> Side A pad 8
+    28: (8, 0),  # OTBio 29 -> DEMOVE 9  -> Side A pad 9
     29: (11, 0),  # OTBio 30 -> DEMOVE 12 -> Side A pad 12
     30: (12, 0),  # OTBio 31 -> DEMOVE 13 -> Side A pad 13
     31: (15, 0),  # OTBio 32 -> DEMOVE 16 -> Side A pad 16
     32: (16, 0),  # OTBio 33 -> DEMOVE 17 -> Side A pad 17
     33: (19, 0),  # OTBio 34 -> DEMOVE 20 -> Side A pad 20
-    34: (0, 1),   # OTBio 35 -> DEMOVE 21 -> Side B pad 1
-    35: (3, 1),   # OTBio 36 -> DEMOVE 24 -> Side B pad 4
-    36: (4, 1),   # OTBio 37 -> DEMOVE 25 -> Side B pad 5
-    37: (7, 1),   # OTBio 38 -> DEMOVE 28 -> Side B pad 8
-    38: (8, 1),   # OTBio 39 -> DEMOVE 29 -> Side B pad 9
+    34: (0, 1),  # OTBio 35 -> DEMOVE 21 -> Side B pad 1
+    35: (3, 1),  # OTBio 36 -> DEMOVE 24 -> Side B pad 4
+    36: (4, 1),  # OTBio 37 -> DEMOVE 25 -> Side B pad 5
+    37: (7, 1),  # OTBio 38 -> DEMOVE 28 -> Side B pad 8
+    38: (8, 1),  # OTBio 39 -> DEMOVE 29 -> Side B pad 9
     39: (11, 1),  # OTBio 40 -> DEMOVE 32 -> Side B pad 12
 }
 
@@ -612,6 +613,7 @@ ELECTRODE_GRIDS = {
     },
 }
 
+
 def get_grid_config(electrode_type: Optional[str]) -> Optional[Dict]:
     if electrode_type is None:
         return None
@@ -648,14 +650,18 @@ class EditionTab(QWidget):
         self._loaded_path: Optional[Path] = None
         self._output_path: Optional[Path] = None
         self._quit_after_save: bool = False
+        self._config_aux_channels: list = (
+            []
+        )  # from the last applied config, used to fill missing MVC on load
 
         self._start_sample: int = 0
         self._end_sample: int = 0
         self._full_source_mode: bool = False
         self._redetect_timestamps: bool = True
 
-        self._undo_stack: List[UndoAction] = []
-        self._redo_stack: List[UndoAction] = []
+        self._undo_stack: Dict[tuple, List[UndoAction]] = {}
+        self._redo_stack: Dict[tuple, List[UndoAction]] = {}
+        self._edit_history: list = []  # accumulated across sessions; saved in pickle
         self._original_decomp_data: Optional[dict] = None
         self._filter_recalc_available: bool = False
         self._muap_popout: Optional[MuapPopoutDialog] = None
@@ -1001,7 +1007,9 @@ class EditionTab(QWidget):
 
         # ── Session-level actions ────────────────────────────────────────
         lay.addWidget(
-            QLabel("SESSION", styleSheet=get_section_header_style("warning", margin_top=0))
+            QLabel(
+                "SESSION", styleSheet=get_section_header_style("warning", margin_top=0)
+            )
         )
 
         self.btn_flag_within_dups = QPushButton("⧉ Within-Port Duplicates")
@@ -1119,6 +1127,11 @@ class EditionTab(QWidget):
         self._fsamp = fsamp
         self.source_plot.set_fsamp(fsamp)
         self.fr_plot.set_fsamp(fsamp)
+
+    def set_aux_configs(self, aux_configs: list):
+        """Store the current config's aux channel definitions (including MVC) so they
+        can be used to fill in missing MVC values when loading an old decomposition."""
+        self._config_aux_channels = list(aux_configs)
 
     # ------------------------------------------------------------------
     # Selection arm toggling
@@ -1264,7 +1277,8 @@ class EditionTab(QWidget):
         """Return a snapshot of all data needed by the Visualisation tab."""
         return {
             "ports": self._ports,
-            "aux_channels": (self._original_decomp_data or {}).get("aux_channels") or [],
+            "aux_channels": (self._original_decomp_data or {}).get("aux_channels")
+            or [],
             "fsamp": self._fsamp,
             "start_sample": self._start_sample,
             "end_sample": self._end_sample,
@@ -1345,8 +1359,15 @@ class EditionTab(QWidget):
         self._grid_info.clear()
         self._raw_port_channels.clear()
         self._rejected_ch_positions.clear()
-        self._undo_stack.clear()
+        self._undo_stack.clear()  # clears all per-unit histories
         self._redo_stack.clear()
+        # Carry forward any edit history already stored in the file so the log
+        # accumulates across multiple editing sessions.
+        prior_history = decomp_data.get("edit_history", [])
+        if isinstance(prior_history, list):
+            self._edit_history = prior_history
+        else:
+            self._edit_history = []
         # Normalise aux channel structure: older saves nest metadata under "meta";
         # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
         for ch in decomp_data.get("aux_channels", []):
@@ -1359,8 +1380,30 @@ class EditionTab(QWidget):
             mvc = ch.get("mvc")
             if mvc is not None and 0 < float(mvc) < 1.0:
                 corrected = float(mvc) * 1000.0
-                print(f"  [load] mvc unit fix: {ch.get('unit','?')} {mvc} V → {corrected} mV")
+                print(
+                    f"  [load] mvc unit fix: {ch.get('unit','?')} {mvc} V → {corrected} mV"
+                )
                 ch["mvc"] = corrected
+
+        # Fill in missing MVC from the currently loaded config (matched by name or unit).
+        # This handles old decompositions that were saved before MVC was configured.
+        if self._config_aux_channels:
+            cfg_by_key = {}
+            for cfg in self._config_aux_channels:
+                for key in (cfg.get("name", ""), cfg.get("unit", "")):
+                    if key:
+                        cfg_by_key[key] = cfg
+            for ch in decomp_data.get("aux_channels", []):
+                if ch.get("mvc") is not None:
+                    continue
+                match = cfg_by_key.get(ch.get("name", "")) or cfg_by_key.get(
+                    ch.get("unit", "")
+                )
+                if match and match.get("mvc") is not None:
+                    ch["mvc"] = match["mvc"]
+                    print(
+                        f"  [load] filled mvc from config: {ch.get('unit','?')} = {ch['mvc']} mV"
+                    )
 
         self._original_decomp_data = decomp_data
 
@@ -1381,20 +1424,25 @@ class EditionTab(QWidget):
         end_sample = emg_full.shape[1] if emg_full is not None else 0
 
         if skip_recalc:
-            logger.info("skip_filter_recalc=True — using stored sources/timestamps as-is")
+            logger.info(
+                "skip_filter_recalc=True — using stored sources/timestamps as-is"
+            )
             can_full = False
         elif can_full:
             try:
                 self._update_status("Computing full-length sources (peel-off replay)…")
                 full_port_results, start_sample, end_sample, err = (
-                    compute_all_full_sources(decomp_data,
-                                            redetect_timestamps=self._redetect_timestamps)
+                    compute_all_full_sources(
+                        decomp_data, redetect_timestamps=self._redetect_timestamps
+                    )
                 )
                 if err:
                     logger.warning("Full source warning: %s", err)
                     full_port_results = {}
             except Exception as e:
-                logger.error("Full source computation failed: %s\n%s", e, traceback.format_exc())
+                logger.error(
+                    "Full source computation failed: %s\n%s", e, traceback.format_exc()
+                )
                 full_port_results = {}
         else:
             sel_pts = decomp_data.get(
@@ -1414,18 +1462,26 @@ class EditionTab(QWidget):
         self._full_source_mode = bool(full_port_results)
 
         if self._full_source_mode:
-            logger.info("Full-length source mode active (peel-off + source_to_timestamps)")
+            logger.info(
+                "Full-length source mode active (peel-off + source_to_timestamps)"
+            )
         else:
-            logger.info("Plateau-only source mode%s",
-                        f" — {reason}" if not can_full else "")
+            logger.info(
+                "Plateau-only source mode%s", f" — {reason}" if not can_full else ""
+            )
 
         ports = decomp_data.get("ports", [])
         ch_offset = 0
         for port_idx, port_name in enumerate(ports):
             ch_offset += self._load_single_port(
-                port_idx, port_name, decomp_data,
-                emg_full, start_sample, end_sample,
-                full_port_results, ch_offset,
+                port_idx,
+                port_name,
+                decomp_data,
+                emg_full,
+                start_sample,
+                end_sample,
+                full_port_results,
+                ch_offset,
             )
 
         self._refresh_port_combo()
@@ -1458,9 +1514,7 @@ class EditionTab(QWidget):
             btn.setEnabled(True)
 
         all_mus_have_props = all(
-            mu.props is not None
-            for mus in self._ports.values()
-            for mu in mus
+            mu.props is not None for mus in self._ports.values() for mu in mus
         )
         if not all_mus_have_props:
             _no_props_tip = "Compute MU properties first"
@@ -1475,8 +1529,13 @@ class EditionTab(QWidget):
             1 for mu in all_mus if mu.props is not None and mu.props.is_reliable
         )
         n_unreliable = n_total - n_reliable
-        logger.info("Reliability: %d/%d reliable, %d/%d not reliable",
-                    n_reliable, n_total, n_unreliable, n_total)
+        logger.info(
+            "Reliability: %d/%d reliable, %d/%d not reliable",
+            n_reliable,
+            n_total,
+            n_unreliable,
+            n_total,
+        )
         self._update_status(
             f"Loaded {n_total} MUs — "
             f"{n_reliable} reliable  |  {n_unreliable} not reliable"
@@ -1636,8 +1695,11 @@ class EditionTab(QWidget):
                 all_timestamps=props_ts,
                 all_sources=props_src,
                 emg_port=emg_port,
-                grid_positions=corrected_positions if corrected_positions is not None
-                               else (grid_cfg["positions"] if grid_cfg else None),
+                grid_positions=(
+                    corrected_positions
+                    if corrected_positions is not None
+                    else (grid_cfg["positions"] if grid_cfg else None)
+                ),
                 grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
                 fsamp=self._fsamp,
             )
@@ -1656,10 +1718,13 @@ class EditionTab(QWidget):
         if emg_port is not None:
             self._emg_data[port_name] = emg_port
 
-        logger.info("Port '%s': %d MUs, %d spikes%s",
-                    port_name, len(motor_units),
-                    sum(len(m.timestamps) for m in motor_units),
-                    " (full)" if self._full_source_mode else "")
+        logger.info(
+            "Port '%s': %d MUs, %d spikes%s",
+            port_name,
+            len(motor_units),
+            sum(len(m.timestamps) for m in motor_units),
+            " (full)" if self._full_source_mode else "",
+        )
         return n_ch
 
     @staticmethod
@@ -1776,6 +1841,7 @@ class EditionTab(QWidget):
             "skip_filter_recalc": True,
             "mu_properties": mu_properties,
             "flagged_mus": flagged_mus_per_port,
+            "edit_history": self._edit_history,
         }
 
         if self._original_decomp_data is not None:
@@ -1938,18 +2004,89 @@ class EditionTab(QWidget):
     # Undo / Redo
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Edit history logging
+    # ------------------------------------------------------------------
+
+    def _log_event(
+        self, event_type: str, action: str, port_name: str, mu_idx: int, **extra
+    ):
+        """Append one entry to _edit_history for any kind of event.
+
+        event_type: "edit" | "undo" | "redo" | "flag" | "unflag" |
+                    "delete_flagged" | "flag_within_duplicates" | "flag_cross_duplicates"
+        extra: any additional serialisable fields to include in the record.
+        """
+        from datetime import datetime
+
+        self._edit_history.append(
+            {
+                "datetime": datetime.now().isoformat(),
+                "event_type": event_type,
+                "action": action,
+                "port_name": port_name,
+                "mu_idx": mu_idx,
+                "fsamp": self._fsamp,
+                **extra,
+            }
+        )
+
+    def _log_edit(self, event_type: str, action: UndoAction):
+        """Append one entry to _edit_history for an undo-tracked spike edit.
+
+        event_type: "edit" | "undo" | "redo"
+        Timestamps are stored as plain Python lists so the history is
+        serialisable without numpy and easy to consume for ML training.
+        """
+
+        def _to_list(arr):
+            if arr is None:
+                return None
+            return np.asarray(arr).flatten().tolist()
+
+        if event_type in ("edit", "redo"):
+            ts_before = _to_list(action.old_timestamps)
+            ts_after = _to_list(action.new_timestamps)
+        else:  # undo
+            ts_before = _to_list(action.new_timestamps)
+            ts_after = _to_list(action.old_timestamps)
+
+        added, removed = [], []
+        if ts_before is not None and ts_after is not None:
+            before_set = set(ts_before)
+            after_set = set(ts_after)
+            added = sorted(after_set - before_set)
+            removed = sorted(before_set - after_set)
+
+        self._log_event(
+            event_type,
+            action.description,
+            action.port_name,
+            action.mu_idx,
+            samples_added=added,
+            samples_removed=removed,
+        )
+
+    # ------------------------------------------------------------------
+
     def _push_undo(self, action: UndoAction):
-        self._undo_stack.append(action)
-        self._redo_stack.clear()
-        if len(self._undo_stack) > 100:
-            self._undo_stack.pop(0)
+        key = (action.port_name, action.mu_idx)
+        stack = self._undo_stack.setdefault(key, [])
+        stack.append(action)
+        self._redo_stack.pop(key, None)  # new edit clears redo for this unit only
+        if len(stack) > 100:
+            stack.pop(0)
+        self._log_edit("edit", action)
 
     def _undo(self):
-        if not self._undo_stack:
+        key = (self._current_port or "", self._current_mu_idx)
+        stack = self._undo_stack.get(key, [])
+        if not stack:
             self._update_status("Nothing to undo")
             return
-        action = self._undo_stack.pop()
-        self._redo_stack.append(action)
+        action = stack.pop()
+        self._redo_stack.setdefault(key, []).append(action)
+        self._log_edit("undo", action)
         self._apply_undo_redo(action, is_undo=True)
         self._on_data_changed(
             f"Undo: {action.description}",
@@ -1957,11 +2094,14 @@ class EditionTab(QWidget):
         )
 
     def _redo(self):
-        if not self._redo_stack:
+        key = (self._current_port or "", self._current_mu_idx)
+        stack = self._redo_stack.get(key, [])
+        if not stack:
             self._update_status("Nothing to redo")
             return
-        action = self._redo_stack.pop()
-        self._undo_stack.append(action)
+        action = stack.pop()
+        self._undo_stack.setdefault(key, []).append(action)
+        self._log_edit("redo", action)
         self._apply_undo_redo(action, is_undo=False)
         self._on_data_changed(
             f"Redo: {action.description}",
@@ -2135,15 +2275,20 @@ class EditionTab(QWidget):
         mu.flagged_duplicate = not mu.flagged_duplicate
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        event = "flag" if mu.flagged_duplicate else "unflag"
+        self._log_event(
+            event,
+            f"{event} MU for deletion",
+            self._current_port or "",
+            self._current_mu_idx,
+        )
         self._update_status(
             f"MU {mu.id} {'flagged' if mu.flagged_duplicate else 'unflagged'}"
         )
 
     def _delete_all_flagged(self):
         ports = list(self._ports.keys())
-        total = sum(
-            1 for p in ports for mu in self._ports[p] if mu.flagged_duplicate
-        )
+        total = sum(1 for p in ports for mu in self._ports[p] if mu.flagged_duplicate)
         if total == 0:
             self._update_status("No MUs are flagged for deletion")
             return
@@ -2183,16 +2328,28 @@ class EditionTab(QWidget):
                         if uid is None:
                             remapped.append(entry)
                         elif uid in old_to_new:
-                            remapped.append({**entry, "accepted_unit_idx": old_to_new[uid]})
+                            remapped.append(
+                                {**entry, "accepted_unit_idx": old_to_new[uid]}
+                            )
                     new_peel.append(remapped)
                 self._original_decomp_data["peel_off_sequence"] = new_peel
 
+        deleted_by_port = {
+            p: [mu.id for mu in self._ports[p] if mu.flagged_duplicate] for p in ports
+        }
         for port_name in ports:
             kept = [mu for mu in self._ports[port_name] if not mu.flagged_duplicate]
             for i, mu in enumerate(kept):
                 mu.id = i
             self._ports[port_name] = kept
 
+        self._log_event(
+            "delete_flagged",
+            f"deleted {total} flagged MU(s)",
+            "",
+            -1,
+            deleted_by_port=deleted_by_port,
+        )
         self._current_mu_idx = 0
         self._refresh_mu_combo()
         if self.mu_combo.count() > 0:
@@ -2378,7 +2535,9 @@ class EditionTab(QWidget):
     def _flag_within_duplicates(self):
         """Detect and flag lower-quality within-port duplicate MUs for deletion."""
         if not _SPIKE_COMP_AVAILABLE:
-            self._update_status("motor_unit_toolbox not available — cannot detect duplicates")
+            self._update_status(
+                "motor_unit_toolbox not available — cannot detect duplicates"
+            )
             return
 
         self._clear_duplicate_roles("within")
@@ -2428,9 +2587,17 @@ class EditionTab(QWidget):
                     mu.within_duplicate_role = "delete"
                     mu.flagged_duplicate = True
 
-        n_flagged = sum(
-            1 for mus in self._ports.values()
-            for mu in mus if mu.within_duplicate_role == "delete"
+        flagged_by_port = {
+            p: [mu.id for mu in mus if mu.within_duplicate_role == "delete"]
+            for p, mus in self._ports.items()
+        }
+        n_flagged = sum(len(v) for v in flagged_by_port.values())
+        self._log_event(
+            "flag_within_duplicates",
+            f"flagged {n_flagged} within-port duplicate MU(s)",
+            "",
+            -1,
+            flagged_by_port=flagged_by_port,
         )
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
@@ -2442,7 +2609,9 @@ class EditionTab(QWidget):
     def _flag_cross_duplicates(self):
         """Detect and flag lower-quality cross-port duplicate MUs for deletion."""
         if not _SPIKE_COMP_AVAILABLE:
-            self._update_status("motor_unit_toolbox not available — cannot detect duplicates")
+            self._update_status(
+                "motor_unit_toolbox not available — cannot detect duplicates"
+            )
             return
 
         port_names = list(self._ports.keys())
@@ -2480,7 +2649,9 @@ class EditionTab(QWidget):
                         fs=int(round(self._fsamp)),
                     )
                 except Exception as exc:
-                    logger.warning("Cross-port RoA failed for %s vs %s: %s", port_a, port_b, exc)
+                    logger.warning(
+                        "Cross-port RoA failed for %s vs %s: %s", port_a, port_b, exc
+                    )
                     continue
 
                 na, nb = roa.shape[0], roa.shape[1]
@@ -2501,7 +2672,7 @@ class EditionTab(QWidget):
                 if not mu.cross_duplicate_partners:
                     continue
                 partner_mus = []
-                for (pname, mid, _score) in mu.cross_duplicate_partners:
+                for pname, mid, _score in mu.cross_duplicate_partners:
                     for pm in self._ports.get(pname, []):
                         if pm.id == mid:
                             partner_mus.append(pm)
@@ -2516,9 +2687,17 @@ class EditionTab(QWidget):
                     mu.cross_duplicate_role = "delete"
                     mu.flagged_duplicate = True
 
-        n_flagged = sum(
-            1 for mus in self._ports.values()
-            for mu in mus if mu.cross_duplicate_role == "delete"
+        flagged_by_port = {
+            p: [mu.id for mu in mus if mu.cross_duplicate_role == "delete"]
+            for p, mus in self._ports.items()
+        }
+        n_flagged = sum(len(v) for v in flagged_by_port.values())
+        self._log_event(
+            "flag_cross_duplicates",
+            f"flagged {n_flagged} cross-port duplicate MU(s)",
+            "",
+            -1,
+            flagged_by_port=flagged_by_port,
         )
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
@@ -2597,7 +2776,9 @@ class EditionTab(QWidget):
         self.source_plot.set_data(mu.source, mu.timestamps)
         # In full-source mode mu.source covers the whole recording (offset = 0);
         # otherwise it covers only the plateau window (offset = _start_sample).
-        self.source_plot.set_force_offset(0 if self._full_source_mode else self._start_sample)
+        self.source_plot.set_force_offset(
+            0 if self._full_source_mode else self._start_sample
+        )
         if self._full_source_mode:
             self.source_plot.set_plateau_region(self._start_sample, self._end_sample)
         self.fr_plot.set_data(mu.timestamps)
@@ -2623,9 +2804,13 @@ class EditionTab(QWidget):
             if source_changed:
                 # Source signal changed (e.g. filter recalc) — redraw curve now
                 self.source_plot.set_data(mu.source, mu.timestamps)
-                self.source_plot.set_force_offset(0 if self._full_source_mode else self._start_sample)
+                self.source_plot.set_force_offset(
+                    0 if self._full_source_mode else self._start_sample
+                )
                 if self._full_source_mode:
-                    self.source_plot.set_plateau_region(self._start_sample, self._end_sample)
+                    self.source_plot.set_plateau_region(
+                        self._start_sample, self._end_sample
+                    )
             self.fr_plot.set_data(mu.timestamps)
             self.source_plot.update_timestamps(mu.timestamps)
 
@@ -2694,8 +2879,10 @@ class EditionTab(QWidget):
         elif self._sel_arm == SelectionArm.DELETE:
             parts.append("⬜ Drag to DELETE  (armed)")
 
-        if self._undo_stack:
-            parts.append(f"Undo: {len(self._undo_stack)}")
+        key = (self._current_port or "", self._current_mu_idx)
+        n_undo = len(self._undo_stack.get(key, []))
+        if n_undo:
+            parts.append(f"Undo: {n_undo}")
         if self._full_source_mode:
             parts.append("Full signal")
         self.status_bar.showMessage("  |  ".join(parts))
@@ -2747,7 +2934,9 @@ class EditionTab(QWidget):
                     waveforms, list(range(n_ch)), self._current_mu_idx
                 )
 
-    def _render_muap_grid(self, muap_grid: np.ndarray, grid_cfg: dict, rejected_positions: set = None):
+    def _render_muap_grid(
+        self, muap_grid: np.ndarray, grid_cfg: dict, rejected_positions: set = None
+    ):
         """Render MUAPs in physical grid layout (portrait, rows × cols).
 
         muap_grid: (rows, cols, n_samples) from compute_port_properties.
@@ -2784,9 +2973,11 @@ class EditionTab(QWidget):
             for p in self._muap_cell_plots.values():
                 p.setYRange(-amp, amp, padding=0)
             for (r, c), item in self._muap_waveform_items.items():
-                wav = (muap_grid[r, c]
-                       if r < muap_grid.shape[0] and c < muap_grid.shape[1]
-                       else None)
+                wav = (
+                    muap_grid[r, c]
+                    if r < muap_grid.shape[0] and c < muap_grid.shape[1]
+                    else None
+                )
                 if wav is not None and len(wav) > 0 and np.any(wav != 0):
                     item.setData(wav)
                 else:
@@ -2812,11 +3003,29 @@ class EditionTab(QWidget):
         self._muap_title_label = _add_lbl(
             self.muap_widget, title_html, 0, 0, colspan=cols + 1, justify="center"
         )
-        _add_lbl(self.muap_widget, f"<span style='{lbl_style}'></span>", 1, 0, justify="center")
+        _add_lbl(
+            self.muap_widget,
+            f"<span style='{lbl_style}'></span>",
+            1,
+            0,
+            justify="center",
+        )
         for c in range(cols):
-            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{c + 1}</span>", 1, c + 1, justify="center")
+            _add_lbl(
+                self.muap_widget,
+                f"<span style='{lbl_style}'>{c + 1}</span>",
+                1,
+                c + 1,
+                justify="center",
+            )
         for r in range(rows):
-            _add_lbl(self.muap_widget, f"<span style='{lbl_style}'>{r + 1}</span>", r + 2, 0, justify="center")
+            _add_lbl(
+                self.muap_widget,
+                f"<span style='{lbl_style}'>{r + 1}</span>",
+                r + 2,
+                0,
+                justify="center",
+            )
 
         _rej_bg = (50, 30, 30)
         _empty_bg = (28, 28, 28)
@@ -2839,7 +3048,11 @@ class EditionTab(QWidget):
                 rc = (r, c)
                 if rc in rejected_positions:
                     p.getViewBox().setBackgroundColor(_rej_bg)
-                    p.plot([0, n_samples], [0, 0], pen=pg.mkPen(color=(140, 60, 60), width=1))
+                    p.plot(
+                        [0, n_samples],
+                        [0, 0],
+                        pen=pg.mkPen(color=(140, 60, 60), width=1),
+                    )
                 elif rc not in electrode_positions:
                     p.getViewBox().setBackgroundColor(_empty_bg)
                 else:
@@ -2868,7 +3081,6 @@ class EditionTab(QWidget):
                     item.setData(wav)
 
         self._muap_grid_key = grid_key
-
 
     def _render_muap_stacked(self, waveforms, ch_indices):
         self.muap_widget.clear()

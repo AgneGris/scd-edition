@@ -132,6 +132,7 @@ class ChannelAllocationBar(QFrame):
 
 class _NoScrollSpinBox(QSpinBox):
     """QSpinBox that ignores touchpad/mouse-wheel scrolling."""
+
     def wheelEvent(self, event):
         event.ignore()
 
@@ -532,7 +533,9 @@ class AuxChannelCard(QFrame):
 
         mvc_browse = QPushButton("...")
         mvc_browse.setFixedSize(24, 24)
-        mvc_browse.setToolTip("Load MVC: opens a data file and uses its maximum as the MVC value")
+        mvc_browse.setToolTip(
+            "Load MVC: opens a data file and uses its maximum as the MVC value"
+        )
         mvc_browse.clicked.connect(self._browse_mvc_file)
         mvc_browse.setStyleSheet(
             f"QPushButton {{ background: {COLORS['background_input']}; "
@@ -608,6 +611,7 @@ class AuxChannelCard(QFrame):
                 data = np.load(path)
             elif p.suffix == ".mat":
                 import scipy.io
+
                 mat = scipy.io.loadmat(path)
                 data = next(v for k, v in mat.items() if not k.startswith("_"))
             else:
@@ -615,7 +619,9 @@ class AuxChannelCard(QFrame):
             mvc_val = float(np.asarray(data).flatten().max())
             self.mvc_edit.setText(f"{mvc_val:g}")
         except Exception as e:
-            QMessageBox.warning(self, "Load Failed", f"Could not load MVC from file:\n{e}")
+            QMessageBox.warning(
+                self, "Load Failed", f"Could not load MVC from file:\n{e}"
+            )
 
     def update_index(self, index: int):
         self.index = index

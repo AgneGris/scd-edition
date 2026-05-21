@@ -89,6 +89,7 @@ def _nice_tick_step(max_val: float) -> float:
         return 20.0
     return 50.0
 
+
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 
 
@@ -287,7 +288,9 @@ class VisualisationTab(QWidget):
         self._inner_tabs.addTab(quality_widget, "Quality")
 
         # Gain tab: instantaneous DR vs normalised force per MU
-        self._gain_plot = self._make_plot_widget("Mean DR (pps)", "Recruitment Force (% MVC)")
+        self._gain_plot = self._make_plot_widget(
+            "Mean DR (pps)", "Recruitment Force (% MVC)"
+        )
         self._inner_tabs.addTab(self._gain_plot, "DR vs Force")
 
         # Onion-skin tab: recruitment time vs mean DR
@@ -524,7 +527,9 @@ class VisualisationTab(QWidget):
 
     def _rebuild_aux_controls(self):
         self._aux_on_states.clear()
-        self._aux_on_states.extend(_default_aux_states(self._aux_channels, self._file_stem))
+        self._aux_on_states.extend(
+            _default_aux_states(self._aux_channels, self._file_stem)
+        )
         for leg in self._aux_legends:
             leg.populate(self._aux_channels)
         for leg in self._aux_legends:
@@ -560,10 +565,16 @@ class VisualisationTab(QWidget):
             baseline = float(np.percentile(raw, 2))
             peak = float(raw.max())
             mvc_cfg = ch.get("mvc")
-            mvc_str = f"  config MVC={mvc_cfg}" if mvc_cfg is not None else "  (no MVC set)"
+            mvc_str = (
+                f"  config MVC={mvc_cfg}" if mvc_cfg is not None else "  (no MVC set)"
+            )
             label = ch.get("unit") or ch.get("name", "?")
-            print(f"  {label:20s}  peak={peak:.5f} mV  baseline≈{baseline:.5f} mV  net={peak-baseline:.5f} mV{mvc_str}")
-        print("  → Use 'net' value as MVC in the config (these are mV from the Quattrocento ADC conversion)")
+            print(
+                f"  {label:20s}  peak={peak:.5f} mV  baseline≈{baseline:.5f} mV  net={peak-baseline:.5f} mV{mvc_str}"
+            )
+        print(
+            "  → Use 'net' value as MVC in the config (these are mV from the Quattrocento ADC conversion)"
+        )
         print()
 
     # ── Rendering ─────────────────────────────────────────────────────────────
@@ -632,9 +643,7 @@ class VisualisationTab(QWidget):
             valid = ts_disp[(ts_disp >= 0) & (ts_disp < n_samples)]
             spike_matrix[valid, col] = True
 
-        t_axis = (
-            np.arange(n_samples) / display_fs + ts_global_min / self._fsamp
-        )
+        t_axis = np.arange(n_samples) / display_fs + ts_global_min / self._fsamp
         return spike_matrix, t_axis, display_fs
 
     def _render_raster(self, sorted_mus: List[tuple]):
@@ -673,9 +682,7 @@ class VisualisationTab(QWidget):
         self._draw_aux_overlay(pw, y_min=-0.5, y_max=len(sorted_mus) - 0.5)
 
     @staticmethod
-    def _decimate_for_display(
-        t: np.ndarray, y: np.ndarray, max_pts: int
-    ):
+    def _decimate_for_display(t: np.ndarray, y: np.ndarray, max_pts: int):
         """Return (t, y) downsampled to at most *max_pts* by peak-preserving
         block decimation.  Falls through unchanged when already small enough."""
         n = len(t)
@@ -704,7 +711,9 @@ class VisualisationTab(QWidget):
             if peak > y_max:
                 y_max = peak
             r, g, b = palette[rank]
-            t_d, y_d = self._decimate_for_display(t_axis, dr_trace, self._MAX_DISPLAY_PTS)
+            t_d, y_d = self._decimate_for_display(
+                t_axis, dr_trace, self._MAX_DISPLAY_PTS
+            )
             pw.plot(
                 t_d,
                 y_d,
@@ -748,7 +757,9 @@ class VisualisationTab(QWidget):
         pw.setYRange(0, 1)
         pw.getAxis("bottom").setTicks([[]])
         pw.getAxis("left").setTicks([[]])
-        text = pg.TextItem(msg, color=COLORS.get("text_muted", "#888888"), anchor=(0.5, 0.5))
+        text = pg.TextItem(
+            msg, color=COLORS.get("text_muted", "#888888"), anchor=(0.5, 0.5)
+        )
         text.setPos(0.5, 0.5)
         pw.addItem(text)
 
@@ -760,29 +771,43 @@ class VisualisationTab(QWidget):
         xs = np.arange(n, dtype=float)
 
         for pw, attr, threshold, y_top_min in (
-            (self._sil_plot,  "sil",    0.8,  1.05),
-            (self._pnr_plot,  "pnr_db", 32.0, 40.0),
+            (self._sil_plot, "sil", 0.8, 1.05),
+            (self._pnr_plot, "pnr_db", 32.0, 40.0),
         ):
             pw.clear()
             if n == 0:
                 continue
 
-            vals = np.array([
-                getattr(mu.props, attr)
-                if (mu.props is not None and not np.isnan(getattr(mu.props, attr)))
-                else 0.0
-                for _, mu in sorted_mus
-            ])
+            vals = np.array(
+                [
+                    (
+                        getattr(mu.props, attr)
+                        if (
+                            mu.props is not None
+                            and not np.isnan(getattr(mu.props, attr))
+                        )
+                        else 0.0
+                    )
+                    for _, mu in sorted_mus
+                ]
+            )
             brushes = [pg.mkBrush(r, g, b, 200) for r, g, b in palette]
             pw.addItem(pg.BarGraphItem(x=xs, height=vals, width=0.7, brushes=brushes))
 
-            pw.addItem(pg.InfiniteLine(
-                pos=threshold, angle=0,
-                pen=pg.mkPen(color="#ff6b6b", width=1.5, style=Qt.DashLine),
-            ))
+            pw.addItem(
+                pg.InfiniteLine(
+                    pos=threshold,
+                    angle=0,
+                    pen=pg.mkPen(color="#ff6b6b", width=1.5, style=Qt.DashLine),
+                )
+            )
             pw.getAxis("bottom").setTicks([ticks])
             pw.setXRange(-0.5, n - 0.5, padding=0)
-            y_top = max(float(vals.max()) * 1.15, y_top_min) if vals.max() > 0 else y_top_min
+            y_top = (
+                max(float(vals.max()) * 1.15, y_top_min)
+                if vals.max() > 0
+                else y_top_min
+            )
             pw.setYRange(0, y_top)
 
     def _render_gain(self, sorted_mus: List[tuple]):
@@ -805,7 +830,9 @@ class VisualisationTab(QWidget):
                     break
 
         if force_raw is None:
-            self._show_no_data(pw, "No force channel — enable an AUX channel to show this plot")
+            self._show_no_data(
+                pw, "No force channel — enable an AUX channel to show this plot"
+            )
             return
 
         f_baseline = float(np.percentile(force_raw, 2))
@@ -835,13 +862,15 @@ class VisualisationTab(QWidget):
             mean_dr = float(1.0 / np.mean(np.clip(isis_s, 0.01, None)))
 
             r, g, b = palette[rank]
-            spots.append({
-                "pos": (recruit_force, mean_dr),
-                "brush": pg.mkBrush(r, g, b, 220),
-                "pen": pg.mkPen("w", width=1),
-                "size": 10,
-                "symbol": "o",
-            })
+            spots.append(
+                {
+                    "pos": (recruit_force, mean_dr),
+                    "brush": pg.mkBrush(r, g, b, 220),
+                    "pen": pg.mkPen("w", width=1),
+                    "size": 10,
+                    "symbol": "o",
+                }
+            )
             labels.append((recruit_force, mean_dr, f"MU {mu.id}", (r, g, b)))
 
         if not spots:
@@ -864,15 +893,16 @@ class VisualisationTab(QWidget):
         if len(spots) >= 3:
             coeffs = np.polyfit(xs, ys, 1)
             x_fit = np.array([float(xs.min()), float(xs.max())])
-            pw.plot(x_fit, np.polyval(coeffs, x_fit),
-                    pen=pg.mkPen(color=COLORS["text_muted"], width=1.5,
-                                 style=Qt.DashLine))
+            pw.plot(
+                x_fit,
+                np.polyval(coeffs, x_fit),
+                pen=pg.mkPen(color=COLORS["text_muted"], width=1.5, style=Qt.DashLine),
+            )
 
         # Set y-range with 10 % headroom around the IQR so one outlier
         # doesn't compress everything else into a sliver
         y_pad = max(float(np.percentile(ys, 75) - np.percentile(ys, 25)), 1.0)
-        pw.setYRange(float(ys.min()) - y_pad * 0.5,
-                     float(ys.max()) + y_pad * 1.5)
+        pw.setYRange(float(ys.min()) - y_pad * 0.5, float(ys.max()) + y_pad * 1.5)
 
     def _draw_aux_overlay(self, pw: pg.PlotWidget, y_min: float, y_max: float):
         """Overlay AUX force channels on *pw*.

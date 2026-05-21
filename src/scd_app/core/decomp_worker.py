@@ -397,7 +397,9 @@ class DecompositionWorker(QThread):
             pickle.dump(save_dict, f)
             print(f"File saved successfully: {self.save_path}")
 
-    def _load_aux_file_channel(self, file_path: Path, aux_config: dict) -> Optional[dict]:
+    def _load_aux_file_channel(
+        self, file_path: Path, aux_config: dict
+    ) -> Optional[dict]:
         """Load one aux channel from an OTB+ .sip stream."""
         import tarfile
 
@@ -417,9 +419,7 @@ class DecompositionWorker(QThread):
                     print(f"  [aux] No .sip channels found in {file_path.name}")
                     return None
                 arrays = [
-                    np.frombuffer(
-                        tar.extractfile(members[n]).read(), dtype="float64"
-                    )
+                    np.frombuffer(tar.extractfile(members[n]).read(), dtype="float64")
                     for n in sip_names
                 ]
             min_len = min(len(a) for a in arrays)

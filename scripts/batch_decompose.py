@@ -58,10 +58,11 @@ import torch
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _parse_bad_channels(specs: List[str], grid_configs: dict) -> List[np.ndarray]:
     """Convert  ["Grid_1:63", "Grid_2:62,63"]  to per-grid rejection masks."""
     bad: Dict[str, List[int]] = {}
-    for spec in (specs or []):
+    for spec in specs or []:
         name, _, idx_str = spec.partition(":")
         name = name.strip()
         indices = [int(i.strip()) for i in idx_str.split(",") if i.strip()]
@@ -75,8 +76,10 @@ def _parse_bad_channels(specs: List[str], grid_configs: dict) -> List[np.ndarray
             if 0 <= idx < n:
                 mask[idx] = 1
             else:
-                print(f"  Warning: bad-channel index {idx} out of range for "
-                      f"{port_name} ({n} channels) — ignored.")
+                print(
+                    f"  Warning: bad-channel index {idx} out of range for "
+                    f"{port_name} ({n} channels) — ignored."
+                )
         masks.append(mask)
     return masks
 
@@ -101,39 +104,43 @@ def _load_per_file_rejections(
     with open(json_path) as f:
         data = json.load(f)
 
-    fname  = file_path.name
-    entry  = data.get(fname, {})
+    fname = file_path.name
+    entry = data.get(fname, {})
     masks: List[np.ndarray] = []
     all_time_masks: List[List] = []
 
     for port_name, config in grid_configs.items():
-        n     = len(config["channels"])
+        n = len(config["channels"])
         saved = entry.get(port_name)
         if saved is None:
-            mask            = np.zeros(n, dtype=int)
+            mask = np.zeros(n, dtype=int)
             grid_time_masks = []
         elif isinstance(saved, list):
             # Old format: plain channel-mask array
             mask = np.array(saved, dtype=int)
             if len(mask) != n:
-                print(f"  Warning: rejection mask length mismatch for "
-                      f"{port_name} in {fname} — resetting.")
+                print(
+                    f"  Warning: rejection mask length mismatch for "
+                    f"{port_name} in {fname} — resetting."
+                )
                 mask = np.zeros(n, dtype=int)
             grid_time_masks = []
         else:
             # New format: {"channels": [...], "time_masks": [...]}
-            ch   = saved.get("channels", [0] * n)
+            ch = saved.get("channels", [0] * n)
             mask = np.array(ch, dtype=int)
             if len(mask) != n:
-                print(f"  Warning: rejection mask length mismatch for "
-                      f"{port_name} in {fname} — resetting.")
+                print(
+                    f"  Warning: rejection mask length mismatch for "
+                    f"{port_name} in {fname} — resetting."
+                )
                 mask = np.zeros(n, dtype=int)
             grid_time_masks = saved.get("time_masks", [])
 
         masks.append(mask)
         all_time_masks.append(grid_time_masks)
 
-    n_rej   = sum(int(m.sum()) for m in masks)
+    n_rej = sum(int(m.sum()) for m in masks)
     n_tmask = sum(len(tm) for tm in all_time_masks)
     if n_rej:
         print(f"  Loaded rejections for {fname}: {n_rej} channel(s) rejected")
@@ -154,48 +161,55 @@ def _setup_from_channel_config(json_path: Path, param_overrides: dict) -> tuple:
 
     grid_configs: Dict[str, dict] = {}
     for g in data.get("grids", []):
-        channels   = list(range(g["start_chan"], g["end_chan"]))
-        n          = len(channels)
+        channels = list(range(g["start_chan"], g["end_chan"]))
+        n = len(channels)
         is_surface = g.get("type", "").lower() == "surface"
         ext_factor = int(np.ceil(1000 / n))
         defaults = {
             "extension_factor": ext_factor,
-            "lowpass_hz":       500  if is_surface else 4400,
-            "highpass_hz":      10,
-            "notch_filter":     "None",
-            "notch_harmonics":  False,
-            "sil_threshold":    0.85,
-            "iterations":       200,
-            "clamp":            True,
-            "fitness":          "CoV",
-            "peel_off":         True,
+            "lowpass_hz": 500 if is_surface else 4400,
+            "highpass_hz": 10,
+            "notch_filter": "None",
+            "notch_harmonics": False,
+            "sil_threshold": 0.85,
+            "iterations": 200,
+            "clamp": True,
+            "fitness": "CoV",
+            "peel_off": True,
             "peel_off_repeats": True,
-            "swarm":            True,
-            "muap_window_ms":   20,
+            "swarm": True,
+            "muap_window_ms": 20,
         }
         defaults.update(param_overrides)
         grid_configs[g["name"]] = {
-            "params":          defaults,
-            "channels":        channels,
-            "num_channels":    n,
-            "electrode_type":  g.get("config", ""),
+            "params": defaults,
+            "channels": channels,
+            "num_channels": n,
+            "electrode_type": g.get("config", ""),
             "electrode_class": "surface_grid" if is_surface else "intramuscular",
         }
 
     from scd_app.io.data_loader import load_layout
+
     loader_map = {
         ".otb+": "loader_otb+.yaml",
-        ".h5":   "loader_h5.yaml",
-        ".mat":  "loader_mat.yaml",
+        ".h5": "loader_h5.yaml",
+        ".mat": "loader_mat.yaml",
     }
-    loader_key  = data.get("loader", ".otb+")
+    loader_key = data.get("loader", ".otb+")
     loader_file = loader_map.get(loader_key, "loader_otb+.yaml")
-    _here       = Path(__file__).resolve().parent.parent
-    loader_path = _here / "src" / "scd_app" / "resources" / "loaders_configs" / loader_file
+    _here = Path(__file__).resolve().parent.parent
+    loader_path = (
+        _here / "src" / "scd_app" / "resources" / "loaders_configs" / loader_file
+    )
     if not loader_path.exists():
         import importlib.resources as pkg_res
-        loader_path = Path(str(
-            pkg_res.files("scd_app") / "resources" / "loaders_configs" / loader_file))
+
+        loader_path = Path(
+            str(
+                pkg_res.files("scd_app") / "resources" / "loaders_configs" / loader_file
+            )
+        )
     layout = load_layout(loader_path)
 
     return grid_configs, layout, sampling_rate
@@ -204,7 +218,7 @@ def _setup_from_channel_config(json_path: Path, param_overrides: dict) -> tuple:
 def _parse_param_overrides(pairs: List[str]) -> dict:
     """Convert ["sil_threshold=0.9", "peel_off=True"] to a dict."""
     overrides = {}
-    for pair in (pairs or []):
+    for pair in pairs or []:
         k, _, v = pair.partition("=")
         k, v = k.strip(), v.strip()
         # Coerce type
@@ -234,25 +248,25 @@ def _build_grid_configs(session_config, param_overrides: dict) -> dict:
         is_surface = port.electrode.type in ("surface", "surface_grid")
         defaults = {
             "extension_factor": extension_factor,
-            "lowpass_hz":       500  if is_surface else 4400,
-            "highpass_hz":      10,
-            "notch_filter":     "None",
-            "notch_harmonics":  False,
+            "lowpass_hz": 500 if is_surface else 4400,
+            "highpass_hz": 10,
+            "notch_filter": "None",
+            "notch_harmonics": False,
             # Global decomp defaults (same as GUI)
-            "sil_threshold":    0.85,
-            "iterations":       200,
-            "clamp":            True,
-            "fitness":          "CoV",
-            "peel_off":         True,
+            "sil_threshold": 0.85,
+            "iterations": 200,
+            "clamp": True,
+            "fitness": "CoV",
+            "peel_off": True,
             "peel_off_repeats": True,
-            "swarm":            True,
-            "fixed_exponent":   2,
+            "swarm": True,
+            "fixed_exponent": 2,
         }
         defaults.update(param_overrides)
         grid_configs[port.name] = {
-            "params":         defaults,
-            "channels":       port.electrode.channels,
-            "num_channels":   n_channels,
+            "params": defaults,
+            "channels": port.electrode.channels,
+            "num_channels": n_channels,
             "electrode_type": port.electrode.name,
             "electrode_class": port.electrode.type,
         }
@@ -261,6 +275,7 @@ def _build_grid_configs(session_config, param_overrides: dict) -> dict:
 
 # ── core decomposition (no Qt dependency) ─────────────────────────────────────
 
+
 def decompose_files(
     file_paths: List[Path],
     layout: dict,
@@ -268,8 +283,12 @@ def decompose_files(
     bad_channel_masks: List[np.ndarray],
     sampling_rate: int,
     output_dir: Path,
-    plateau_s: Optional[tuple] = None,        # (start_s, end_s) in seconds, or None = full file
-    time_masks_per_grid: Optional[List] = None,  # per-grid list of [start_s, end_s] pairs
+    plateau_s: Optional[
+        tuple
+    ] = None,  # (start_s, end_s) in seconds, or None = full file
+    time_masks_per_grid: Optional[
+        List
+    ] = None,  # per-grid list of [start_s, end_s] pairs
     verbose: bool = True,
 ):
     """
@@ -288,22 +307,25 @@ def decompose_files(
 
         # ── load EMG ──────────────────────────────────────────────────────────
         from scd_app.io.data_loader import load_field
+
         try:
-            emg = load_field(file_path, layout, "emg")   # (samples, channels)
+            emg = load_field(file_path, layout, "emg")  # (samples, channels)
         except Exception as exc:
             print(f"  ERROR loading file: {exc} — skipping.")
             continue
 
         if plateau_s is not None:
             start_smp = int(round(plateau_s[0] * sampling_rate))
-            end_smp   = int(round(plateau_s[1] * sampling_rate))
+            end_smp = int(round(plateau_s[1] * sampling_rate))
             start_smp = max(0, min(start_smp, emg.shape[0]))
-            end_smp   = max(start_smp + 1, min(end_smp, emg.shape[0]))
+            end_smp = max(start_smp + 1, min(end_smp, emg.shape[0]))
             plateau_coords = np.array([start_smp, end_smp])
-            print(f"  Plateau: {plateau_s[0]}s – {plateau_s[1]}s  "
-                  f"(samples {start_smp}–{end_smp})")
+            print(
+                f"  Plateau: {plateau_s[0]}s – {plateau_s[1]}s  "
+                f"(samples {start_smp}–{end_smp})"
+            )
         else:
-            plateau_coords = np.array([0, emg.shape[0]])   # full file
+            plateau_coords = np.array([0, emg.shape[0]])  # full file
 
         # ── build a worker just to reuse its helpers ───────────────────────
         # (no QThread.start() is called — we call run() directly)
@@ -311,13 +333,13 @@ def decompose_files(
         save_path = output_dir / f"{stem}_decomp_output.pkl"
 
         worker = _HeadlessWorker(
-            emg_data            = emg,
-            grid_configs        = grid_configs,
-            rejected_channels   = bad_channel_masks,
-            plateau_coords      = plateau_coords,
-            sampling_rate       = sampling_rate,
-            save_path           = save_path,
-            time_masks_per_grid = time_masks_per_grid or [],
+            emg_data=emg,
+            grid_configs=grid_configs,
+            rejected_channels=bad_channel_masks,
+            plateau_coords=plateau_coords,
+            sampling_rate=sampling_rate,
+            save_path=save_path,
+            time_masks_per_grid=time_masks_per_grid or [],
         )
         worker.run()
 
@@ -353,7 +375,7 @@ def decompose_concatenated(
 
     print(f"\nConcatenating {len(file_paths)} file(s):")
     segments = []
-    sample_offsets = [0]          # start sample index of each file in the concat
+    sample_offsets = [0]  # start sample index of each file in the concat
     for fp in file_paths:
         print(f"  Loading {fp.name} …")
         t_load = time.perf_counter()
@@ -364,7 +386,9 @@ def decompose_concatenated(
             return
         t_load = time.perf_counter() - t_load
         dur_s = emg.shape[0] / sampling_rate
-        print(f"    shape    : {tuple(emg.shape)}  ({emg.shape[1]} channels, {dur_s:.2f} s)")
+        print(
+            f"    shape    : {tuple(emg.shape)}  ({emg.shape[1]} channels, {dur_s:.2f} s)"
+        )
         print(f"    dtype    : {emg.dtype}")
         print(f"    loaded in: {t_load:.1f}s")
         segments.append(emg)
@@ -402,9 +426,8 @@ def decompose_concatenated(
         for file_i, file_masks in enumerate(time_masks_per_grid_per_file):
             offset_s = sample_offsets[file_i] / sampling_rate
             for grid_i, grid_masks in enumerate(file_masks):
-                for (t0, t1) in grid_masks:
-                    merged_time_masks[grid_i].append(
-                        [t0 + offset_s, t1 + offset_s])
+                for t0, t1 in grid_masks:
+                    merged_time_masks[grid_i].append([t0 + offset_s, t1 + offset_s])
 
     # ── output path ───────────────────────────────────────────────────────────
     if output_stem is None:
@@ -412,8 +435,9 @@ def decompose_concatenated(
         # Find common prefix, then append only the unique suffixes of each stem
         # e.g. ["base_run-01", "base_run-02"] → "base_run-01_run-02_concat"
         from os.path import commonprefix
+
         prefix = commonprefix(stems).rstrip("_")
-        suffixes = [s[len(prefix):].lstrip("_") for s in stems]
+        suffixes = [s[len(prefix) :].lstrip("_") for s in stems]
         suffixes = [s for s in suffixes if s]  # drop empty
         if suffixes:
             output_stem = prefix + "_" + "_".join(suffixes) + "_concat"
@@ -424,24 +448,26 @@ def decompose_concatenated(
     # ── plateau ───────────────────────────────────────────────────────────────
     if plateau_s is not None:
         start_smp = int(round(plateau_s[0] * sampling_rate))
-        end_smp   = int(round(plateau_s[1] * sampling_rate))
+        end_smp = int(round(plateau_s[1] * sampling_rate))
         start_smp = max(0, min(start_smp, emg_concat.shape[0]))
-        end_smp   = max(start_smp + 1, min(end_smp, emg_concat.shape[0]))
+        end_smp = max(start_smp + 1, min(end_smp, emg_concat.shape[0]))
         plateau_coords = np.array([start_smp, end_smp])
-        print(f"  Plateau : {plateau_s[0]}s – {plateau_s[1]}s  "
-              f"(samples {start_smp}–{end_smp})")
+        print(
+            f"  Plateau : {plateau_s[0]}s – {plateau_s[1]}s  "
+            f"(samples {start_smp}–{end_smp})"
+        )
     else:
         plateau_coords = np.array([0, emg_concat.shape[0]])
 
     t0 = time.perf_counter()
     worker = _HeadlessWorker(
-        emg_data            = emg_concat,
-        grid_configs        = grid_configs,
-        rejected_channels   = combined_masks,
-        plateau_coords      = plateau_coords,
-        sampling_rate       = sampling_rate,
-        save_path           = save_path,
-        time_masks_per_grid = merged_time_masks,
+        emg_data=emg_concat,
+        grid_configs=grid_configs,
+        rejected_channels=combined_masks,
+        plateau_coords=plateau_coords,
+        sampling_rate=sampling_rate,
+        save_path=save_path,
+        time_masks_per_grid=merged_time_masks,
     )
     worker.run()
     elapsed = time.perf_counter() - t0
@@ -455,48 +481,58 @@ class _HeadlessWorker:
     DecompositionWorker.run() expects from `self`.
     """
 
-    def __init__(self, emg_data, grid_configs, rejected_channels,
-                 plateau_coords, sampling_rate, save_path,
-                 time_masks_per_grid=None):
-        self.emg_data            = emg_data
-        self.grid_configs        = grid_configs
-        self.rejected_channels   = rejected_channels
-        self.plateau_coords      = plateau_coords
-        self.sampling_rate       = sampling_rate
-        self.save_path           = save_path
+    def __init__(
+        self,
+        emg_data,
+        grid_configs,
+        rejected_channels,
+        plateau_coords,
+        sampling_rate,
+        save_path,
+        time_masks_per_grid=None,
+    ):
+        self.emg_data = emg_data
+        self.grid_configs = grid_configs
+        self.rejected_channels = rejected_channels
+        self.plateau_coords = plateau_coords
+        self.sampling_rate = sampling_rate
+        self.save_path = save_path
         self.time_masks_per_grid = time_masks_per_grid or []
-        self.aux_configs         = []
-        self.emg_file_path       = None
-        self._is_running         = True
+        self.aux_configs = []
+        self.emg_file_path = None
+        self._is_running = True
 
     # Mimic Qt signals as no-ops so we can share the run() implementation
     class _Signal:
-        def emit(self, *args): pass
+        def emit(self, *args):
+            pass
 
-    progress             = _Signal()
-    electrode_completed  = _Signal()
-    finished             = _Signal()
-    error                = _Signal()
-    source_found         = _Signal()
+    progress = _Signal()
+    electrode_completed = _Signal()
+    finished = _Signal()
+    error = _Signal()
+    source_found = _Signal()
 
     def run(self):
         """Identical to DecompositionWorker.run() but prints progress directly."""
         from scd_app.core.decomp_worker import DecompositionWorker
 
         # Bind all helpers that call self.* internally
-        self._parse_notch          = DecompositionWorker._parse_notch.__get__(self)
-        self._create_notch_params  = DecompositionWorker._create_notch_params.__get__(self)
-        _create_scd_config         = DecompositionWorker._create_scd_config.__get__(self)
-        _save_results_fn           = DecompositionWorker._save_results.__get__(self)
+        self._parse_notch = DecompositionWorker._parse_notch.__get__(self)
+        self._create_notch_params = DecompositionWorker._create_notch_params.__get__(
+            self
+        )
+        _create_scd_config = DecompositionWorker._create_scd_config.__get__(self)
+        _save_results_fn = DecompositionWorker._save_results.__get__(self)
 
         try:
             results = {
-                "pulse_trains":         [],
-                "discharge_times":      [],
-                "mu_filters":           [],
-                "ports":                [],
-                "w_mat":                [],
-                "peel_off_sequence":    [],
+                "pulse_trains": [],
+                "discharge_times": [],
+                "mu_filters": [],
+                "ports": [],
+                "w_mat": [],
+                "peel_off_sequence": [],
                 "preprocessing_config": [],
             }
             total_mus = 0
@@ -505,11 +541,13 @@ class _HeadlessWorker:
                 if not self._is_running:
                     break
 
-                print(f"  Processing {port_name} "
-                      f"({grid_idx + 1}/{len(self.grid_configs)})...")
+                print(
+                    f"  Processing {port_name} "
+                    f"({grid_idx + 1}/{len(self.grid_configs)})..."
+                )
 
                 channels = config["channels"]
-                n_total  = self.emg_data.shape[1]
+                n_total = self.emg_data.shape[1]
                 bad_ch_idx = [c for c in channels if c >= n_total]
                 if bad_ch_idx:
                     raise IndexError(
@@ -520,16 +558,19 @@ class _HeadlessWorker:
                 grid_data = self.emg_data[:, channels]
 
                 # Bad channel replacement
-                rejected     = self.rejected_channels[grid_idx]
+                rejected = self.rejected_channels[grid_idx]
                 if len(rejected) != len(channels):
-                    print(f"  Warning: rejection mask length mismatch for "
-                          f"{port_name} — resetting.")
+                    print(
+                        f"  Warning: rejection mask length mismatch for "
+                        f"{port_name} — resetting."
+                    )
                     rejected = np.zeros(len(channels), dtype=int)
 
                 good_channels = np.where(rejected == 0)[0]
                 noise_std = (
                     grid_data[:, good_channels].std().item()
-                    if len(good_channels) > 0 else 1e-6
+                    if len(good_channels) > 0
+                    else 1e-6
                 )
 
                 bad_channels = np.where(rejected == 1)[0]
@@ -537,9 +578,12 @@ class _HeadlessWorker:
                     print(f"    Masked channels : {list(bad_channels)}")
                     gen = torch.Generator()
                     gen.manual_seed(42)
-                    noise = torch.randn(
-                        grid_data.shape[0], len(bad_channels), generator=gen
-                    ) * noise_std
+                    noise = (
+                        torch.randn(
+                            grid_data.shape[0], len(bad_channels), generator=gen
+                        )
+                        * noise_std
+                    )
                     grid_data[:, bad_channels] = noise
                 else:
                     print(f"    Masked channels : none")
@@ -547,42 +591,57 @@ class _HeadlessWorker:
                 # Apply time masks: replace all channels in masked segments with noise
                 grid_time_masks = (
                     self.time_masks_per_grid[grid_idx]
-                    if grid_idx < len(self.time_masks_per_grid) else []
+                    if grid_idx < len(self.time_masks_per_grid)
+                    else []
                 )
-                for (t_start_s, t_end_s) in grid_time_masks:
+                for t_start_s, t_end_s in grid_time_masks:
                     t_start = int(round(t_start_s * self.sampling_rate))
-                    t_end   = int(round(t_end_s   * self.sampling_rate))
+                    t_end = int(round(t_end_s * self.sampling_rate))
                     t_start = max(0, min(t_start, grid_data.shape[0]))
-                    t_end   = max(t_start + 1, min(t_end, grid_data.shape[0]))
-                    n_samp  = t_end - t_start
-                    gen_t   = torch.Generator()
+                    t_end = max(t_start + 1, min(t_end, grid_data.shape[0]))
+                    n_samp = t_end - t_start
+                    gen_t = torch.Generator()
                     gen_t.manual_seed(43 + t_start)
-                    noise_t = torch.randn(
-                        n_samp, grid_data.shape[1], generator=gen_t
-                    ) * noise_std
+                    noise_t = (
+                        torch.randn(n_samp, grid_data.shape[1], generator=gen_t)
+                        * noise_std
+                    )
                     grid_data[t_start:t_end, :] = noise_t
-                    print(f"    Time masked : {t_start_s:.3f}s – {t_end_s:.3f}s  "
-                          f"({n_samp} samples)")
+                    print(
+                        f"    Time masked : {t_start_s:.3f}s – {t_end_s:.3f}s  "
+                        f"({n_samp} samples)"
+                    )
 
                 start_sample = int(self.plateau_coords[0])
-                end_sample   = int(self.plateau_coords[1])
-                grid_data    = grid_data[start_sample:end_sample, :]
+                end_sample = int(self.plateau_coords[1])
+                grid_data = grid_data[start_sample:end_sample, :]
 
-                scd_config   = _create_scd_config(config["params"])
+                scd_config = _create_scd_config(config["params"])
 
                 # Run SCD — no source_callback so no real-time plot updates
                 grid_data_dev = grid_data.to(
-                    device=scd_config.device, dtype=torch.float32)
+                    device=scd_config.device, dtype=torch.float32
+                )
                 from scd.models.scd import SwarmContrastiveDecomposition
+
                 model = SwarmContrastiveDecomposition()
                 timestamps, dictionary = model.run(
-                    grid_data_dev, scd_config, source_callback=None)
+                    grid_data_dev, scd_config, source_callback=None
+                )
 
                 if dictionary and "filters" in dictionary:
-                    cpu_timestamps = [
-                        t.detach().cpu().numpy() if torch.is_tensor(t) else np.asarray(t)
-                        for t in timestamps
-                    ] if isinstance(timestamps, list) else timestamps
+                    cpu_timestamps = (
+                        [
+                            (
+                                t.detach().cpu().numpy()
+                                if torch.is_tensor(t)
+                                else np.asarray(t)
+                            )
+                            for t in timestamps
+                        ]
+                        if isinstance(timestamps, list)
+                        else timestamps
+                    )
 
                     results["pulse_trains"].append(dictionary["source"])
                     results["discharge_times"].append(cpu_timestamps)
@@ -590,11 +649,14 @@ class _HeadlessWorker:
                     results["ports"].append(port_name)
                     results["w_mat"].append(dictionary.get("w_mat"))
                     results["peel_off_sequence"].append(
-                        dictionary.get("peel_off_sequence", []))
+                        dictionary.get("peel_off_sequence", [])
+                    )
 
                     prep_cfg = dict(dictionary.get("preprocessing_config", {}))
-                    prep_cfg.setdefault("square_sources_spike_det",
-                                        bool(scd_config.square_sources_spike_det))
+                    prep_cfg.setdefault(
+                        "square_sources_spike_det",
+                        bool(scd_config.square_sources_spike_det),
+                    )
                     results["preprocessing_config"].append(prep_cfg)
 
                     n_mus = len(timestamps) if isinstance(timestamps, list) else 1
@@ -615,11 +677,13 @@ class _HeadlessWorker:
 
         except Exception as exc:
             import traceback
+
             traceback.print_exc()
             print(f"  ERROR during decomposition: {exc}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
+
 
 def main():
     ap = argparse.ArgumentParser(
@@ -628,41 +692,80 @@ def main():
         epilog=__doc__,
     )
     # Option A: app's native channel_config.json (simplest)
-    ap.add_argument("--channel-config", default=None, metavar="JSON",
-                    help="Path to the app's channel_config.json. "
-                         "When provided, --config and --layout are not needed.")
+    ap.add_argument(
+        "--channel-config",
+        default=None,
+        metavar="JSON",
+        help="Path to the app's channel_config.json. "
+        "When provided, --config and --layout are not needed.",
+    )
     # Option B: session YAML + layout YAML
-    ap.add_argument("--config",  default=None,  help="Session YAML path.")
-    ap.add_argument("--layout",  default=None,  help="Data-layout YAML path.")
-    ap.add_argument("--files",   required=True,  nargs="+",
-                    help="EMG file path(s), directory, or glob pattern. "
-                         "If a directory is given, all files matching --ext are processed.")
-    ap.add_argument("--output",  default=None,
-                    help="Output directory (default: same directory as each input file).")
-    ap.add_argument("--bad-channels", nargs="*", default=[],
-                    metavar="GRID:IDX",
-                    help="Channels to reject, e.g.  Grid_1:63  Grid_2:62,63  "
-                         "(applied to every file; ignored if --rejections-file is given).")
-    ap.add_argument("--rejections-file", default=None, metavar="JSON",
-                    help="Per-file rejection JSON produced by batch_channel_check.py. "
-                         "Takes precedence over --bad-channels.")
-    ap.add_argument("--plateau", nargs=2, type=float, metavar=("START_S", "END_S"),
-                    default=None,
-                    help="Time window in seconds, e.g.  --plateau 10.0 40.0  "
-                         "Default: full file.")
-    ap.add_argument("--ext",     default=None,
-                    help="File extension to search when --files is a directory "
-                         "(e.g. .h5, .mat, .otb+). Default: auto-detect from layout format.")
-    ap.add_argument("--params",  nargs="*", default=[],
-                    metavar="KEY=VALUE",
-                    help="Override decomp params, e.g.  sil_threshold=0.90")
-    ap.add_argument("--concat", action="store_true", default=False,
-                    help="Concatenate all --files along the time axis and "
-                         "decompose as a single signal instead of processing "
-                         "each file separately.")
-    ap.add_argument("--concat-stem", default=None, metavar="STEM",
-                    help="Output filename stem when --concat is used "
-                         "(default: auto-generated from input file names).")
+    ap.add_argument("--config", default=None, help="Session YAML path.")
+    ap.add_argument("--layout", default=None, help="Data-layout YAML path.")
+    ap.add_argument(
+        "--files",
+        required=True,
+        nargs="+",
+        help="EMG file path(s), directory, or glob pattern. "
+        "If a directory is given, all files matching --ext are processed.",
+    )
+    ap.add_argument(
+        "--output",
+        default=None,
+        help="Output directory (default: same directory as each input file).",
+    )
+    ap.add_argument(
+        "--bad-channels",
+        nargs="*",
+        default=[],
+        metavar="GRID:IDX",
+        help="Channels to reject, e.g.  Grid_1:63  Grid_2:62,63  "
+        "(applied to every file; ignored if --rejections-file is given).",
+    )
+    ap.add_argument(
+        "--rejections-file",
+        default=None,
+        metavar="JSON",
+        help="Per-file rejection JSON produced by batch_channel_check.py. "
+        "Takes precedence over --bad-channels.",
+    )
+    ap.add_argument(
+        "--plateau",
+        nargs=2,
+        type=float,
+        metavar=("START_S", "END_S"),
+        default=None,
+        help="Time window in seconds, e.g.  --plateau 10.0 40.0  "
+        "Default: full file.",
+    )
+    ap.add_argument(
+        "--ext",
+        default=None,
+        help="File extension to search when --files is a directory "
+        "(e.g. .h5, .mat, .otb+). Default: auto-detect from layout format.",
+    )
+    ap.add_argument(
+        "--params",
+        nargs="*",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Override decomp params, e.g.  sil_threshold=0.90",
+    )
+    ap.add_argument(
+        "--concat",
+        action="store_true",
+        default=False,
+        help="Concatenate all --files along the time axis and "
+        "decompose as a single signal instead of processing "
+        "each file separately.",
+    )
+    ap.add_argument(
+        "--concat-stem",
+        default=None,
+        metavar="STEM",
+        help="Output filename stem when --concat is used "
+        "(default: auto-generated from input file names).",
+    )
     args = ap.parse_args()
 
     # ── load config ───────────────────────────────────────────────────────────
@@ -670,16 +773,18 @@ def main():
 
     if args.channel_config:
         grid_configs, layout, fs = _setup_from_channel_config(
-            Path(args.channel_config), param_overrides)
+            Path(args.channel_config), param_overrides
+        )
         print(f"Channel config : {args.channel_config}")
         print(f"Fs             : {fs} Hz")
         print(f"Grids          : {list(grid_configs.keys())}")
     elif args.config and args.layout:
         from scd_app.core.config import ConfigManager
         from scd_app.io.data_loader import load_layout
-        mgr    = ConfigManager()
+
+        mgr = ConfigManager()
         config = mgr.load_session(Path(args.config))
-        fs     = config.sampling_frequency
+        fs = config.sampling_frequency
         layout = load_layout(Path(args.layout))
         print(f"Session   : {config.name}  |  Fs: {fs} Hz")
         grid_configs = _build_grid_configs(config, param_overrides)
@@ -698,10 +803,13 @@ def main():
     # ── file list ─────────────────────────────────────────────────────────────
     # Auto-detect extension from layout format if not specified
     _fmt_ext = {
-        "h5": ".h5", "mat": ".mat", "npy": ".npy", "otb": ".otb+",
+        "h5": ".h5",
+        "mat": ".mat",
+        "npy": ".npy",
+        "otb": ".otb+",
     }
     default_ext = _fmt_ext.get(layout.get("format", ""), ".h5")
-    search_ext  = args.ext if args.ext else default_ext
+    search_ext = args.ext if args.ext else default_ext
 
     file_paths = []
     for pat in args.files:
@@ -728,7 +836,7 @@ def main():
     if args.output:
         output_dir = Path(args.output)
     else:
-        output_dir = None   # resolved per-file below
+        output_dir = None  # resolved per-file below
 
     # ── run ───────────────────────────────────────────────────────────────────
     plateau_s = tuple(args.plateau) if args.plateau else None
@@ -748,44 +856,46 @@ def main():
         for file_path in file_paths:
             if rejections_path:
                 m, tm = _load_per_file_rejections(
-                    rejections_path, file_path, grid_configs)
+                    rejections_path, file_path, grid_configs
+                )
             else:
-                m  = bad_masks
+                m = bad_masks
                 tm = [[] for _ in grid_configs]
             masks_per_file.append(m)
             time_masks_per_file.append(tm)
 
         out = output_dir if output_dir else file_paths[0].parent
         decompose_concatenated(
-            file_paths                  = file_paths,
-            layout                      = layout,
-            grid_configs                = grid_configs,
-            bad_channel_masks_per_file  = masks_per_file,
-            sampling_rate               = fs,
-            output_dir                  = out,
-            plateau_s                   = plateau_s,
-            time_masks_per_grid_per_file= time_masks_per_file,
-            output_stem                 = args.concat_stem,
+            file_paths=file_paths,
+            layout=layout,
+            grid_configs=grid_configs,
+            bad_channel_masks_per_file=masks_per_file,
+            sampling_rate=fs,
+            output_dir=out,
+            plateau_s=plateau_s,
+            time_masks_per_grid_per_file=time_masks_per_file,
+            output_stem=args.concat_stem,
         )
     else:
         # ── decompose each file separately (original behaviour) ────────────
         for file_path in file_paths:
             if rejections_path:
                 masks, file_time_masks = _load_per_file_rejections(
-                    rejections_path, file_path, grid_configs)
+                    rejections_path, file_path, grid_configs
+                )
             else:
-                masks           = bad_masks
+                masks = bad_masks
                 file_time_masks = [[] for _ in grid_configs]
             out = output_dir if output_dir else file_path.parent
             decompose_files(
-                file_paths          = [file_path],
-                layout              = layout,
-                grid_configs        = grid_configs,
-                bad_channel_masks   = masks,
-                sampling_rate       = fs,
-                plateau_s           = plateau_s,
-                time_masks_per_grid = file_time_masks,
-                output_dir          = out,
+                file_paths=[file_path],
+                layout=layout,
+                grid_configs=grid_configs,
+                bad_channel_masks=masks,
+                sampling_rate=fs,
+                plateau_s=plateau_s,
+                time_masks_per_grid=file_time_masks,
+                output_dir=out,
             )
 
     elapsed = time.perf_counter() - t_total
