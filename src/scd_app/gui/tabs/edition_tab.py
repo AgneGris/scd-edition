@@ -590,6 +590,13 @@ ELECTRODE_GRIDS = {
         "muap_mapping": {i: i + 1 for i in range(96)},
         "positions": GRID_POSITIONS_HD04MM1606,
     },
+    "HD08MM1606": {
+        "grid_shape": (16, 6),
+        "ied_mm": 8,
+        "n_channels": 96,
+        "muap_mapping": {i: i + 1 for i in range(96)},
+        "positions": GRID_POSITIONS_HD04MM1606,
+    },
     "HD08MM1305": {
         "grid_shape": (5, 13),
         "ied_mm": 8,

@@ -636,6 +636,12 @@ class DecompositionTab(QWidget):
         widgets["muap_window_ms"] = add_row("MUAP Window:", muap_win)
 
         self.param_widgets[port_name] = widgets
+
+        copy_btn = QPushButton("Copy to All Grids")
+        copy_btn.setToolTip("Apply these parameters to every other grid")
+        copy_btn.clicked.connect(lambda _checked, p=port_name: self._copy_params_to_all(p))
+        layout.addWidget(copy_btn, row, 0, 1, 2)
+
         return page
 
     def _on_grid_changed(self, index: int):
@@ -672,6 +678,23 @@ class DecompositionTab(QWidget):
                 params["muap_window_ms"] = widgets["muap_window_ms"].value()
             except (ValueError, KeyError) as e:
                 print(f"Warning: Could not sync parameter for {port_name}: {e}")
+
+    def _copy_params_to_all(self, source_port: str):
+        """Copy per-grid parameters from source_port to every other grid."""
+        src = self.param_widgets.get(source_port)
+        if src is None:
+            return
+        for port_name, dst in self.param_widgets.items():
+            if port_name == source_port:
+                continue
+            dst["sil_threshold"].setText(src["sil_threshold"].text())
+            dst["extension_factor"].setText(src["extension_factor"].text())
+            dst["highpass_hz"].setText(src["highpass_hz"].text())
+            dst["lowpass_hz"].setText(src["lowpass_hz"].text())
+            dst["notch_filter"].setCurrentText(src["notch_filter"].currentText())
+            dst["notch_harmonics"].setChecked(src["notch_harmonics"].isChecked())
+            dst["peel_off"].setCurrentText(src["peel_off"].currentText())
+            dst["muap_window_ms"].setValue(src["muap_window_ms"].value())
 
     # ------------------------------------------------------------------ #
     #  Aux / force channel helpers                                        #

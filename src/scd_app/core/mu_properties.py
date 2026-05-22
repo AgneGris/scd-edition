@@ -70,7 +70,10 @@ def _center_muaps(muaps: np.ndarray) -> np.ndarray:
     center = samples // 2
     for u in range(units):
         muap = muaps[u]  # (rows, cols, samples)
-        flat_idx = int(np.nanargmax(np.nanmax(np.abs(muap), axis=-1)))
+        max_per_cell = np.nanmax(np.abs(muap), axis=-1)
+        if np.all(np.isnan(max_per_cell)):
+            continue  # all-NaN MUAP — leave it as-is
+        flat_idx = int(np.nanargmax(max_per_cell))
         ch_row, ch_col = np.unravel_index(flat_idx, (rows, cols))
         peak_sample = int(np.nanargmax(np.abs(muap[ch_row, ch_col])))
         result[u] = np.roll(muap, center - peak_sample, axis=-1)
@@ -453,7 +456,8 @@ def compute_port_properties(
             muaps_all = _center_muaps(muaps_all)
 
             for i in range(n_units):
-                muap_grids[i] = muaps_all[i]
+                m = muaps_all[i]
+                muap_grids[i] = None if np.all(np.isnan(m)) else m
 
         except Exception as exc:
             logger.error("MUAP computation failed: %s\n%s", exc, traceback.format_exc())
