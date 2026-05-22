@@ -78,6 +78,9 @@ class SessionConfig:
     # Auxiliary channels (force, EMG reference, etc.) from the channel config JSON
     aux_channels: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Data layout (YAML loader dict, possibly with user overrides for path/orientation)
+    data_layout: Optional[Dict[str, Any]] = None
+
     # Edition settings
     auto_save: bool = True
     undo_levels: int = 50

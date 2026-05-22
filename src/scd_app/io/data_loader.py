@@ -113,7 +113,11 @@ def _read_h5(file_path: Path, dataset_path: str, fallbacks: List[str]) -> np.nda
 
 
 def _read_mat(file_path: Path, var_name: str, fallbacks: List[str]) -> np.ndarray:
-    """Read from .mat file (v5/v7 via scipy, v7.3 via h5py)."""
+    """Read from .mat file (v5/v7 via scipy, v7.3 via h5py).
+
+    var_name supports dot notation for MATLAB struct fields, e.g. "signal.data"
+    resolves as mat["signal"]["data"] with scipy's (1,1)-wrapped struct convention.
+    """
     import scipy.io as sio
 
     try:
@@ -122,16 +126,40 @@ def _read_mat(file_path: Path, var_name: str, fallbacks: List[str]) -> np.ndarra
         # v7.3 .mat files are HDF5
         return _read_h5(file_path, var_name, fallbacks)
 
-    # Try primary key
-    if var_name in mat:
-        return np.asarray(mat[var_name])
+    def _traverse(path: str):
+        """Resolve a dot-notation path through the loaded mat dict."""
+        parts = path.split(".")
+        obj = mat
+        for part in parts:
+            if isinstance(obj, dict):
+                if part not in obj:
+                    return None
+                obj = obj[part]
+            elif isinstance(obj, np.ndarray):
+                # scipy wraps scalar MATLAB structs as shape-(1,1) arrays
+                if obj.shape == (1, 1):
+                    obj = obj[0, 0]
+                if obj.dtype.names and part in obj.dtype.names:
+                    obj = obj[part]
+                    if isinstance(obj, np.ndarray) and obj.shape == (1, 1):
+                        obj = obj[0, 0]
+                else:
+                    return None
+            else:
+                return None
+        return np.asarray(obj, dtype=np.float64)
+
+    # Try primary path (dot-notation aware)
+    result = _traverse(var_name)
+    if result is not None:
+        return result
 
     # Try fallbacks
     for key in fallbacks:
-        if key in mat:
-            return np.asarray(mat[key])
+        result = _traverse(key)
+        if result is not None:
+            return result
 
-    # List available keys (skip MATLAB metadata)
     available = [k for k in mat.keys() if not k.startswith("__")]
     raise KeyError(
         f"Variable '{var_name}' not found in {file_path.name}. "

@@ -737,6 +737,28 @@ class ConfigTab(QWidget):
         loader_layout.addStretch()
         layout.addLayout(loader_layout)
 
+        # Path / orientation overrides — shown only for HDF5 and mat formats
+        self.emg_path_row = QWidget()
+        path_row_layout = QHBoxLayout(self.emg_path_row)
+        path_row_layout.setContentsMargins(0, 0, 0, 0)
+        path_row_layout.setSpacing(8)
+        emg_path_label = QLabel("Variable path:")
+        emg_path_label.setStyleSheet(get_label_style(size="normal"))
+        self.emg_path_edit = QLineEdit()
+        self.emg_path_edit.setPlaceholderText("e.g. signal/data")
+        self.emg_path_edit.textChanged.connect(self._on_emg_path_changed)
+        orient_label = QLabel("Orientation:")
+        orient_label.setStyleSheet(get_label_style(size="normal"))
+        self.emg_orientation_combo = QComboBox()
+        self.emg_orientation_combo.addItems(["auto", "samples_first", "channels_first"])
+        self.emg_orientation_combo.currentTextChanged.connect(self._on_emg_path_changed)
+        path_row_layout.addWidget(emg_path_label)
+        path_row_layout.addWidget(self.emg_path_edit, stretch=2)
+        path_row_layout.addWidget(orient_label)
+        path_row_layout.addWidget(self.emg_orientation_combo)
+        self.emg_path_row.setVisible(False)
+        layout.addWidget(self.emg_path_row)
+
         fs_layout = QHBoxLayout()
         fs_label = QLabel("Sampling Rate:")
         fs_label.setStyleSheet(get_label_style(size="normal"))
@@ -1071,11 +1093,39 @@ class ConfigTab(QWidget):
                 return
 
     def _on_loader_changed(self):
+        layout = self._get_current_layout()
+        fmt = layout.get("format", "") if layout else ""
+        show = fmt in ("h5", "mat")
+        self.emg_path_row.setVisible(show)
+        if show and layout:
+            emg_spec = layout.get("fields", {}).get("emg", {})
+            self.emg_path_edit.setText(emg_spec.get("path", ""))
+            orient = emg_spec.get("orientation", "auto")
+            idx = self.emg_orientation_combo.findText(orient)
+            self.emg_orientation_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        if self.emg_path:
+            self._update_file_info()
+
+    def _on_emg_path_changed(self):
         if self.emg_path:
             self._update_file_info()
 
     def _get_current_layout(self) -> Optional[dict]:
         return self._loader_layouts.get(self.loader_combo.currentText())
+
+    def _get_layout_with_overrides(self) -> Optional[dict]:
+        """Return a deep-copy of the current layout with the user's path/orientation applied."""
+        layout = self._get_current_layout()
+        if layout is None:
+            return None
+        layout = copy.deepcopy(layout)
+        path_override = self.emg_path_edit.text().strip()
+        if path_override:
+            layout["fields"]["emg"]["path"] = path_override
+        orientation = self.emg_orientation_combo.currentText()
+        if orientation != "auto":
+            layout["fields"]["emg"]["orientation"] = orientation
+        return layout
 
     def _on_fsamp_changed(self):
         if self.emg_path:
@@ -1104,7 +1154,7 @@ class ConfigTab(QWidget):
                 self._add_grid()
 
     def _estimate_channels_from_file(self, file_path: Path) -> int:
-        layout = self._get_current_layout()
+        layout = self._get_layout_with_overrides()
         if layout is None:
             return 256
         try:
@@ -1117,7 +1167,7 @@ class ConfigTab(QWidget):
             return 256
 
     def _update_file_info(self):
-        layout = self._get_current_layout()
+        layout = self._get_layout_with_overrides()
         if layout is None or self.emg_path is None:
             return
         try:
@@ -1398,7 +1448,7 @@ class ConfigTab(QWidget):
 
     def _config_to_dict(self) -> dict:
         """Serialize current UI state to a JSON-friendly dict."""
-        return {
+        d = {
             "version": 1,
             "loader": self.loader_combo.currentText(),
             "sampling_rate": int(self.fsamp_edit.text() or 2048),
@@ -1414,6 +1464,10 @@ class ConfigTab(QWidget):
             ],
             "aux_channels": [card.get_data() for card in self.aux_cards],
         }
+        if self.emg_path_row.isVisible():
+            d["emg_path"] = self.emg_path_edit.text().strip()
+            d["emg_orientation"] = self.emg_orientation_combo.currentText()
+        return d
 
     def _config_from_dict(self, cfg: dict):
         """Restore UI state from a previously saved dict."""
@@ -1422,6 +1476,14 @@ class ConfigTab(QWidget):
         idx = self.loader_combo.findText(loader_name)
         if idx >= 0:
             self.loader_combo.setCurrentIndex(idx)
+
+        # Path / orientation overrides (for HDF5 / mat formats)
+        if "emg_path" in cfg:
+            self.emg_path_edit.setText(cfg["emg_path"])
+        if "emg_orientation" in cfg:
+            idx = self.emg_orientation_combo.findText(cfg["emg_orientation"])
+            if idx >= 0:
+                self.emg_orientation_combo.setCurrentIndex(idx)
 
         # Sampling rate
         self.fsamp_edit.setText(str(cfg.get("sampling_rate", 2048)))
@@ -1574,7 +1636,7 @@ class ConfigTab(QWidget):
         # Aux channels
         config.aux_channels = [card.get_data() for card in self.aux_cards]
 
-        config.data_layout = self._get_current_layout()
+        config.data_layout = self._get_layout_with_overrides()
         config.output_dir = self.output_dir_edit.text() or str(self.emg_path.parent)
         config.emg_paths = [str(p) for p in self.emg_paths]
         self.config_applied.emit(config, self.emg_paths)
