@@ -31,6 +31,10 @@ from PyQt5.QtWidgets import (
     QShortcut,
     QStatusBar,
     QApplication,
+    QPlainTextEdit,
+    QDialog,
+    QDialogButtonBox,
+    QSizePolicy,
 )
 from PyQt5.QtGui import QKeySequence, QFont, QPixmap, QIcon, QPainter, QColor
 import pyqtgraph as pg
@@ -945,6 +949,17 @@ class EditionTab(QWidget):
         self.btn_auto_edit_mu.setStyleSheet(self._warn_toolbar_btn_style())
         tb.addWidget(self.btn_auto_edit_mu)
 
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(spacer)
+
+        self.btn_notes = QPushButton("📝 Notes")
+        self.btn_notes.setToolTip("Open notes for the current unit")
+        self.btn_notes.clicked.connect(self._open_notes_dialog)
+        self.btn_notes.setEnabled(False)
+        self.btn_notes.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_notes)
+
         return tb
 
     # ── Left panel ───────────────────────────────────────────────────────
@@ -1720,6 +1735,12 @@ class EditionTab(QWidget):
             if 0 <= idx < len(motor_units):
                 motor_units[idx].flagged_duplicate = True
 
+        # Restore per-unit notes (absent in older files → default empty string)
+        port_notes = decomp_data.get("mu_notes", [])
+        if port_idx < len(port_notes):
+            for mu, note in zip(motor_units, port_notes[port_idx]):
+                mu.notes = note if isinstance(note, str) else ""
+
         self._grid_info[port_name] = grid_cfg
         self._rejected_ch_positions[port_name] = rejected_pos_set
         if emg_port is not None:
@@ -1801,7 +1822,7 @@ class EditionTab(QWidget):
         import dataclasses
 
         ports = list(self._ports.keys())
-        discharge_times, pulse_trains, mu_filters, mu_properties = [], [], [], []
+        discharge_times, pulse_trains, mu_filters, mu_properties, mu_notes = [], [], [], [], []
         flagged_mus_per_port = {}
 
         for port_name in ports:
@@ -1838,6 +1859,7 @@ class EditionTab(QWidget):
                 else:
                     port_props.append({})
             mu_properties.append(port_props)
+            mu_notes.append([mu.notes for mu in mus])
 
         save_data = {
             "ports": ports,
@@ -1847,6 +1869,7 @@ class EditionTab(QWidget):
             "mu_filters": mu_filters,
             "skip_filter_recalc": True,
             "mu_properties": mu_properties,
+            "mu_notes": mu_notes,
             "flagged_mus": flagged_mus_per_port,
             "edit_history": self._edit_history,
         }
@@ -2856,6 +2879,7 @@ class EditionTab(QWidget):
     def _update_quality_panel(self, mu: Optional[MotorUnit]):
         if mu is None:
             self.quality_bar.clear_properties()
+            self.btn_notes.setEnabled(False)
             return
         if mu.props is not None:
             self.quality_bar.set_properties(
@@ -2867,6 +2891,44 @@ class EditionTab(QWidget):
             )
         else:
             self.quality_bar.clear_properties()
+        self.btn_notes.setEnabled(True)
+
+    def _open_notes_dialog(self):
+        mu = self._current_mu()
+        if mu is None:
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Notes — {self._current_port}  MU {mu.id}")
+        dlg.resize(420, 260)
+        dlg.setStyleSheet(f"background-color: {COLORS['background']}; color: {COLORS['foreground']};")
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+
+        editor = QPlainTextEdit()
+        editor.setPlainText(mu.notes)
+        editor.setPlaceholderText("Notes for this unit…")
+        editor.setStyleSheet(
+            f"QPlainTextEdit {{"
+            f" background-color: {COLORS.get('background_input', '#1a1f24')};"
+            f" color: {COLORS['foreground']};"
+            f" border: 1px solid {COLORS['border']};"
+            f" border-radius: 4px;"
+            f" font-size: {FONT_SIZES.get('small', '9pt')};"
+            f"}}"
+        )
+        lay.addWidget(editor, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet(f"color: {COLORS['foreground']};")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        lay.addWidget(buttons)
+
+        if dlg.exec_() == QDialog.Accepted:
+            mu.notes = editor.toPlainText()
 
     def _update_status(self, msg: Optional[str] = None):
         if msg:

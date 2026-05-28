@@ -684,18 +684,14 @@ def recalculate_unit_filter(
         square_source=square_source,
     )
 
-    # ── Step 3: STA filter from edited timestamps (plateau only) ──────────
-    ts_in_plateau = edited_timestamps_abs[
-        (edited_timestamps_abs >= start_sample)
-        & (edited_timestamps_abs < end_sample)
-        & (edited_timestamps_abs < emg_peeled.shape[0])
-    ]
-    if len(ts_in_plateau) < 2:
+    # ── Step 3: STA filter from all edited timestamps (full signal) ───────
+    ts_valid = edited_timestamps_abs[edited_timestamps_abs < emg_peeled.shape[0]]
+    if len(ts_valid) < 2:
         raise ValueError(
-            "Need at least 2 spikes within the plateau for filter recalculation."
+            "Need at least 2 spikes for filter recalculation."
         )
 
-    ts_tensor = torch.from_numpy(np.asarray(ts_in_plateau, dtype=np.int64)).to(device)
+    ts_tensor = torch.from_numpy(np.asarray(ts_valid, dtype=np.int64)).to(device)
     sta = fn["spike_triggered_average"](emg_peeled, ts_tensor, 1)
     filt = sta.t()
     filt = filt / filt.abs().sum().clamp(min=1e-8)
@@ -706,15 +702,10 @@ def recalculate_unit_filter(
     source_t = (source_t - plateau_slice.mean()) / plateau_slice.std().clamp(min=1e-8)
     source_t = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # ── Step 5: Re-detect spike times from new source ─────────────────────
-    new_timestamps_abs = _extract_timestamps(
-        source_t, fn, min_peak_sep=min_peak_sep, square_source=square_source
-    )
-
     return (
         filt.detach().cpu().numpy(),
         source_t.detach().cpu().numpy().astype(np.float64),
-        new_timestamps_abs,
+        edited_timestamps_abs,
     )
 
 

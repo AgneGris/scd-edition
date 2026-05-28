@@ -22,6 +22,8 @@ class MotorUnit:
     flagged_duplicate: bool = False
     props: Optional[MUProperties] = field(default=None, repr=False)
 
+    notes: str = ""
+
     # Duplicate detection roles — set by toolbar buttons, not persisted
     within_duplicate_role: Optional[str] = None  # "keep" | "delete" | None
     cross_duplicate_role: Optional[str] = None  # "keep" | "delete" | None
