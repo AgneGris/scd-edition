@@ -504,7 +504,7 @@ class SourcePlotWidget(pg.PlotWidget):
 
 class FiringRatePlotWidget(pg.PlotWidget):
     def __init__(self, parent=None):
-        super().__init__(parent, background=COLORS["background"])
+        super().__init__(parent, background=COLORS["background"], viewBox=XZoomViewBox())
         self.showGrid(x=True, y=True, alpha=0.15)
         self.setLabel("bottom", "Time (s)", color=COLORS.get("text_dim", "#6c7086"))
         self.setLabel("left", "IFR (Hz)", color=COLORS.get("text_dim", "#6c7086"))
@@ -515,6 +515,7 @@ class FiringRatePlotWidget(pg.PlotWidget):
         self._curve.setDownsampling(auto=True, method="peak")
         self._curve.setClipToView(True)
         self._fsamp = 1.0
+        self._y_max = 1.0
 
     def set_fsamp(self, fsamp: float):
         self._fsamp = fsamp
@@ -531,6 +532,13 @@ class FiringRatePlotWidget(pg.PlotWidget):
         ifr = np.where(isi > 0.01, 1.0 / isi, 0.0)
         t_mid = (ts[:-1] + ts[1:]) / 2 / self._fsamp
         self._curve.setData(t_mid, ifr)
+        valid = ifr[ifr > 0]
+        self._y_max = float(np.max(valid)) if len(valid) > 0 else 1.0
+        self.getViewBox().enableAutoRange(axis=1, enable=False)
+        self.getViewBox().setYRange(0, self._y_max * 1.1, padding=0)
+
+    def reset_y_range(self):
+        self.getViewBox().setYRange(0, self._y_max * 1.1, padding=0)
 
     def clear_data(self):
         self._curve.setData([], [])
