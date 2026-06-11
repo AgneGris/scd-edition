@@ -676,6 +676,7 @@ class EditionTab(QWidget):
         self._original_decomp_data: Optional[dict] = None
         self._filter_recalc_available: bool = False
         self._muap_popout: Optional[MuapPopoutDialog] = None
+        self._last_action_msg: Optional[str] = None
 
         # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
         self._props_timer = QTimer(self)
@@ -1128,18 +1129,20 @@ class EditionTab(QWidget):
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Up"), self, self._select_prev_mu)
         QShortcut(QKeySequence("Down"), self, self._select_next_mu)
-        QShortcut(
-            QKeySequence("Ctrl+A"),
-            self,
-            lambda: self.btn_sel_add.setChecked(not self.btn_sel_add.isChecked()),
-        )
-        QShortcut(
-            QKeySequence("Ctrl+D"),
-            self,
-            lambda: self.btn_sel_delete.setChecked(not self.btn_sel_delete.isChecked()),
-        )
+        QShortcut(QKeySequence("Ctrl+Up"), self, self._select_prev_port)
+        QShortcut(QKeySequence("Ctrl+Down"), self, self._select_next_port)
+        QShortcut(QKeySequence("Left"), self, lambda: self._pan_source(-0.02))
+        QShortcut(QKeySequence("Right"), self, lambda: self._pan_source(0.02))
+        QShortcut(QKeySequence("A"), self, lambda: self.btn_sel_add.setChecked(True))
+        QShortcut(QKeySequence("D"), self, lambda: self.btn_sel_delete.setChecked(True))
         QShortcut(QKeySequence("Escape"), self, lambda: self._set_mode(EditMode.VIEW))
         QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
+
+    def _pan_source(self, fraction: float):
+        """Pan the source plot by `fraction` of the current visible width."""
+        vb = self.source_plot.getViewBox()
+        (x_min, x_max), _ = vb.viewRange()
+        vb.translateBy(x=(x_max - x_min) * fraction, y=0)
 
     # ------------------------------------------------------------------
     # Sampling rate
@@ -1935,8 +1938,8 @@ class EditionTab(QWidget):
         self.source_plot.getViewBox().setRange(
             xRange=(0, x_max), yRange=(-y_pad, y_max + y_pad), padding=0
         )
-        # FR plot X follows via the link; only auto-range its Y axis.
-        self.fr_plot.getViewBox().enableAutoRange(axis=1, enable=True)
+        # FR plot X follows via the link; reset Y to the full data range.
+        self.fr_plot.reset_y_range()
 
     def _reset_view(self):
         self._reset_view_full()
@@ -2297,6 +2300,16 @@ class EditionTab(QWidget):
         idx = self.mu_combo.currentIndex()
         if idx < self.mu_combo.count() - 1:
             self.mu_combo.setCurrentIndex(idx + 1)
+
+    def _select_prev_port(self):
+        idx = self.port_combo.currentIndex()
+        if idx > 0:
+            self.port_combo.setCurrentIndex(idx - 1)
+
+    def _select_next_port(self):
+        idx = self.port_combo.currentIndex()
+        if idx < self.port_combo.count() - 1:
+            self.port_combo.setCurrentIndex(idx + 1)
 
     def _toggle_flag_delete(self):
         mu = self._current_mu()
@@ -2932,7 +2945,8 @@ class EditionTab(QWidget):
 
     def _update_status(self, msg: Optional[str] = None):
         if msg:
-            self.status_bar.showMessage(msg, 4000)
+            self._last_action_msg = msg
+            self.status_bar.showMessage(msg)
             return
         parts = []
         if self._current_port:
@@ -2954,6 +2968,8 @@ class EditionTab(QWidget):
             parts.append(f"Undo: {n_undo}")
         if self._full_source_mode:
             parts.append("Full signal")
+        if getattr(self, "_last_action_msg", None):
+            parts.append(f"Last: {self._last_action_msg}")
         self.status_bar.showMessage("  |  ".join(parts))
 
     # ------------------------------------------------------------------
