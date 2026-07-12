@@ -50,3 +50,6 @@ resources/loaders_configs/loader_dynamic.yaml
 # HPC generated job scripts and outputs
 jobs/batch_decomp_*.sh
 jobs/job_outputs/*.txt
+
+# Notebooks (local analysis, untracked)
+notebooks/

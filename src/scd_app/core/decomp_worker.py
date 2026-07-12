@@ -272,10 +272,12 @@ class DecompositionWorker(QThread):
         return dictionary, timestamps
 
     def _save_results(self, results: dict):
-        # 1. Channel counts, actual indices, and electrode info per port
+        # 1. Channel counts, actual indices, electrode info and the user-set
+        #    decomposition parameters per port.
         chans_per_electrode = []
         channel_indices = []  # actual absolute channel indices per port
         electrodes = []
+        decomposition_params = []  # user-modifiable params, one dict per port
         for port_name in results["ports"]:
             if port_name in self.grid_configs:
                 cfg = self.grid_configs[port_name]
@@ -283,10 +285,12 @@ class DecompositionWorker(QThread):
                 chans_per_electrode.append(len(chs))
                 channel_indices.append(chs)
                 electrodes.append(cfg.get("electrode_type"))
+                decomposition_params.append(dict(cfg.get("params") or {}))
             else:
                 chans_per_electrode.append(64)
                 channel_indices.append(None)
                 electrodes.append(None)
+                decomposition_params.append({})
 
         # 2. Raw EMG — always (channels, samples)
         if torch.is_tensor(self.emg_data):
@@ -356,7 +360,15 @@ class DecompositionWorker(QThread):
 
         # 5. Build save dict
         save_dict = {
-            "version": 1.0,
+            "version": 1.1,
+            # User-modifiable decomposition parameters, one dict per port.  Everything the
+            # user can set in the Decomposition tab: sil_threshold, iterations,
+            # extension_factor, highpass_hz, lowpass_hz, notch_filter, notch_harmonics,
+            # peel_off, peel_off_repeats, muap_window_ms, fitness, swarm, fixed_exponent,
+            # clamp.  Saved so a decomposition can be reproduced or audited from its output
+            # alone (preprocessing_config only records what SCD derived from these).
+            "decomposition_params": decomposition_params,
+            "aux_configs": [dict(a) for a in self.aux_configs],
             # Decomposition results
             "pulse_trains": results["pulse_trains"],
             "discharge_times": results["discharge_times"],

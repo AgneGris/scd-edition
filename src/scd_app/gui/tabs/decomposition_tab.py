@@ -109,6 +109,10 @@ class DecompositionTab(QWidget):
         self.rejected_channels = []
         self.plateau_coords = None
 
+        # Cache of filtered/downsampled display arrays for the channel-rejection view,
+        # so toggling a channel does not re-filter the full-resolution EMG.
+        self._disp_cache = {}
+
         # UI References
         self.grid_selector = None
         self.param_stack = None
@@ -714,7 +718,7 @@ class DecompositionTab(QWidget):
         """Apply bandpass and notch filters to a (samples, channels) float array.
         Returns filtered array of the same shape. Falls back to raw on error."""
         try:
-            from scipy.signal import butter, sosfiltfilt, iirnotch, filtfilt
+            from scipy.signal import butter, sosfiltfilt, iirnotch, tf2sos
 
             nyq = fs / 2.0
             highpass = float(params.get("highpass_hz", 10))
@@ -722,28 +726,35 @@ class DecompositionTab(QWidget):
             notch_str = str(params.get("notch_filter", "None"))
             notch_harmonics = bool(params.get("notch_harmonics", False))
 
+            # Build every section first, then run ONE zero-phase pass.  Filtering each
+            # section separately meant a float64/float32 round-trip of the whole array per
+            # section — with 50 Hz harmonics up to Nyquist that is ~100 passes and tens of
+            # GB of copies, which made the channel-rejection view unusably slow.
+            sections = []
+
             hp = max(highpass, 1.0) / nyq
             lp = min(lowpass, nyq * 0.999) / nyq
             if 0 < hp < lp < 1:
-                sos = butter(4, [hp, lp], btype="band", output="sos")
-                data = sosfiltfilt(sos, data.astype(np.float64), axis=0).astype(
-                    np.float32
-                )
+                sections.append(butter(4, [hp, lp], btype="band", output="sos"))
 
             if notch_str not in ("None", ""):
                 notch_freq = float(notch_str)
-                freqs = []
+                # Harmonics above the low-pass cutoff are already removed by the bandpass,
+                # so notching them is pure cost for no effect.
+                notch_limit = min(lowpass, nyq * 0.999)
                 f = notch_freq
-                while f < nyq:
-                    freqs.append(f)
+                while f < notch_limit:
+                    b, a = iirnotch(f, 30.0, fs)
+                    sections.append(tf2sos(b, a))
                     if not notch_harmonics:
                         break
                     f += notch_freq
-                for freq in freqs:
-                    b, a = iirnotch(freq, 30.0, fs)
-                    data = filtfilt(b, a, data.astype(np.float64), axis=0).astype(
-                        np.float32
-                    )
+
+            if sections:
+                sos = np.vstack(sections)
+                data = sosfiltfilt(sos, data.astype(np.float64), axis=0).astype(
+                    np.float32
+                )
         except Exception as e:
             print(f"Warning: filter failed, showing raw: {e}")
         return data
@@ -755,6 +766,10 @@ class DecompositionTab(QWidget):
 
         self._cleanup_matplotlib_widgets()
         self.figure.set_facecolor(COLORS["background"])
+
+        # Display-data cache for draw_grid — keyed per grid + filter/downsample settings.
+        # Reset here because self.emg_data belongs to the file we are about to inspect.
+        self._disp_cache = {}
 
         # Build grid list
         grid_list = list(self.grid_configs.items())
@@ -779,14 +794,17 @@ class DecompositionTab(QWidget):
 
         nav = {"current": 0, "show_force": bool(_aux_to_show)}
 
-        def draw_grid(grid_idx, restore_view=None, fixed_separation=None):
+        def draw_grid(grid_idx, restore_view=None, prev_separation=None):
             """Draw a single grid's channels.
 
             Args:
-                restore_view:      optional ((x0, x1), (y0, y1)) — preserves zoom/pan.
-                fixed_separation:  optional float — reuse an existing separation value
-                                   so the channel geometry doesn't shift when a channel
-                                   is toggled and the active-channel std changes.
+                restore_view:     optional ((x0, x1), (y0, y1)) — preserves zoom/pan.
+                prev_separation:  optional float — the separation the restored view was
+                                  built with.  Row positions (ch * separation) and the
+                                  y-limits are both proportional to `separation`, so
+                                  scaling the restored y-limits by (new / prev) leaves
+                                  every channel at the same place on screen while the
+                                  traces renormalise to the new set of good channels.
             """
             self.figure.clf()
 
@@ -839,35 +857,66 @@ class DecompositionTab(QWidget):
                 color=COLORS["info"],
             )
 
-            raw_data = self.emg_data[:, channels].numpy()
-
-            # Apply the per-grid filters (bandpass + notch) for display
-            raw_data = self._apply_emg_filters(
-                raw_data, self.sampling_rate, grid_params
-            )
-
-            # Downsample for display option (if enabled, does not affect actual decomposition data)
+            # Slicing + filtering the full-resolution EMG costs far more than the plotting
+            # itself, and toggling a channel does not change the signal — only which lines
+            # are drawn.  So cache the filtered/downsampled display array and reuse it
+            # across redraws.  Cached per (grid, filter settings, downsample geometry);
+            # the cache is cleared whenever a new file is loaded.
             use_downsample = self.global_widgets["downsample_display"].isChecked()
-            if use_downsample:
-                canvas_width_px = self.canvas.get_width_height()[0] or 1000
-                disp_data, step = self._downsample_for_display(
-                    raw_data, canvas_width_px
+            canvas_width_px = self.canvas.get_width_height()[0] or 1000
+            cache_key = (
+                grid_idx,
+                hp,
+                lp,
+                notch,
+                grid_params.get("notch_harmonics"),
+                use_downsample,
+                canvas_width_px if use_downsample else None,
+            )
+            cached = self._disp_cache.get(cache_key)
+            if cached is None:
+                raw_data = self.emg_data[:, channels].numpy()
+
+                # Apply the per-grid filters (bandpass + notch) for display
+                raw_data = self._apply_emg_filters(
+                    raw_data, self.sampling_rate, grid_params
                 )
+
+                # Downsample for display (does not affect the decomposition data)
+                if use_downsample:
+                    disp_data, step = self._downsample_for_display(
+                        raw_data, canvas_width_px
+                    )
+                else:
+                    disp_data = raw_data
+                    step = 1
+                # Per-channel moments, so the pooled std over whatever subset of channels
+                # is currently active can be recomputed in O(n_channels) on every toggle
+                # instead of re-reducing the whole display array.
+                d64 = disp_data.astype(np.float64, copy=False)
+                stats = (
+                    float(disp_data.shape[0]),  # samples per channel
+                    d64.sum(axis=0),  # Σx   per channel
+                    np.einsum("ij,ij->j", d64, d64),  # Σx²  per channel
+                )
+                self._disp_cache[cache_key] = (disp_data, step, stats)
             else:
-                disp_data = raw_data
-                step = 1
+                disp_data, step, stats = cached
             max_len = disp_data.shape[0]
 
-            # Normalise separation using only active (non-rejected) channels.
-            if fixed_separation is not None:
-                separation = fixed_separation
+            # Renormalise the separation using ONLY the currently active channels, so
+            # rejecting a noisy channel immediately rescales the remaining traces.
+            active_idx = np.where(mask == 0)[0]
+            sel = active_idx if len(active_idx) > 0 else np.arange(n_channels)
+            n_per_ch, sum_x, sum_x2 = stats
+            n_tot = n_per_ch * len(sel)
+            if n_tot > 0:
+                mean = sum_x[sel].sum() / n_tot
+                var = sum_x2[sel].sum() / n_tot - mean**2
+                active_std = float(np.sqrt(max(var, 0.0)))
             else:
-                active_idx = np.where(mask == 0)[0]
-                ref_data = (
-                    disp_data[:, active_idx] if len(active_idx) > 0 else disp_data
-                )
-                active_std = np.std(ref_data)
-                separation = active_std * 15 if active_std > 0 else 1.0
+                active_std = 0.0
+            separation = active_std * 15 if active_std > 0 else 1.0
 
             for ch in range(n_channels):
                 is_rejected = mask[ch] == 1
@@ -908,10 +957,17 @@ class DecompositionTab(QWidget):
             ax.set_ylim(-separation, total_height)
             ax.margins(0)
 
-            # Restore zoom/pan if the user was already viewing a sub-region
+            # Restore zoom/pan if the user was already viewing a sub-region.  Scale the
+            # y-limits by the change in separation: row y-positions are ch * separation,
+            # so the same factor keeps every channel at an identical screen position while
+            # the traces themselves renormalise.
             if restore_view is not None:
                 ax.set_xlim(restore_view[0])
-                ax.set_ylim(restore_view[1])
+                y0, y1 = restore_view[1]
+                if prev_separation and prev_separation > 0:
+                    scale = separation / prev_separation
+                    y0, y1 = y0 * scale, y1 * scale
+                ax.set_ylim(y0, y1)
 
             # Hide everything except the bottom time axis
             ax.set_yticks([])
@@ -1171,12 +1227,13 @@ class DecompositionTab(QWidget):
                     return
 
                 mask[closest_ch] = 1 - mask[closest_ch]
-                # Preserve zoom/pan and channel geometry across the redraw
+                # Renormalise to the new set of good channels, but pass the old separation
+                # so the view is rescaled with it and the rows stay put on screen.
                 saved_view = (ax.get_xlim(), ax.get_ylim())
                 saved_sep = separation
                 disconnect()
                 draw_grid(
-                    nav["current"], restore_view=saved_view, fixed_separation=saved_sep
+                    nav["current"], restore_view=saved_view, prev_separation=saved_sep
                 )
 
             def on_scroll(event):
