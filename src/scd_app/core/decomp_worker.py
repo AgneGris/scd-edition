@@ -17,8 +17,10 @@ from scd.models.scd import SwarmContrastiveDecomposition
 class DecompositionWorker(QThread):
     """Worker thread to run the SCD decomposition algorithm."""
 
-    finished = pyqtSignal(dict)
-    stopped = pyqtSignal(dict)  # emitted instead of finished when user stops
+    # NB: not named `finished` — that would shadow QThread.finished, and this one is
+    # emitted from inside run() while the thread is still alive.
+    decomposition_finished = pyqtSignal(dict)
+    stopped = pyqtSignal(dict)  # emitted instead of decomposition_finished when user stops
     error = pyqtSignal(str)
     progress = pyqtSignal(str)
     electrode_completed = pyqtSignal(int, int)
@@ -199,7 +201,7 @@ class DecompositionWorker(QThread):
             self.progress.emit("Saving results...")
             self._save_results(results)
 
-            self.finished.emit(
+            self.decomposition_finished.emit(
                 {
                     "status": "success",
                     "path": str(self.save_path),

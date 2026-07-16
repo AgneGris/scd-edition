@@ -1657,7 +1657,9 @@ class DecompositionTab(QWidget):
         self._update_confirm_btn_visibility()
 
     def _start_decomposition(self):
-        if not self.config or not self.emg_paths or self.emg_data is None:
+        # emg_data is not required here: the phase-1 path below loads each file itself,
+        # and the later phases only run once a file has been loaded.
+        if not self.config or not self.emg_paths:
             QMessageBox.warning(self, "Error", "No session loaded.")
             return
 
@@ -1713,10 +1715,25 @@ class DecompositionTab(QWidget):
         else:
             self._prepare_current_file()
 
-    def _prepare_current_file(self):
-        """Load file, do channel rejection + RMS, then wait for time window (per file)."""
+    def _load_emg_full(self, file_path: Path):
+        """Load a file's EMG with no channel filter applied.
+
+        The filter is removed so that force/aux "signal" channels (which may sit
+        beyond the EMG grid range) are included in the array and available for the
+        worker to save.
+        """
+        import copy
+
         from scd_app.io.data_loader import load_field
 
+        layout = getattr(self.config, "data_layout", None)
+        layout_full = copy.deepcopy(layout) if layout else layout
+        if layout_full and "fields" in layout_full and "emg" in layout_full["fields"]:
+            layout_full["fields"]["emg"].pop("channels", None)
+        return load_field(file_path, layout_full, "emg")
+
+    def _prepare_current_file(self):
+        """Load file, do channel rejection + RMS, then wait for time window (per file)."""
         if self._file_idx >= len(self._file_queue):
             self.grid_indicator_label.setText("All files complete")
             self._reset_ui_state()
@@ -1730,22 +1747,8 @@ class DecompositionTab(QWidget):
             f"File {self._file_idx + 1}/{n_total}: {file_path.name}"
         )
 
-        # Load this file's EMG data — remove any channel filter so that
-        # force/aux "signal" channels (which may sit beyond the EMG grid range)
-        # are included in the array and available for the worker to save.
         try:
-            import copy
-
-            layout = getattr(self.config, "data_layout", None)
-            layout_full = copy.deepcopy(layout) if layout else layout
-            if (
-                layout_full
-                and "fields" in layout_full
-                and "emg" in layout_full["fields"]
-            ):
-                layout_full["fields"]["emg"].pop("channels", None)
-            emg = load_field(file_path, layout_full, "emg")
-            self.emg_data = emg
+            self.emg_data = self._load_emg_full(file_path)
             self.emg_path = file_path
         except Exception as e:
             QMessageBox.critical(
@@ -1822,6 +1825,14 @@ class DecompositionTab(QWidget):
         save_path = self._output_dir / f"{file_path.stem}_decomp_output.pkl"
 
         aux_configs = getattr(self.config, "aux_channels", [])
+
+        # Retire the previous worker before rebinding. decomposition_finished is emitted
+        # from inside run(), so the thread can still be alive here, and dropping the last
+        # reference to a running QThread aborts the process. It is at the end of run(),
+        # so this returns immediately.
+        if self.worker is not None:
+            self.worker.wait()
+
         self.worker = DecompositionWorker(
             self.emg_data,
             self.grid_configs,
@@ -1833,7 +1844,7 @@ class DecompositionTab(QWidget):
             emg_file_path=file_path,
         )
         self.worker.progress.connect(self._update_grid_indicator)
-        self.worker.finished.connect(self._on_file_decomposition_finished)
+        self.worker.decomposition_finished.connect(self._on_file_decomposition_finished)
         self.worker.stopped.connect(self._on_worker_stopped)
         self.worker.error.connect(self._on_decomposition_error)
         self.worker.source_found.connect(self._on_source_found)
@@ -1846,8 +1857,6 @@ class DecompositionTab(QWidget):
     def _batch_setup_next_file(self):
         """Load one file and collect its manual channel rejection + time window.
         Called repeatedly until all files are set up, then triggers decomposition."""
-        from scd_app.io.data_loader import load_field
-
         if self._setup_idx >= len(self._file_queue):
             # All files set up — start decomposing
             n = len(self._file_setups)
@@ -1867,18 +1876,7 @@ class DecompositionTab(QWidget):
 
         # Load EMG
         try:
-            import copy
-
-            layout = getattr(self.config, "data_layout", None)
-            layout_full = copy.deepcopy(layout) if layout else layout
-            if (
-                layout_full
-                and "fields" in layout_full
-                and "emg" in layout_full["fields"]
-            ):
-                layout_full["fields"]["emg"].pop("channels", None)
-            emg = load_field(file_path, layout_full, "emg")
-            self.emg_data = emg
+            self.emg_data = self._load_emg_full(file_path)
             self.emg_path = file_path
         except Exception as e:
             QMessageBox.critical(
@@ -1911,10 +1909,12 @@ class DecompositionTab(QWidget):
         self._show_rms_plot()
 
         if self._use_full_file:
+            # Only the setup decisions are kept — the EMG itself is reloaded at
+            # decomposition time. Holding every file's array here would put the whole
+            # batch's raw data in RAM at once.
             self._file_setups.append(
                 {
                     "file_path": file_path,
-                    "emg_data": self.emg_data,
                     "rejected_channels": rejected_snapshot,
                     "plateau_coords": np.array([0, self.emg_data.shape[0]]),
                 }
@@ -1953,7 +1953,6 @@ class DecompositionTab(QWidget):
         self._file_setups.append(
             {
                 "file_path": file_path,
-                "emg_data": self.emg_data,
                 "rejected_channels": self._batch_setup_rejected_snapshot,
                 "plateau_coords": plateau,
             }
@@ -1978,16 +1977,30 @@ class DecompositionTab(QWidget):
             return
 
         setup = self._file_setups[self._file_idx]
-        self.emg_data = setup["emg_data"]
-        self.emg_path = setup["file_path"]
-        self.rejected_channels = setup["rejected_channels"]
-        self.plateau_coords = setup["plateau_coords"]
+        file_path = setup["file_path"]
 
         n_total = len(self._file_setups)
         self.grid_indicator_label.setText(
-            f"File {self._file_idx + 1}/{n_total}: {self.emg_path.name}"
+            f"File {self._file_idx + 1}/{n_total}: {file_path.name}"
         )
-        self.file_path_label.setText(f"\U0001f4c4 {self.emg_path.name}")
+        self.file_path_label.setText(f"\U0001f4c4 {file_path.name}")
+        QApplication.processEvents()  # show the label before the (blocking) load
+
+        # Drop the previous file's array before loading the next one
+        self.emg_data = None
+        try:
+            self.emg_data = self._load_emg_full(file_path)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Load Error", f"Failed to load {file_path.name}:\n{e}"
+            )
+            self._file_idx += 1
+            self._batch_decompose_next_file()
+            return
+
+        self.emg_path = file_path
+        self.rejected_channels = setup["rejected_channels"]
+        self.plateau_coords = setup["plateau_coords"]
 
         self._run_current_file()
 
@@ -1995,6 +2008,12 @@ class DecompositionTab(QWidget):
         """One file done — move to next."""
         decomp_path = Path(results.get("path"))
         self._last_decomp_path = decomp_path
+
+        # Let the thread exit and release it — it holds this file's EMG array, which
+        # would otherwise stay in RAM alongside the next file's.
+        if self.worker is not None:
+            self.worker.wait()
+            self.worker = None
 
         self._file_idx += 1
         if getattr(self, "_file_setups", None):
