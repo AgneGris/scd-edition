@@ -55,6 +55,11 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
+from scd.processing.preprocess import (
+    estimate_baseline_noise,
+    replace_bad_channels_with_noise,
+)
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -566,9 +571,10 @@ class _HeadlessWorker:
                     )
                     rejected = np.zeros(len(channels), dtype=int)
 
+                # Baseline amplitude, also reused by the time-mask fill below
                 good_channels = np.where(rejected == 0)[0]
                 noise_std = (
-                    grid_data[:, good_channels].std().item()
+                    estimate_baseline_noise(grid_data[:, good_channels])
                     if len(good_channels) > 0
                     else 1e-6
                 )
@@ -576,15 +582,11 @@ class _HeadlessWorker:
                 bad_channels = np.where(rejected == 1)[0]
                 if len(bad_channels) > 0:
                     print(f"    Masked channels : {list(bad_channels)}")
-                    gen = torch.Generator()
-                    gen.manual_seed(42)
-                    noise = (
-                        torch.randn(
-                            grid_data.shape[0], len(bad_channels), generator=gen
-                        )
-                        * noise_std
+                    # Delegated to SCD so this matches decomp_worker and
+                    # filter_recalculation._replace_bad_channels exactly.
+                    replace_bad_channels_with_noise(
+                        grid_data, bad_channels.tolist()
                     )
-                    grid_data[:, bad_channels] = noise
                 else:
                     print(f"    Masked channels : none")
 

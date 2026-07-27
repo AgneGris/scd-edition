@@ -86,10 +86,19 @@ def _replace_bad_channels(
 ) -> np.ndarray:
     """Replace rejected channels with baseline noise, matching decomp_worker.
 
-    The decomposition replaced bad channels with torch.randn * noise_std
-    BEFORE SCD saw the data, so the whitening matrix was computed on
-    noise-replaced data.  We must do the same here.
+    The decomposition replaced bad channels with noise BEFORE SCD saw the
+    data, so the whitening matrix was computed on noise-replaced data.  We
+    must do the same here.
+
+    Delegates to scd.replace_bad_channels_with_noise so this stays identical
+    to the decomposition path by construction.  Note that function works in
+    (samples, channels), so the port is transposed around the call — an
+    earlier version of this helper drew randn(n_bad, n_samples) directly,
+    which produced different values from the decomposition's
+    randn(n_samples, n_bad) whenever a port had more than one bad channel.
     """
+    from scd import replace_bad_channels_with_noise
+
     mask_list = decomp_data.get("emg_mask", [])
     if port_idx >= len(mask_list) or mask_list[port_idx] is None:
         return raw_port
@@ -99,22 +108,15 @@ def _replace_bad_channels(
     if len(bad_ch) == 0:
         return raw_port
 
-    good_ch = np.where(mask == 0)[0]
-    noise_std = float(raw_port[good_ch, :].std()) if len(good_ch) > 0 else 1e-6
-
-    # Fixed seed so the noise is identical across load / recalculate calls
-    gen = torch.Generator()
-    gen.manual_seed(seed)
-    noise = (
-        torch.randn(len(bad_ch), raw_port.shape[1], generator=gen).numpy() * noise_std
-    )
-    raw_port[bad_ch, :] = noise
+    # (n_ch, samples) -> (samples, n_ch) for SCD, then write back in place
+    port_t = torch.from_numpy(np.ascontiguousarray(raw_port.T))
+    replace_bad_channels_with_noise(port_t, bad_ch.tolist(), seed=seed)
+    raw_port[bad_ch, :] = port_t.numpy().T[bad_ch, :]
 
     logger.debug(
-        "Port %d: replaced %d bad channel(s) with noise (std=%.4f)",
+        "Port %d: replaced %d bad channel(s) with baseline noise",
         port_idx,
         len(bad_ch),
-        noise_std,
     )
     return raw_port
 

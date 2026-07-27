@@ -12,6 +12,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 import torch
 from scd.config.structures import Config
 from scd.models.scd import SwarmContrastiveDecomposition
+from scd.processing.preprocess import replace_bad_channels_with_noise
 
 
 class DecompositionWorker(QThread):
@@ -105,23 +106,13 @@ class DecompositionWorker(QThread):
                     rejected = np.zeros(len(channels), dtype=int)
                 bad_channels = np.where(rejected == 1)[0]
                 if len(bad_channels) > 0:
-                    good_channels = np.where(rejected == 0)[0]
-                    noise_std = (
-                        grid_data[:, good_channels].std().item()
-                        if len(good_channels) > 0
-                        else 1e-6
+                    # Delegated to SCD so the decomposition and
+                    # filter_recalculation._replace_bad_channels fill the
+                    # channels identically. Fixed seed inside, so the noise is
+                    # reproducible when sources are recomputed on load.
+                    replace_bad_channels_with_noise(
+                        grid_data, bad_channels.tolist()
                     )
-                    # Use a fixed seed (matching filter_recalculation._replace_bad_channels)
-                    # so that the noise is reproducible when sources are recomputed on load.
-                    gen = torch.Generator()
-                    gen.manual_seed(42)
-                    noise = (
-                        torch.randn(
-                            grid_data.shape[0], len(bad_channels), generator=gen
-                        )
-                        * noise_std
-                    )
-                    grid_data[:, bad_channels] = noise
 
                 # Slice to selected time window
                 start_sample = int(self.plateau_coords[0])

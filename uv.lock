@@ -2213,7 +2213,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "scikit-learn", specifier = ">=1.0.0" },
     { name = "scipy", specifier = ">=1.7.0" },
-    { name = "swarm-contrastive-decomposition", specifier = ">=0.1.8" },
+    { name = "swarm-contrastive-decomposition", specifier = ">=0.2.0" },
     { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "scd-edition", extra = "cpu" } },
     { name = "torch", marker = "extra == 'cuda'", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "scd-edition", extra = "cuda" } },
 ]
@@ -2598,7 +2598,7 @@ wheels = [
 
 [[package]]
 name = "swarm-contrastive-decomposition"
-version = "0.1.8"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h5py" },
@@ -2614,9 +2614,9 @@ dependencies = [
     { name = "torch", version = "2.12.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra != 'extra-11-scd-edition-cpu' and extra != 'extra-11-scd-edition-cuda') or (sys_platform != 'emscripten' and extra != 'extra-11-scd-edition-cpu' and extra != 'extra-11-scd-edition-cuda') or (extra == 'extra-11-scd-edition-cpu' and extra == 'extra-11-scd-edition-cuda')" },
     { name = "torch", version = "2.12.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-scd-edition-cpu') or (extra == 'extra-11-scd-edition-cpu' and extra == 'extra-11-scd-edition-cuda')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a6/c9/b03a56eb7da09ab75a6156c7bb7335be680e52a9f9acbd23a5fe3d0b94b8/swarm_contrastive_decomposition-0.1.8.tar.gz", hash = "sha256:39f617a1009a036304d69988c9f5347b77c477d1b4e1a335893ad372e99233c9", size = 28133, upload-time = "2026-05-10T09:08:12.37Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/04/0b2d66923c0ac1c5bdfd867a87a6ff9157bb9f42f1ebc5b040599c7638c0/swarm_contrastive_decomposition-0.2.0.tar.gz", hash = "sha256:dff017a6b21e1928c475d17f83f82805b3fe0ba2c4b526c875c8492b15798055", size = 29932, upload-time = "2026-07-27T21:55:12.432Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/87/f830fe686038efd9ddbe0c9ab8393aaf8b56dc7ace13392be6e1281ae614/swarm_contrastive_decomposition-0.1.8-py3-none-any.whl", hash = "sha256:b4fb2773b593c541c07d8e83b992a75b5d6e936a7196848c0fb62f1c22e9fe1c", size = 27859, upload-time = "2026-05-10T09:08:10.198Z" },
+    { url = "https://files.pythonhosted.org/packages/97/89/a589de6ac96601dd149ab89f9e14fe76f12a93edf306302be005d3aa88b5/swarm_contrastive_decomposition-0.2.0-py3-none-any.whl", hash = "sha256:9dfd916d6bcf803c35c4fd0349bb04f4edef9b7c0e1d83a02ca91ecf1e598bdb", size = 28406, upload-time = "2026-07-27T21:55:10.04Z" },
 ]
 
 [[package]]
