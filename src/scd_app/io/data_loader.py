@@ -147,7 +147,14 @@ def _read_mat(file_path: Path, var_name: str, fallbacks: List[str]) -> np.ndarra
                     return None
             else:
                 return None
-        return np.asarray(obj, dtype=np.float64)
+        # A path that stops on a struct (or on a non-numeric field) is not a
+        # usable array — treat it as a miss so the next fallback gets a turn.
+        if isinstance(obj, np.ndarray) and obj.dtype.names:
+            return None
+        try:
+            return np.asarray(obj, dtype=np.float64)
+        except (ValueError, TypeError):
+            return None
 
     # Try primary path (dot-notation aware)
     result = _traverse(var_name)

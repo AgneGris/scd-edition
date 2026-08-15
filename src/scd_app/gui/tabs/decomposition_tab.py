@@ -1842,6 +1842,7 @@ class DecompositionTab(QWidget):
             save_path,
             aux_configs=aux_configs,
             emg_file_path=file_path,
+            data_layout=getattr(self.config, "data_layout", None),
         )
         self.worker.progress.connect(self._update_grid_indicator)
         self.worker.decomposition_finished.connect(self._on_file_decomposition_finished)

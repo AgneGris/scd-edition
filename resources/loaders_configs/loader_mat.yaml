@@ -6,8 +6,8 @@ format: mat
 
 fields:
   emg:
-    path: "emg"                    # .mat variable name
-    fallback_keys: ["data", "Data", "sig", "signal"] 
+    path: "emg"                    # .mat variable name (dot notation for structs, e.g. signal.data)
+    fallback_keys: ["data", "Data", "sig", "signal.data", "signal.Data", "signal"]
     channels: null                 # null = all channels
     orientation: auto              # auto-detect from shape
   force:

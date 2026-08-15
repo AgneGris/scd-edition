@@ -492,9 +492,11 @@ class AuxChannelCard(QFrame):
         self.type_combo.currentTextChanged.connect(self.changed.emit)
         main_layout.addWidget(self.type_combo, stretch=2)
 
-        # Source: from main signal or from .sip aux files
+        # Source: from main signal, from .sip aux files, or a named field in the data file
         self.source_combo = QComboBox()
-        self.source_combo.addItems(["Signal channels", "Aux file (.sip)"])
+        self.source_combo.addItems(
+            ["Signal channels", "Aux file (.sip)", "Data file field"]
+        )
         self.source_combo.currentIndexChanged.connect(self._on_source_change)
         main_layout.addWidget(self.source_combo, stretch=2)
 
@@ -510,6 +512,19 @@ class AuxChannelCard(QFrame):
         self.end_spin.setValue(0)
         self.end_spin.valueChanged.connect(self.changed.emit)
         main_layout.addWidget(self.end_spin, stretch=1)
+
+        # Field path (for "Data file field") — read straight out of the data file,
+        # e.g. a MATLAB struct field holding an already-calibrated force trace.
+        self.field_edit = QLineEdit()
+        self.field_edit.setPlaceholderText("e.g. signal.path")
+        self.field_edit.setToolTip(
+            "Name of the field inside the data file holding this signal.\n"
+            "Dot notation walks MATLAB structs (e.g. signal.path); "
+            "HDF5 uses slashes (e.g. signal/force)."
+        )
+        self.field_edit.textChanged.connect(self.changed.emit)
+        self.field_edit.setVisible(False)
+        main_layout.addWidget(self.field_edit, stretch=2)
 
         # Unit
         self.unit_edit = QLineEdit()
@@ -595,10 +610,12 @@ class AuxChannelCard(QFrame):
         )
 
     def _on_source_change(self, idx: int):
-        """Toggle channel range visibility based on source."""
+        """Show the channel range for range-based sources, the field path otherwise."""
         is_signal = idx == 0
+        is_field = idx == 2
         self.start_spin.setVisible(is_signal)
         self.end_spin.setVisible(is_signal)
+        self.field_edit.setVisible(is_field)
         self.changed.emit()
 
     def _browse_mvc_file(self):
@@ -643,9 +660,17 @@ class AuxChannelCard(QFrame):
                 get_label_style(size="small", color="warning")
             )
 
+    # Combo index ↔ the value persisted in the channel-config JSON
+    SOURCES = ["signal", "aux_file", "data_field"]
+
     def get_source(self) -> str:
-        """'signal' if from main signal channels, 'aux_file' if from .sip files."""
-        return "signal" if self.source_combo.currentIndex() == 0 else "aux_file"
+        """'signal' = main signal channels, 'aux_file' = .sip streams,
+        'data_field' = a named field read straight out of the data file."""
+        idx = self.source_combo.currentIndex()
+        return self.SOURCES[idx] if 0 <= idx < len(self.SOURCES) else "signal"
+
+    def get_field_path(self) -> str:
+        return self.field_edit.text().strip()
 
     def get_channel_range(self) -> Tuple[int, int]:
         return self.start_spin.value(), self.end_spin.value()
@@ -660,6 +685,9 @@ class AuxChannelCard(QFrame):
             "end_chan": self.end_spin.value(),
             "unit": self.unit_edit.text(),
         }
+        field_path = self.get_field_path()
+        if field_path:
+            d["field_path"] = field_path
         mvc_text = self.mvc_edit.text().strip()
         if mvc_text:
             try:
@@ -677,14 +705,20 @@ class AuxChannelCard(QFrame):
         end: int = 0,
         unit: str = "",
         mvc: Optional[float] = None,
+        field_path: str = "",
     ):
         self.name_edit.setText(name)
         type_idx = self.type_combo.findText(aux_type, Qt.MatchFixedString)
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
-        self.source_combo.setCurrentIndex(0 if source == "signal" else 1)
+        src_idx = self.SOURCES.index(source) if source in self.SOURCES else 0
+        self.source_combo.setCurrentIndex(src_idx)
+        # setCurrentIndex only fires _on_source_change when the index actually
+        # changes, so apply the visibility rules explicitly.
+        self._on_source_change(src_idx)
         self.start_spin.setValue(start)
         self.end_spin.setValue(end)
+        self.field_edit.setText(field_path)
         self.unit_edit.setText(unit)
         if mvc is not None:
             self.mvc_edit.setText(f"{mvc:g}")
@@ -1400,7 +1434,19 @@ class ConfigTab(QWidget):
 
         # Validate signal-source aux channels
         for card in self.aux_cards:
-            if card.get_source() != "signal":
+            source = card.get_source()
+            if source == "data_field":
+                # No channel range to check — but the field name is mandatory,
+                # otherwise the worker has nothing to look up.
+                if not card.get_field_path():
+                    msg = "Field path required"
+                    warnings.append(
+                        f"{card.get_data()['name']}: "
+                        "a field path is required for the 'Data file field' source"
+                    )
+                    card.set_validation_status(False, msg)
+                continue
+            if source != "signal":
                 continue
             start, end = card.get_channel_range()
             name = card.get_data()["name"]
@@ -1561,6 +1607,7 @@ class ConfigTab(QWidget):
                 end=a.get("end_chan", 0),
                 unit=a.get("unit", ""),
                 mvc=a.get("mvc"),
+                field_path=a.get("field_path", ""),
             )
 
         self.output_dir_edit.setText(self.output_dir_edit.text())

@@ -37,6 +37,7 @@ class DecompositionWorker(QThread):
         save_path: Path,
         aux_configs: Optional[List[dict]] = None,
         emg_file_path: Optional[Path] = None,
+        data_layout: Optional[dict] = None,
     ):
         super().__init__()
         self.emg_data = emg_data
@@ -47,6 +48,7 @@ class DecompositionWorker(QThread):
         self.save_path = save_path
         self.aux_configs = aux_configs or []
         self.emg_file_path = emg_file_path
+        self.data_layout = data_layout
         self._is_running = True
         self._partial_results = None  # (results_dict, total_mus) after each grid
 
@@ -312,9 +314,11 @@ class DecompositionWorker(QThread):
             else:
                 dewhitened_filters.append(None)
 
-        # 4. Aux channels — two source types:
-        #    "signal"   → slice from full EMG array (channels, samples)
-        #    "aux_file" → read .sip streams from the OTB+ archive
+        # 4. Aux channels — three source types:
+        #    "signal"     → slice from full EMG array (channels, samples)
+        #    "aux_file"   → read .sip streams from the OTB+ archive
+        #    "data_field" → read a named field out of the data file itself
+        #                   (e.g. a MATLAB struct field holding calibrated force)
         #    Each saved entry: {"data": np.ndarray (samples,), "meta": dict,
         #                       "start_chan": int, "end_chan": int}
         #    data is NOT time-cropped; the full recording is preserved so force
@@ -325,6 +329,18 @@ class DecompositionWorker(QThread):
             n_total_ch = full_np.shape[0]
             for a in self.aux_configs:
                 source = a.get("source", "signal")
+                if source == "data_field":
+                    if self.emg_file_path is None:
+                        print(
+                            f"  [aux] Skipping '{a.get('name', '?')}': "
+                            "data_field source requires emg_file_path"
+                        )
+                        continue
+                    entry = self._load_data_field_channel(self.emg_file_path, a)
+                    if entry is not None:
+                        aux_channels_saved.append(entry)
+                    continue
+
                 if source == "aux_file":
                     if self.emg_file_path is None:
                         print(
@@ -446,6 +462,84 @@ class DecompositionWorker(QThread):
         sig = aux_np[s:e, :].squeeze()
         entry = {k: v for k, v in aux_config.items()}  # flat copy
         entry["data"] = sig
+        return entry
+
+    # Data-file formats understood by the loader, keyed by file extension. Used
+    # only when no layout was supplied (e.g. a worker driven outside the GUI).
+    _FORMAT_BY_SUFFIX = {
+        ".mat": "mat",
+        ".h5": "h5",
+        ".hdf5": "h5",
+        ".npy": "npy",
+        ".otb": "otb",
+        ".otb+": "otb",
+    }
+
+    def _load_data_field_channel(
+        self, file_path: Path, aux_config: dict
+    ) -> Optional[dict]:
+        """Load one aux channel from a named field inside the data file.
+
+        Unlike the "signal" source this does not slice the EMG array, so it can
+        reach values stored alongside it — e.g. a calibrated force trace in a
+        MATLAB struct field. Dot notation walks structs (``signal.path``).
+        """
+        from scd_app.io.data_loader import load_field
+
+        name = aux_config.get("name", "?")
+        field_path = str(aux_config.get("field_path", "")).strip()
+        if not field_path:
+            print(f"  [aux] Skipping '{name}': data_field source needs a field_path")
+            return None
+
+        file_path = Path(file_path)
+        fmt = None
+        if self.data_layout:
+            fmt = self.data_layout.get("format")
+        if not fmt:
+            fmt = self._FORMAT_BY_SUFFIX.get(file_path.suffix.lower())
+        if not fmt:
+            print(
+                f"  [aux] Skipping '{name}': cannot determine format "
+                f"for {file_path.suffix!r}"
+            )
+            return None
+
+        # Minimal single-field layout; no channel slicing, auto orientation so a
+        # (1, samples) row vector comes back the same way as (samples, 1).
+        layout = {
+            "name": f"aux:{field_path}",
+            "format": fmt,
+            "fields": {
+                "aux": {
+                    "path": field_path,
+                    "fallback_keys": [],
+                    "channels": None,
+                    "orientation": "auto",
+                }
+            },
+        }
+
+        try:
+            sig = load_field(file_path, layout, "aux").numpy()
+        except Exception as ex:
+            print(f"  [aux] Failed to read '{field_path}' from {file_path.name}: {ex}")
+            return None
+
+        sig = np.asarray(sig, dtype=float).squeeze()
+        if sig.ndim > 1:
+            print(
+                f"  [aux] Skipping '{name}': field '{field_path}' is "
+                f"{sig.shape}, expected a single trace"
+            )
+            return None
+        if sig.size == 0:
+            print(f"  [aux] Skipping '{name}': field '{field_path}' is empty")
+            return None
+
+        entry = {k: v for k, v in aux_config.items()}  # flat copy
+        entry["data"] = sig
+        print(f"  [aux] '{name}': read {field_path} -> {sig.shape[0]} samples")
         return entry
 
     def stop(self):
