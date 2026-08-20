@@ -38,6 +38,7 @@ Thumbs.db
 *.eaf
 data/
 tests/
+!tests/test_otb4_loader.py
 export/
 docs/
 bats/

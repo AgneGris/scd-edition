@@ -103,6 +103,7 @@ Click **Select Input File** and choose your EMG recording. Supported formats:
 | Extension | Format |
 |-----------|--------|
 | `.otb+`   | OTBiolab+ (Quattrocento amplifier) |
+| `.otb4`   | OTBiolab 4 (Novecento+ amplifier) |
 | `.mat`    | MATLAB |
 | `.h5`     | HDF5 |
 | `.npy`    | NumPy array |
@@ -130,7 +131,7 @@ If your recording includes force or other analogue channels, click **+ Add Aux C
 
 - **Name** — e.g. `Middle Ext`
 - **Unit label** — e.g. `Middle Ext` (used to auto-select the correct channel when visualising named tasks)
-- **Source** — `Signal` if the force data is stored as regular channels in the EMG file; `Aux file` if it is stored in a separate `.sip` stream inside an OTB+ archive
+- **Source** — `Signal` if force is stored as regular channels in the EMG array; `Auxiliary stream` for OTB+ `.sip` or Novecento+ external/AUX tracks
 - **Channel start / end** — channel indices within the file (or sip stream)
 - **MVC (mV)** — the maximum voluntary contraction value **in millivolts**. This is used to normalise force to %MVC in the visualisation. See [Force channel setup](#force-channel-setup) for how to find this value.
 
@@ -339,8 +340,9 @@ Saved files can be reloaded in any order and remain fully editable.
 | Format | Notes |
 |--------|-------|
 | `.otb+` | OTBiolab+ archive (Quattrocento). EMG channels and auxiliary `.sip` channels (force, angle) are both supported. |
-| `.mat` | MATLAB v5 and v7.3 (HDF5-based). The field containing the EMG matrix is configurable via `resources/loaders_configs/loader_mat.yaml`. |
-| `.h5` | HDF5. Field path configurable via `resources/loaders_configs/loader_h5.yaml`. |
+| `.otb4` | OTBiolab 4 archive (Novecento+). EMG grids, external/AUX channels, sampling rate, and acquisition metadata are discovered from the embedded track metadata. |
+| `.mat` | MATLAB v5 and v7.3 (HDF5-based). The field containing the EMG matrix is configurable via `src/scd_app/resources/loaders_configs/loader_mat.yaml`. |
+| `.h5` | HDF5. Field path configurable via `src/scd_app/resources/loaders_configs/loader_h5.yaml`. |
 | `.npy` | NumPy array, shape `(channels, samples)` or `(samples, channels)` — the longer axis is assumed to be time. |
 | `.csv` | Rows = samples, columns = channels. |
 
@@ -382,6 +384,10 @@ Example: if OTBiolab+ shows `MVC = 0.049 V` for Middle Extension → enter `49` 
 
 You can find the displayed MVC value by opening the `.otb+` file in OTBiolab+ and reading the scale shown next to the force channel.
 
+**For Novecento+ recordings (.otb4):** external/AUX channels are converted
+using their per-track ADC metadata and retain the unit declared in the file
+(the supplied Novecento+ examples declare Volts). Enter MVC in that same unit.
+
 **For other formats:** use whatever MVC value is in the same units as the raw signal values in your file. You can check what the signal amplitude looks like by loading a decomposition and reading the console output — when data loads, the application prints the force channel min, max, and net amplitude so you can verify the units.
 
 ### Step 2 — Add the channel in the config
@@ -390,7 +396,7 @@ In Tab 1, click **+ Add Aux Channel** and fill in:
 
 - **Name** — descriptive label (e.g. `Middle Ext`)
 - **Unit label** — must match exactly if you want auto-selection by filename (e.g. `Middle Ext` will be auto-enabled for files with `mvc-15ext_fing-M` in the name)
-- **Source** — `Signal` (channel embedded in the EMG array) or `Aux file` (OTB+ `.sip` stream)
+- **Source** — `Signal` (channel embedded in the EMG array) or `Auxiliary stream` (OTB+ `.sip` or Novecento+ external/AUX track)
 - **Channel start / end** — 0-based index of the force channel
 - **MVC (mV)** — value from Step 1
 

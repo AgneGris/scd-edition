@@ -1,0 +1,19 @@
+# Novecento+ Recording Layout
+# EMG grids and auxiliary/expansion inputs are discovered from Tracks_*.xml.
+
+name: ".otb4"
+format: otb4
+
+fields:
+  emg:
+    path: emg
+    channels: null
+    expected_channels: null
+    orientation: samples_first
+  aux:
+    path: aux
+    channels: null
+    expected_channels: null
+    orientation: samples_first
+  timestamps:
+    path: timestamps

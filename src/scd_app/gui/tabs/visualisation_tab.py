@@ -556,7 +556,8 @@ class VisualisationTab(QWidget):
         force_chs = [ch for ch in self._aux_channels if ch.get("type") == "force"]
         if not force_chs:
             return
-        print("\n── Force channel ranges (in mV as stored in file) ──")
+        print("\n── Force channel ranges (in acquisition units) ──")
+        units = set()
         for ch in force_chs:
             raw = np.asarray(ch.get("data", [])).squeeze()
             if raw.ndim != 1 or raw.size == 0:
@@ -569,12 +570,19 @@ class VisualisationTab(QWidget):
                 f"  config MVC={mvc_cfg}" if mvc_cfg is not None else "  (no MVC set)"
             )
             label = ch.get("unit") or ch.get("name", "?")
+            physical_unit = ch.get("physical_unit") or "mV"
+            units.add(physical_unit)
             print(
-                f"  {label:20s}  peak={peak:.5f} mV  baseline≈{baseline:.5f} mV  net={peak-baseline:.5f} mV{mvc_str}"
+                f"  {label:20s}  peak={peak:.5f} {physical_unit}  "
+                f"baseline≈{baseline:.5f} {physical_unit}  "
+                f"net={peak-baseline:.5f} {physical_unit}{mvc_str}"
             )
-        print(
-            "  → Use 'net' value as MVC in the config (these are mV from the Quattrocento ADC conversion)"
-        )
+        if units == {"mV"}:
+            print(
+                "  → Use 'net' as MVC in the config (mV from the Quattrocento ADC conversion)"
+            )
+        else:
+            print("  → Enter MVC in the same acquisition unit shown above")
         print()
 
     # ── Rendering ─────────────────────────────────────────────────────────────

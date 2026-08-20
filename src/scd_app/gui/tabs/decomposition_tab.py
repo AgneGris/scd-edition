@@ -789,6 +789,16 @@ class DecompositionTab(QWidget):
         _aux_cfgs = getattr(self.config, "aux_channels", []) if self.config else []
         _stem = self.emg_path.stem if self.emg_path else ""
         _aux_to_show = _filter_aux_for_task(_aux_cfgs, _stem)
+        _aux_stream_data = None
+        if any(a.get("source") == "aux_file" for a in _aux_to_show):
+            try:
+                from scd_app.io.data_loader import load_field
+
+                _aux_stream_data = load_field(
+                    self.emg_path, self.config.data_layout, "aux"
+                ).numpy()
+            except Exception as exc:
+                print(f"Warning: Could not load auxiliary preview: {exc}")
 
         import time
 
@@ -998,10 +1008,18 @@ class DecompositionTab(QWidget):
                 for a in _aux_to_show:
                     s = int(a.get("start_chan", 0))
                     e = int(a.get("end_chan", s + 1))
-                    n_total_ch = self.emg_data.shape[1]
+                    if a.get("source") == "aux_file":
+                        source_data = _aux_stream_data
+                    elif a.get("source", "signal") == "signal":
+                        source_data = self.emg_data.numpy()
+                    else:
+                        continue
+                    if source_data is None:
+                        continue
+                    n_total_ch = source_data.shape[1]
                     if s >= e or e > n_total_ch:
                         continue
-                    raw = self.emg_data[:, s:e].numpy().mean(axis=1)  # (samples,)
+                    raw = source_data[:, s:e].mean(axis=1)  # (samples,)
                     if step > 1:
                         raw = raw[::step]
                     sig = raw - raw.mean()  # remove DC offset
@@ -1020,13 +1038,14 @@ class DecompositionTab(QWidget):
                         label=label,
                     )
                     first_label = False
-                ax.legend(
-                    loc="upper right",
-                    fontsize=7,
-                    facecolor=COLORS["background_light"],
-                    labelcolor=force_color,
-                    framealpha=0.7,
-                )
+                if not first_label:
+                    ax.legend(
+                        loc="upper right",
+                        fontsize=7,
+                        facecolor=COLORS["background_light"],
+                        labelcolor=force_color,
+                        framealpha=0.7,
+                    )
 
             # --- Navigation buttons ---
             prev_ax = self.figure.add_axes([0.05, 0.01, 0.12, 0.05])

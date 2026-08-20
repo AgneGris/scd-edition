@@ -1395,6 +1395,7 @@ class EditionTab(QWidget):
             self._edit_history = []
         # Normalise aux channel structure: older saves nest metadata under "meta";
         # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
+        acquisition_format = decomp_data.get("acquisition_metadata", {}).get("format")
         for ch in decomp_data.get("aux_channels", []):
             meta = ch.pop("meta", None)
             if isinstance(meta, dict):
@@ -1403,7 +1404,11 @@ class EditionTab(QWidget):
             # Old files stored mvc in Volts (OTB display units); signal is in mV.
             # Any legitimate force MVC will be ≥ 1 mV, so mvc < 1.0 means it's in V.
             mvc = ch.get("mvc")
-            if mvc is not None and 0 < float(mvc) < 1.0:
+            if (
+                acquisition_format != "otb4"
+                and mvc is not None
+                and 0 < float(mvc) < 1.0
+            ):
                 corrected = float(mvc) * 1000.0
                 print(
                     f"  [load] mvc unit fix: {ch.get('unit','?')} {mvc} V → {corrected} mV"

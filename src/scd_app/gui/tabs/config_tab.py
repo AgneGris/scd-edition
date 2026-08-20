@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-from scd_app.io.data_loader import load_layout, load_field
+from scd_app.io.data_loader import load_layout, load_field, load_metadata
 
 from PyQt5.QtWidgets import (
     QWidget,
@@ -492,10 +492,11 @@ class AuxChannelCard(QFrame):
         self.type_combo.currentTextChanged.connect(self.changed.emit)
         main_layout.addWidget(self.type_combo, stretch=2)
 
-        # Source: from main signal, from .sip aux files, or a named field in the data file
+        # Source: from main signal, an acquisition-system auxiliary stream, or a
+        # named field in the data file.
         self.source_combo = QComboBox()
         self.source_combo.addItems(
-            ["Signal channels", "Aux file (.sip)", "Data file field"]
+            ["Signal channels", "Auxiliary stream", "Data file field"]
         )
         self.source_combo.currentIndexChanged.connect(self._on_source_change)
         main_layout.addWidget(self.source_combo, stretch=2)
@@ -611,10 +612,10 @@ class AuxChannelCard(QFrame):
 
     def _on_source_change(self, idx: int):
         """Show the channel range for range-based sources, the field path otherwise."""
-        is_signal = idx == 0
+        is_range = idx in (0, 1)
         is_field = idx == 2
-        self.start_spin.setVisible(is_signal)
-        self.end_spin.setVisible(is_signal)
+        self.start_spin.setVisible(is_range)
+        self.end_spin.setVisible(is_range)
         self.field_edit.setVisible(is_field)
         self.changed.emit()
 
@@ -740,6 +741,9 @@ class ConfigTab(QWidget):
         self.emg_path: Optional[Path] = None
         self.emg_paths: List[Path] = []  # all selected files for batch
         self.max_channels: int = 256
+        self.file_metadata: dict = {}
+        self._metadata_key = None
+        self._metadata_error = None
         self.grid_cards: List[GridCard] = []
         self.aux_cards: List[AuxChannelCard] = []
 
@@ -876,7 +880,7 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data Files",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4);;All Files (*.*)",
         )
         if paths:
             self.emg_paths = [Path(p) for p in paths]
@@ -885,6 +889,7 @@ class ConfigTab(QWidget):
                 f"{len(paths)} files selected (first: {self.emg_path.name})"
             )
             self._auto_select_loader(self.emg_path)
+            self._refresh_file_metadata()
 
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
@@ -1137,6 +1142,11 @@ class ConfigTab(QWidget):
         fmt = layout.get("format", "") if layout else ""
         show = fmt in ("h5", "mat")
         self.emg_path_row.setVisible(show)
+        self.skip_quaternions_cb.setEnabled(fmt != "otb4")
+        if fmt == "otb4":
+            # The loader exposes only physical EMG channels, so its canonical
+            # channel array has no quaternion/buffer/ramp gaps.
+            self.skip_quaternions_cb.setChecked(False)
         if show and layout:
             emg_spec = layout.get("fields", {}).get("emg", {})
             self.emg_path_edit.setText(emg_spec.get("path", ""))
@@ -1144,6 +1154,7 @@ class ConfigTab(QWidget):
             idx = self.emg_orientation_combo.findText(orient)
             self.emg_orientation_combo.setCurrentIndex(idx if idx >= 0 else 0)
         if self.emg_path:
+            self._refresh_file_metadata()
             self._update_file_info()
 
     def _on_emg_path_changed(self):
@@ -1176,13 +1187,15 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+);;OTB+ Files (*.otb+);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4);;"
+            "OTB Files (*.otb+ *.otb4);;All Files (*.*)",
         )
         if path:
             self.emg_path = Path(path)
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(path)
             self._auto_select_loader(self.emg_path)
+            self._refresh_file_metadata()
 
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
@@ -1194,6 +1207,8 @@ class ConfigTab(QWidget):
                 self._add_grid()
 
     def _estimate_channels_from_file(self, file_path: Path) -> int:
+        if self.file_metadata.get("emg_channel_count") is not None:
+            return int(self.file_metadata["emg_channel_count"])
         layout = self._get_layout_with_overrides()
         if layout is None:
             return 256
@@ -1211,6 +1226,24 @@ class ConfigTab(QWidget):
         if layout is None or self.emg_path is None:
             return
         try:
+            if self._metadata_error:
+                raise ValueError(self._metadata_error)
+            if self.file_metadata.get("emg_channel_count") is not None:
+                n_samples = int(self.file_metadata["n_samples"])
+                n_channels = int(self.file_metadata["emg_channel_count"])
+                fs = int(self.file_metadata["sampling_frequency"])
+                duration_sec = n_samples / fs
+                n_grids = len(self.file_metadata.get("grids", []))
+                n_aux = int(self.file_metadata.get("aux_channel_count", 0))
+                self.max_channels = n_channels
+                self.allocation_bar.set_max_channels(n_channels)
+                self.file_info_label.setText(
+                    f"Loaded: {self.emg_path.name} | "
+                    f"Shape: {n_samples} samples × {n_channels} channels | "
+                    f"{n_grids} grid(s), {n_aux} aux | "
+                    f"Duration: {duration_sec:.1f}s @ {fs} Hz"
+                )
+                return
             layout_full = copy.deepcopy(layout)
             layout_full["fields"]["emg"].pop("channels", None)
             emg = load_field(self.emg_path, layout_full, "emg")
@@ -1229,6 +1262,26 @@ class ConfigTab(QWidget):
             self.file_info_label.setStyleSheet(
                 get_label_style(size="small", color="error")
             )
+
+    def _refresh_file_metadata(self):
+        """Load cheap archive metadata and apply its sampling frequency."""
+        layout = self._get_layout_with_overrides()
+        if layout is None or self.emg_path is None:
+            self.file_metadata = {}
+            return
+        key = (str(self.emg_path), layout.get("format"))
+        if key == self._metadata_key:
+            return
+        self._metadata_key = key
+        self._metadata_error = None
+        try:
+            self.file_metadata = load_metadata(self.emg_path, layout)
+            fs = self.file_metadata.get("sampling_frequency")
+            if fs is not None:
+                self.fsamp_edit.setText(str(int(fs)))
+        except Exception as exc:
+            self.file_metadata = {}
+            self._metadata_error = str(exc)
 
     def _add_grid(self):
         index = len(self.grid_cards) + 1
@@ -1411,6 +1464,15 @@ class ConfigTab(QWidget):
             start, end = card.get_channel_range()
             name = card.get_data()["name"]
 
+            expected = card.get_channel_count()
+            if end - start != expected:
+                msg = f"Expected {expected} channels"
+                warnings.append(
+                    f"{name}: configured range has {end - start} channels; "
+                    f"the selected electrode expects {expected}"
+                )
+                card.set_validation_status(False, msg)
+
             if end > self.max_channels:
                 msg = "Exceeds available channels"
                 warnings.append(
@@ -1446,6 +1508,22 @@ class ConfigTab(QWidget):
                     )
                     card.set_validation_status(False, msg)
                 continue
+            if source == "aux_file":
+                start, end = card.get_channel_range()
+                name = card.get_data()["name"]
+                available = self.file_metadata.get("aux_channel_count")
+                if start >= end:
+                    msg = "Start >= End"
+                    warnings.append(f"{name}: Start channel must be < End channel")
+                    card.set_validation_status(False, msg)
+                elif available is not None and end > int(available):
+                    msg = "Exceeds available aux channels"
+                    warnings.append(
+                        f"{name}: auxiliary range [{start},{end}) exceeds "
+                        f"the {int(available)} channels declared by the file"
+                    )
+                    card.set_validation_status(False, msg)
+                continue
             if source != "signal":
                 continue
             start, end = card.get_channel_range()
@@ -1462,6 +1540,18 @@ class ConfigTab(QWidget):
                 msg = "Start >= End"
                 warnings.append(f"{name}: Start channel must be < End channel")
                 card.set_validation_status(False, msg)
+
+        metadata_fs = self.file_metadata.get("sampling_frequency")
+        if metadata_fs is not None:
+            try:
+                configured_fs = int(self.fsamp_edit.text())
+            except ValueError:
+                configured_fs = None
+            if configured_fs != int(metadata_fs):
+                warnings.append(
+                    f"Sampling rate {configured_fs!r} does not match file metadata "
+                    f"({int(metadata_fs)} Hz)"
+                )
 
         return len(warnings) == 0, warnings
 
@@ -1551,6 +1641,7 @@ class ConfigTab(QWidget):
             self.emg_path = Path(file_path)
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(file_path)
+            self._refresh_file_metadata()
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
             self.allocation_bar.set_max_channels(self.max_channels)

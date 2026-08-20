@@ -4,6 +4,7 @@ Decomposition Worker - Manages EMG signal decomposition (via SCD).
 
 from pathlib import Path
 from typing import Optional, List, Tuple
+import copy
 import numpy as np
 import pickle
 
@@ -49,6 +50,7 @@ class DecompositionWorker(QThread):
         self.aux_configs = aux_configs or []
         self.emg_file_path = emg_file_path
         self.data_layout = data_layout
+        self._aux_data_cache = {}
         self._is_running = True
         self._partial_results = None  # (results_dict, total_mus) after each grid
 
@@ -314,9 +316,20 @@ class DecompositionWorker(QThread):
             else:
                 dewhitened_filters.append(None)
 
+        acquisition_metadata = {}
+        if self.emg_file_path is not None and self.data_layout:
+            try:
+                from scd_app.io.data_loader import load_metadata
+
+                acquisition_metadata = load_metadata(
+                    self.emg_file_path, self.data_layout
+                )
+            except Exception as ex:
+                print(f"  [metadata] Could not preserve acquisition metadata: {ex}")
+
         # 4. Aux channels — three source types:
         #    "signal"     → slice from full EMG array (channels, samples)
-        #    "aux_file"   → read .sip streams from the OTB+ archive
+        #    "aux_file"   → read the acquisition format's canonical aux field
         #    "data_field" → read a named field out of the data file itself
         #                   (e.g. a MATLAB struct field holding calibrated force)
         #    Each saved entry: {"data": np.ndarray (samples,), "meta": dict,
@@ -350,6 +363,15 @@ class DecompositionWorker(QThread):
                         continue
                     entry = self._load_aux_file_channel(self.emg_file_path, a)
                     if entry is not None:
+                        s = int(a.get("start_chan", 0))
+                        e = int(a.get("end_chan", s + 1))
+                        channel_meta = acquisition_metadata.get(
+                            "aux_channels", []
+                        )[s:e]
+                        if channel_meta:
+                            entry["channel_metadata"] = channel_meta
+                            if len(channel_meta) == 1:
+                                entry["physical_unit"] = channel_meta[0].get("unit")
                         aux_channels_saved.append(entry)
                     continue
 
@@ -394,6 +416,7 @@ class DecompositionWorker(QThread):
             ],  # list[dict], one per port
             # Metadata
             "sampling_rate": self.sampling_rate,
+            "acquisition_metadata": acquisition_metadata,
             "plateau_coords": (
                 self.plateau_coords.tolist()
                 if hasattr(self.plateau_coords, "tolist")
@@ -421,45 +444,54 @@ class DecompositionWorker(QThread):
     def _load_aux_file_channel(
         self, file_path: Path, aux_config: dict
     ) -> Optional[dict]:
-        """Load one aux channel from an OTB+ .sip stream."""
-        import tarfile
+        """Load one channel from the format's canonical auxiliary field."""
+        from scd_app.io.data_loader import load_field
 
         file_path = Path(file_path)
-        if file_path.suffix.lower() not in (".otb", ".otb+"):
-            print(
-                f"  [aux] '{aux_config.get('name', '?')}': "
-                f"aux_file source only supported for OTB+ files, got {file_path.suffix!r}"
-            )
-            return None
+        layout = copy.deepcopy(self.data_layout) if self.data_layout else None
+        if not layout or "aux" not in layout.get("fields", {}):
+            fmt = self._FORMAT_BY_SUFFIX.get(file_path.suffix.lower())
+            if not fmt:
+                print(
+                    f"  [aux] '{aux_config.get('name', '?')}': cannot determine "
+                    f"format for {file_path.suffix!r}"
+                )
+                return None
+            layout = {
+                "name": f"aux:{file_path.suffix.lower()}",
+                "format": fmt,
+                "fields": {
+                    "aux": {
+                        "path": "aux",
+                        "channels": None,
+                        "orientation": "samples_first",
+                    }
+                },
+            }
 
-        try:
-            with tarfile.open(str(file_path), "r") as tar:
-                members = {m.name: m for m in tar.getmembers()}
-                sip_names = sorted(n for n in members if n.endswith(".sip"))
-                if not sip_names:
-                    print(f"  [aux] No .sip channels found in {file_path.name}")
-                    return None
-                arrays = [
-                    np.frombuffer(tar.extractfile(members[n]).read(), dtype="float64")
-                    for n in sip_names
-                ]
-            min_len = min(len(a) for a in arrays)
-            # (n_sip, samples) — channels-first to match the EMG convention
-            aux_np = np.column_stack([a[:min_len] for a in arrays]).T
-        except Exception as ex:
-            print(f"  [aux] Failed to read .sip from {file_path.name}: {ex}")
-            return None
+        cache_key = (str(file_path), layout.get("format"))
+        aux_np = self._aux_data_cache.get(cache_key)
+        if aux_np is None:
+            try:
+                aux_np = load_field(file_path, layout, "aux").numpy()
+                self._aux_data_cache[cache_key] = aux_np
+            except Exception as ex:
+                print(
+                    f"  [aux] Failed to read auxiliary stream from "
+                    f"{file_path.name}: {ex}"
+                )
+                return None
 
         s = int(aux_config.get("start_chan", 0))
         e = int(aux_config.get("end_chan", s + 1))
-        if s >= e or e > aux_np.shape[0]:
+        if s >= e or e > aux_np.shape[1]:
             print(
                 f"  [aux] Skipping '{aux_config.get('name', '?')}': "
-                f"sip range [{s},{e}) out of range ({aux_np.shape[0]} sip channels)"
+                f"range [{s},{e}) out of range ({aux_np.shape[1]} aux channels)"
             )
             return None
 
-        sig = aux_np[s:e, :].squeeze()
+        sig = aux_np[:, s:e].squeeze()
         entry = {k: v for k, v in aux_config.items()}  # flat copy
         entry["data"] = sig
         return entry
@@ -473,6 +505,7 @@ class DecompositionWorker(QThread):
         ".npy": "npy",
         ".otb": "otb",
         ".otb+": "otb",
+        ".otb4": "otb4",
     }
 
     def _load_data_field_channel(

@@ -34,7 +34,7 @@ def load_field(
     Parameters
     ----------
     file_path : Path
-        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+)
+        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+, .otb4)
     layout : dict
         Parsed YAML layout descriptor (from load_layout)
     field : str
@@ -63,7 +63,30 @@ def load_field(
     if raw.ndim == 2:
         raw = _fix_orientation(raw, field_spec.get("orientation", "auto"))
 
+    expected_channels = field_spec.get("expected_channels")
+    if expected_channels is not None:
+        actual_channels = raw.shape[1] if raw.ndim == 2 else 1
+        if actual_channels != int(expected_channels):
+            raise ValueError(
+                f"Field '{field}' in {file_path.name} contains {actual_channels} "
+                f"channels, but layout '{layout['name']}' expects "
+                f"{int(expected_channels)}"
+            )
+
     return torch.from_numpy(raw).to(dtype=torch.float32)
+
+
+def load_metadata(
+    file_path: Union[str, Path], layout: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Load acquisition metadata when the selected format provides it."""
+    file_path = Path(file_path)
+    fmt = layout["format"]
+    if fmt == "otb4":
+        from scd_app.io.otb4_loader import read_otb4_metadata
+
+        return read_otb4_metadata(file_path)
+    return {"format": fmt}
 
 
 def _read_array(
@@ -86,6 +109,10 @@ def _read_array(
         return np.load(str(file_path))
     elif fmt == "otb":
         return _read_otb(file_path, field_name)
+    elif fmt == "otb4":
+        from scd_app.io.otb4_loader import read_otb4
+
+        return read_otb4(file_path, field_name)
     else:
         raise ValueError(f"Unsupported format: '{fmt}'")
 
