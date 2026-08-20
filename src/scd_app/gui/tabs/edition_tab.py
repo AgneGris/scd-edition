@@ -594,6 +594,19 @@ ELECTRODE_GRIDS = {
         "muap_mapping": {i: i + 1 for i in range(96)},
         "positions": GRID_POSITIONS_HD04MM1606,
     },
+    # Same 16x6 electrode with hardware channels 1-16 disconnected.  The
+    # remaining channels occupy five complete columns; re-key them locally so
+    # an 80-channel decomposition retains the correct physical arrangement.
+    "HD08MM1606, CHANNELS 17-96": {
+        "grid_shape": (16, 5),
+        "ied_mm": 8,
+        "n_channels": 80,
+        "muap_mapping": {i: i + 1 for i in range(80)},
+        "positions": {
+            local_ch: GRID_POSITIONS_HD04MM1606[local_ch + 16]
+            for local_ch in range(1, 81)
+        },
+    },
     "HD08MM1606": {
         "grid_shape": (16, 6),
         "ied_mm": 8,

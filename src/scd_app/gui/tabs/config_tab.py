@@ -189,6 +189,12 @@ class GridCard(QFrame):
                 "spacing_mm": 8.0,
                 "n_channels": 96,
             },
+            "Grid (HD08MM1606, channels 17-96)": {
+                "rows": 16,
+                "cols": 5,
+                "spacing_mm": 8.0,
+                "n_channels": 80,
+            },
             "Grid (HD08MM1305)": {
                 "rows": 13,
                 "cols": 5,
