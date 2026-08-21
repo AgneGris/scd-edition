@@ -34,16 +34,11 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.widgets import Button
 from matplotlib.ticker import FuncFormatter
-import matplotlib.pyplot as plt
 
 from scd_app.gui.style.styling import (
     COLORS,
     FONT_SIZES,
-    SPACING,
-    FONT_FAMILY,
     get_section_header_style,
-    get_label_style,
-    get_button_style,
 )
 
 from scd_app.core.config import SessionConfig
@@ -421,17 +416,17 @@ class DecompositionTab(QWidget):
 
         # --- Time window bar (shown below header when Manual selection) ---
         _edit_style = (
-            f"QLineEdit {{ background-color: {COLORS.get('background_input','#33334d')};"
+            f"QLineEdit {{ background-color: {COLORS.get('background_input', '#33334d')};"
             f" color: {COLORS['foreground']}; border: 1px solid {COLORS['border']};"
             f" border-radius: 3px; padding: 2px 6px;"
-            f" font-size: {FONT_SIZES.get('small','9pt')}; }}"
+            f" font-size: {FONT_SIZES.get('small', '9pt')}; }}"
         )
         _ts_btn_style = (
-            f"QPushButton {{ background-color: {COLORS.get('background_input','#33334d')};"
+            f"QPushButton {{ background-color: {COLORS.get('background_input', '#33334d')};"
             f" color: {COLORS['foreground']}; border: 1px solid {COLORS['border']};"
             f" border-radius: 4px; padding: 3px 10px;"
-            f" font-size: {FONT_SIZES.get('small','9pt')}; }}"
-            f"QPushButton:hover {{ border-color: {COLORS.get('info','#4a9eff')}; }}"
+            f" font-size: {FONT_SIZES.get('small', '9pt')}; }}"
+            f"QPushButton:hover {{ border-color: {COLORS.get('info', '#4a9eff')}; }}"
         )
         self.time_sel_widget = QWidget()
         ts_bar = QHBoxLayout(self.time_sel_widget)
@@ -440,7 +435,7 @@ class DecompositionTab(QWidget):
 
         lbl_s = QLabel("Start (s):")
         lbl_s.setStyleSheet(
-            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         self.start_time_edit = QLineEdit("0.00")
         self.start_time_edit.setStyleSheet(_edit_style)
@@ -449,7 +444,7 @@ class DecompositionTab(QWidget):
 
         lbl_e = QLabel("End (s):")
         lbl_e.setStyleSheet(
-            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         self.end_time_edit = QLineEdit()
         self.end_time_edit.setPlaceholderText("…")
@@ -463,7 +458,7 @@ class DecompositionTab(QWidget):
 
         instr_lbl = QLabel("  Click plot: 1st = start,  2nd = end")
         instr_lbl.setStyleSheet(
-            f"color: {COLORS.get('text_muted','#6c7086')}; font-size: 8pt; font-style: italic;"
+            f"color: {COLORS.get('text_muted', '#6c7086')}; font-size: 8pt; font-style: italic;"
         )
 
         ts_bar.addWidget(lbl_s)
@@ -859,7 +854,8 @@ class DecompositionTab(QWidget):
             self.figure.text(
                 0.5,
                 0.08,
-                "Click = Toggle channel  |  Scroll = Zoom X  |  Shift+Scroll = Pan  |  Ctrl+Scroll = Zoom XY  |  Drag = Pan ",
+                "Click = Toggle channel  |  Scroll = Zoom X  |  "
+                "Shift+Scroll = Pan  |  Ctrl+Scroll = Zoom XY  |  Drag = Pan ",
                 ha="center",
                 va="center",
                 fontsize=10,
@@ -1129,7 +1125,7 @@ class DecompositionTab(QWidget):
 
             # Rejected count for this grid
             n_rej = np.sum(mask)
-            rej_text = self.figure.text(
+            self.figure.text(
                 0.285,
                 0.03,
                 (f"{n_rej} ch. rejected" if n_rej > 0 else ""),
@@ -1223,7 +1219,6 @@ class DecompositionTab(QWidget):
 
                 if state["press_event"] is None:
                     return
-                press = state["press_event"]
                 state["press_event"] = None
 
                 # Guard: ignore click if it arrived shortly after a scroll

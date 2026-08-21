@@ -25,8 +25,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QGroupBox,
 )
-from PyQt5.QtGui import QFont
-
 # Re-use the app's colour / size tokens
 from scd_app.gui.style.styling import COLORS, FONT_SIZES, FONT_FAMILY
 
@@ -66,11 +64,11 @@ class _MetricRow(QWidget):
     """One label + value row inside the properties grid."""
 
     _LABEL_STYLE = (
-        f"color: {_C_DIM}; font-size: {FONT_SIZES.get('small','9pt')};"
+        f"color: {_C_DIM}; font-size: {FONT_SIZES.get('small', '9pt')};"
         f"font-family: {FONT_FAMILY};"
     )
     _VALUE_STYLE = (
-        f"color: {_C_FG}; font-size: {FONT_SIZES.get('small','9pt')};"
+        f"color: {_C_FG}; font-size: {FONT_SIZES.get('small', '9pt')};"
         f"font-family: {FONT_FAMILY}; font-weight: bold;"
     )
 
@@ -111,7 +109,7 @@ class _Section(QGroupBox):
             f"""
             QGroupBox {{
                 color: {_C_INFO};
-                font-size: {FONT_SIZES.get('small','9pt')};
+                font-size: {FONT_SIZES.get('small', '9pt')};
                 font-family: {FONT_FAMILY};
                 font-weight: bold;
                 border: 1px solid {_C_BORD};
@@ -168,12 +166,12 @@ class MUPropertiesPanel(QFrame):
         self._reliability_badge = QLabel("● RELIABLE")
         self._reliability_badge.setStyleSheet(
             f"color: {_C_OK}; font-weight: bold; "
-            f"font-size: {FONT_SIZES.get('small','9pt')}; font-family: {FONT_FAMILY};"
+            f"font-size: {FONT_SIZES.get('small', '9pt')}; font-family: {FONT_FAMILY};"
         )
         badge_row.addWidget(self._reliability_badge)
 
         _dup_style = (
-            f"color: {_C_WARN}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {_C_WARN}; font-size: {FONT_SIZES.get('small', '9pt')};"
             f" font-family: {FONT_FAMILY};"
         )
         self._within_dup_label = QLabel()
@@ -278,13 +276,13 @@ class MUPropertiesPanel(QFrame):
             self._reliability_badge.setText("● RELIABLE")
             self._reliability_badge.setStyleSheet(
                 f"color: {_C_OK}; font-weight: bold; "
-                f"font-size: {FONT_SIZES.get('small','9pt')};"
+                f"font-size: {FONT_SIZES.get('small', '9pt')};"
             )
         else:
             self._reliability_badge.setText("● UNRELIABLE")
             self._reliability_badge.setStyleSheet(
                 f"color: {_C_ERR}; font-weight: bold; "
-                f"font-size: {FONT_SIZES.get('small','9pt')};"
+                f"font-size: {FONT_SIZES.get('small', '9pt')};"
             )
 
         # — Within-port duplicate partners —
@@ -337,7 +335,7 @@ class MUPropertiesPanel(QFrame):
         self._reliability_badge.setText("● —")
         self._reliability_badge.setStyleSheet(
             f"color: {_C_DIM}; font-weight: bold; "
-            f"font-size: {FONT_SIZES.get('small','9pt')};"
+            f"font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         self._within_dup_label.setVisible(False)
         self._cross_dup_label.setVisible(False)

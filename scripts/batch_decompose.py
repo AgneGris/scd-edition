@@ -302,8 +302,6 @@ def decompose_files(
     This is the Qt-free equivalent of DecompositionWorker.run() + _save_results().
     The source_callback is omitted (saves ~15 % wall time per MU on large sessions).
     """
-    from scd_app.core.decomp_worker import DecompositionWorker
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for file_idx, file_path in enumerate(file_paths):
@@ -442,7 +440,7 @@ def decompose_concatenated(
         from os.path import commonprefix
 
         prefix = commonprefix(stems).rstrip("_")
-        suffixes = [s[len(prefix) :].lstrip("_") for s in stems]
+        suffixes = [s[len(prefix):].lstrip("_") for s in stems]
         suffixes = [s for s in suffixes if s]  # drop empty
         if suffixes:
             output_stem = prefix + "_" + "_".join(suffixes) + "_concat"
@@ -588,7 +586,7 @@ class _HeadlessWorker:
                         grid_data, bad_channels.tolist()
                     )
                 else:
-                    print(f"    Masked channels : none")
+                    print("    Masked channels : none")
 
                 # Apply time masks: replace all channels in masked segments with noise
                 grid_time_masks = (

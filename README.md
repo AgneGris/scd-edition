@@ -1,9 +1,11 @@
 # SCD Edition
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 
-A graphical application for decomposing high-density surface or intramuscular EMG recordings into individual motor unit spike trains, editing them manually, and visualising population-level discharge behaviour.
+A graphical application for researchers and engineers to decompose high-density surface or intramuscular EMG recordings into individual motor unit spike trains, edit them manually, and visualise population-level discharge behaviour.
+
+![SCD Edition demo](docs/demo.gif)
 
 Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris/swarm-contrastive-decomposition) algorithm.
 
@@ -23,12 +25,13 @@ Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris
 6. [File formats](#file-formats)
 7. [Force channel setup](#force-channel-setup)
 8. [Citation](#citation)
+9. [License](#license)
 
 ---
 
 ## Installation
 
-### From PyPI (recommended)
+### From GitHub (recommended)
 
 ```bash
 pip install git+https://github.com/AgneGris/scd-edition.git
@@ -36,20 +39,47 @@ pip install git+https://github.com/AgneGris/scd-edition.git
 
 All dependencies install automatically.
 
+On Windows, this route may install a CPU-only PyTorch build. Use the CUDA-enabled uv route below to ensure NVIDIA GPU support.
+
 ### From source with uv (recommended for development)
 
 [uv](https://github.com/astral-sh/uv) manages the virtual environment and dependencies automatically.
 
-**Windows / Linux — CUDA-enabled (recommended if you have an NVIDIA GPU):**
+Clone the repository, then choose the command for your platform:
+
 ```bash
-uv sync --extra cuda
+git clone https://github.com/AgneGris/scd-edition
+cd scd-edition
+```
+
+On Windows, install and require a uv-managed Python to avoid DLL conflicts with Conda or Anaconda:
+
+```powershell
+uv python install 3.13
+```
+
+**Windows — CUDA-enabled (recommended if you have an NVIDIA GPU):**
+```bash
+uv sync --python 3.13 --managed-python --extra cuda
 .venv\Scripts\Activate.ps1
 ```
 
-**macOS or CPU-only:**
+**Linux — CUDA-enabled:**
+```bash
+uv sync --extra cuda
+source .venv/bin/activate
+```
+
+**macOS or CPU-only Linux:**
 ```bash
 uv sync --extra cpu
 source .venv/bin/activate
+```
+
+**CPU-only Windows:**
+```bash
+uv sync --python 3.13 --managed-python --extra cpu
+.venv\Scripts\Activate.ps1
 ```
 
 ### From source with pip
@@ -58,18 +88,6 @@ source .venv/bin/activate
 git clone https://github.com/AgneGris/scd-edition
 cd scd-edition
 pip install -e .
-```
-
-### Using uv 
-For Windows/Linux, CUDA-enabled PyTorch build is recommended. Otherwise use --extra cpu
-```bash
-uv sync --extra cuda
-.venv\Scripts\Activate.ps1
-```
-For macOS 
-```bash
-uv sync --extra cpu
-.venv\Scripts\Activate.ps1
 ```
 
 ## Usage 🚀
@@ -422,7 +440,11 @@ If you use this software, please cite:
   title={A particle swarm optimised independence estimator for blind source separation of neurophysiological time series},
   author={Grison, Agnese and Clarke, Alexander Kenneth and Muceli, Silvia and Ib{\'a}{\~n}ez, Jaime and Kundu, Aritra and Farina, Dario},
   journal={IEEE Transactions on Biomedical Engineering},
-  year={2024},
+  volume={72},
+  number={1},
+  pages={227--237},
+  year={2025},
+  doi={10.1109/TBME.2024.3446806},
   publisher={IEEE}
 }
 
@@ -434,9 +456,14 @@ If you use this software, please cite:
   number={8},
   pages={2281--2300},
   year={2025},
+  doi={10.1113/JP287913},
   publisher={Wiley Online Library}
 }
 ```
+
+## License
+
+SCD Edition is available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use is not permitted without separate permission from the copyright holders.
 
 ## Contact
 

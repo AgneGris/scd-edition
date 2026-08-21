@@ -38,7 +38,9 @@ Thumbs.db
 *.eaf
 data/
 tests/
-!tests/test_otb4_loader.py
+!tests/
+tests/*
+!tests/test_smoke.py
 export/
 docs/
 bats/
@@ -48,9 +50,9 @@ scripts/patch_mvc.py
 
 resources/loaders_configs/loader_dynamic.yaml
 
-# HPC generated job scripts and outputs
-jobs/batch_decomp_*.sh
-jobs/job_outputs/*.txt
+# Lab-specific HPC jobs and local dependency checkout
+jobs/
+motor_unit_toolbox/
 
 # Notebooks (local analysis, untracked)
 notebooks/

@@ -761,7 +761,7 @@ class EditionTab(QWidget):
     @staticmethod
     def _combo_style() -> str:
         return (
-            f"QComboBox {{ background-color: {COLORS.get('background_input','#33334d')};"
+            f"QComboBox {{ background-color: {COLORS.get('background_input', '#33334d')};"
             f" color: {COLORS['foreground']}; border: 1px solid {COLORS['border']};"
             f" border-radius: 4px; padding: 4px 8px; }}"
         )
@@ -776,10 +776,10 @@ class EditionTab(QWidget):
             f"  border: 1px solid transparent;"
             f"  border-radius: 4px;"
             f"  padding: 4px 10px;"
-            f"  font-size: {FONT_SIZES.get('small','9pt')};"
+            f"  font-size: {FONT_SIZES.get('small', '9pt')};"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background-color: {COLORS.get('background_input','#33334d')};"
+            f"  background-color: {COLORS.get('background_input', '#33334d')};"
             f"  border-color: {COLORS['border']};"
             f"}}"
             f"QPushButton:checked {{"
@@ -787,7 +787,7 @@ class EditionTab(QWidget):
             f"  border: 2px solid {accent};"
             f"  font-weight: bold;"
             f"}}"
-            f"QPushButton:disabled {{ color: {COLORS.get('text_dim','#6c7086')}; }}"
+            f"QPushButton:disabled {{ color: {COLORS.get('text_dim', '#6c7086')}; }}"
         )
 
     @staticmethod
@@ -833,14 +833,14 @@ class EditionTab(QWidget):
         tb.setStyleSheet(
             f"""
             QToolBar {{
-                background-color: {COLORS.get('background_light','#2a2a3c')};
+                background-color: {COLORS.get('background_light', '#2a2a3c')};
                 border-bottom: 1px solid {COLORS['border']};
                 spacing: 4px;
                 padding: 2px;
             }}
             QToolBar QLabel {{
                 color: {COLORS['foreground']};
-                font-size: {FONT_SIZES.get('small','9pt')};
+                font-size: {FONT_SIZES.get('small', '9pt')};
             }}
             QToolButton {{
                 color: {COLORS['foreground']};
@@ -848,15 +848,15 @@ class EditionTab(QWidget):
                 border: 1px solid transparent;
                 border-radius: 4px;
                 padding: 4px 8px;
-                font-size: {FONT_SIZES.get('small','9pt')};
+                font-size: {FONT_SIZES.get('small', '9pt')};
             }}
             QToolButton:hover {{
-                background-color: {COLORS.get('background_input','#33334d')};
+                background-color: {COLORS.get('background_input', '#33334d')};
                 border-color: {COLORS['border']};
             }}
             QToolButton:checked {{
-                background-color: {COLORS.get('info','#89b4fa')}30;
-                border-color: {COLORS.get('info','#89b4fa')};
+                background-color: {COLORS.get('info', '#89b4fa')}30;
+                border-color: {COLORS.get('info', '#89b4fa')};
             }}
         """
         )
@@ -994,7 +994,7 @@ class EditionTab(QWidget):
         port_row = QHBoxLayout()
         port_lbl = QLabel("Port:")
         port_lbl.setStyleSheet(
-            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         port_row.addWidget(port_lbl)
         self.port_combo = QComboBox()
@@ -1007,7 +1007,7 @@ class EditionTab(QWidget):
         mu_row = QHBoxLayout()
         mu_lbl = QLabel("Unit:")
         mu_lbl.setStyleSheet(
-            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         mu_row.addWidget(mu_lbl)
         self.mu_combo = QComboBox()
@@ -1381,7 +1381,8 @@ class EditionTab(QWidget):
             self._redetect_timestamps = True
 
         try:
-            self._loaded_path = path  # must be set before _load_decomposition_data so _refresh_aux_controls sees the correct stem
+            # Set this before loading so _refresh_aux_controls sees the correct stem.
+            self._loaded_path = path
             self._load_decomposition_data(data)
             self._update_status(f"Loaded: {path.name}")
             self._update_file_label()
@@ -1424,7 +1425,7 @@ class EditionTab(QWidget):
             ):
                 corrected = float(mvc) * 1000.0
                 print(
-                    f"  [load] mvc unit fix: {ch.get('unit','?')} {mvc} V → {corrected} mV"
+                    f"  [load] mvc unit fix: {ch.get('unit', '?')} {mvc} V → {corrected} mV"
                 )
                 ch["mvc"] = corrected
 
@@ -1445,7 +1446,7 @@ class EditionTab(QWidget):
                 if match and match.get("mvc") is not None:
                     ch["mvc"] = match["mvc"]
                     print(
-                        f"  [load] filled mvc from config: {ch.get('unit','?')} = {ch['mvc']} mV"
+                        f"  [load] filled mvc from config: {ch.get('unit', '?')} = {ch['mvc']} mV"
                     )
 
         self._original_decomp_data = decomp_data
@@ -1632,7 +1633,7 @@ class EditionTab(QWidget):
                 else:
                     emg_port = emg_full[
                         valid_chs,
-                        max(0, start_sample) : min(end_sample, emg_full.shape[1]),
+                        max(0, start_sample): min(end_sample, emg_full.shape[1]),
                     ]
                 valid_port_chs = port_ch_idx[port_ch_idx < emg_full.shape[0]]
                 self._raw_port_channels[port_name] = emg_full[valid_port_chs, :]
@@ -1856,7 +1857,7 @@ class EditionTab(QWidget):
                 save_ts = [self._ts_to_plateau_local(mu.timestamps) for mu in mus]
                 save_src = [
                     (
-                        mu.source[self._start_sample : self._end_sample]
+                        mu.source[self._start_sample: self._end_sample]
                         if len(mu.source) > (self._end_sample - self._start_sample)
                         else mu.source
                     )
@@ -3094,7 +3095,7 @@ class EditionTab(QWidget):
         self._muap_cell_plots = {}
         self._muap_waveform_items = {}
 
-        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:7pt;"
+        lbl_style = f"color:{COLORS.get('text_dim', '#6c7086')}; font-size:7pt;"
 
         def _add_lbl(widget, text, row, col, **kw):
             lbl = widget.addLabel(text, row=row, col=col, **kw)

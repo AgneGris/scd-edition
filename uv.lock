@@ -986,7 +986,7 @@ wheels = [
 [[package]]
 name = "motor-unit-toolbox"
 version = "1.0"
-source = { git = "https://github.com/imendezguerra/motor_unit_toolbox.git#d84dc6c943daa5d686b2911b48b13bf718628130" }
+source = { git = "https://github.com/imendezguerra/motor_unit_toolbox.git?rev=d84dc6c943daa5d686b2911b48b13bf718628130#d84dc6c943daa5d686b2911b48b13bf718628130" }
 dependencies = [
     { name = "easydict" },
     { name = "matplotlib" },
@@ -2204,7 +2204,7 @@ requires-dist = [
     { name = "cmcrameri", specifier = ">=1.0" },
     { name = "mat73", specifier = ">=0.59" },
     { name = "matplotlib", specifier = ">=3.5.0" },
-    { name = "motor-unit-toolbox", git = "https://github.com/imendezguerra/motor_unit_toolbox.git" },
+    { name = "motor-unit-toolbox", git = "https://github.com/imendezguerra/motor_unit_toolbox.git?rev=d84dc6c943daa5d686b2911b48b13bf718628130" },
     { name = "numpy", specifier = ">=1.20.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pyqt5", specifier = ">=5.15.0" },

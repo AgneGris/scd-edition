@@ -220,7 +220,7 @@ def set_style_sheet(widget, font_type="Lexend"):
         f"""
             /* ========== BASE WIDGET ========== */
             QWidget {{
-                background-color: {COLORS['background']}; 
+                background-color: {COLORS['background']};
                 color: {COLORS['foreground']};
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
                 font-size: {FONT_SIZES['medium']};
@@ -234,13 +234,13 @@ def set_style_sheet(widget, font_type="Lexend"):
                 background-color: transparent;
                 padding: 2px;
             }}
-            
+
             QLabel[heading="true"] {{
                 font-size: {FONT_SIZES['xlarge']};
                 font-weight: 600;
                 color: #ffffff;
             }}
-            
+
             QLabel#PinkLabel {{ color: {COLORS['pink']}; font-weight: 600; }}
             QLabel#BlueLabel {{ color: {COLORS['info']}; font-weight: 600; }}
             QLabel#PurpleLabel {{ color: {COLORS['purple']}; font-weight: 600; }}
@@ -251,7 +251,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             QTabWidget::pane {{
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
-                background-color: {COLORS['background_light']};  
+                background-color: {COLORS['background_light']};
                 margin-top: -1px;
             }}
 
@@ -261,12 +261,12 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             QTabBar::tab {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                background: transparent;  
+                background: transparent;
                 color: {COLORS['text_dim']};
                 border: none;
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
-                padding: 12px 24px; 
+                padding: 12px 24px;
                 min-width: 80px;
                 margin-right: 4px;
                 font-weight: 500;
@@ -274,15 +274,15 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QTabBar::tab:hover {{
-                background: {COLORS['background_hover']};  
+                background: {COLORS['background_hover']};
                 color: {COLORS['foreground']};
             }}
 
             QTabBar::tab:selected {{
-                background: {COLORS['background_light']}; 
-                color: #ffffff;  
+                background: {COLORS['background_light']};
+                color: #ffffff;
                 font-weight: 600;
-                border-bottom: 3px solid {COLORS['accent']};  
+                border-bottom: 3px solid {COLORS['accent']};
             }}
 
             /* ========== BUTTONS ========== */
@@ -290,52 +290,52 @@ def set_style_sheet(widget, font_type="Lexend"):
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
                 background-color: qlineargradient(
                     x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['accent_hover']}, 
+                    stop:0 {COLORS['accent_hover']},
                     stop:1 {COLORS['accent']}
-                );  
+                );
                 color: white;
                 border: none;
                 border-radius: 6px;
                 padding: 10px 20px;
-                font-weight: 600;  
+                font-weight: 600;
                 font-size: {FONT_SIZES['normal']};
             }}
-            
+
             QPushButton:hover {{
                 background-color: qlineargradient(
                     x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['accent_light']}, 
+                    stop:0 {COLORS['accent_light']},
                     stop:1 {COLORS['accent_hover']}
-                );  
+                );
             }}
-            
+
             QPushButton:pressed {{
                 background-color: #002952;
-                padding: 11px 20px 9px 20px;  
+                padding: 11px 20px 9px 20px;
             }}
-            
+
             QPushButton:disabled {{
-                background-color: #2a2f36;  
-                color: {COLORS['text_muted']};  
+                background-color: #2a2f36;
+                color: {COLORS['text_muted']};
             }}
 
             /* ========== INPUT FIELDS ========== */
             QLineEdit {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                background-color: {COLORS['background']}; 
+                background-color: {COLORS['background']};
                 color: {COLORS['foreground']};
                 font-size: {FONT_SIZES['normal']};
-                border: 2px solid {COLORS['border']}; 
+                border: 2px solid {COLORS['border']};
                 border-radius: 6px;
                 padding: 8px 12px;
                 selection-background-color: {COLORS['accent']};
             }}
 
             QLineEdit:focus {{
-                border: 2px solid {COLORS['accent']};  
+                border: 2px solid {COLORS['accent']};
                 background-color: {COLORS['background_light']};
             }}
-            
+
             QLineEdit:read-only {{
                 background-color: {COLORS['background_input']};
                 color: {COLORS['text_dim']};
@@ -344,17 +344,17 @@ def set_style_sheet(widget, font_type="Lexend"):
             /* ========== COMBO BOX ========== */
             QComboBox {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                background-color: {COLORS['background']}; 
+                background-color: {COLORS['background']};
                 color: {COLORS['foreground']};
                 font-size: {FONT_SIZES['normal']};
-                border: 2px solid {COLORS['border']}; 
+                border: 2px solid {COLORS['border']};
                 border-radius: 6px;
                 padding: 8px 12px;
                 selection-background-color: {COLORS['accent']};
             }}
 
             QComboBox:focus {{
-                border: 2px solid {COLORS['accent']};  
+                border: 2px solid {COLORS['accent']};
                 background-color: {COLORS['background_light']};
             }}
 
@@ -362,10 +362,10 @@ def set_style_sheet(widget, font_type="Lexend"):
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 30px;
-                border-left: 2px solid {COLORS['border']};  
+                border-left: 2px solid {COLORS['border']};
                 border-top-right-radius: 6px;
                 border-bottom-right-radius: 6px;
-                background: {COLORS['background_hover']}; 
+                background: {COLORS['background_hover']};
             }}
 
             QComboBox::down-arrow {{
@@ -374,21 +374,21 @@ def set_style_sheet(widget, font_type="Lexend"):
                 border-top: 6px solid {COLORS['text_dim']};
                 margin-right: 8px;
             }}
-            
+
             QComboBox::down-arrow:hover {{
                 border-top: 6px solid {COLORS['foreground']};
             }}
 
             QComboBox QAbstractItemView {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                border: 2px solid {COLORS['accent']};  
-                background-color: {COLORS['background_light']};  
+                border: 2px solid {COLORS['accent']};
+                background-color: {COLORS['background_light']};
                 selection-background-color: {COLORS['accent']};
                 selection-color: #ffffff;
                 border-radius: 6px;
                 padding: 4px;
             }}
-            
+
             QComboBox:disabled {{
                 background-color: {COLORS['background_input']};
                 color: {COLORS['text_muted']};
@@ -398,17 +398,17 @@ def set_style_sheet(widget, font_type="Lexend"):
             /* ========== SPIN BOX ========== */
             QSpinBox, QDoubleSpinBox {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                background-color: {COLORS['background']}; 
+                background-color: {COLORS['background']};
                 color: {COLORS['foreground']};
                 font-size: {FONT_SIZES['normal']};
-                border: 2px solid {COLORS['border']}; 
+                border: 2px solid {COLORS['border']};
                 border-radius: 6px;
                 padding: 8px 12px;
                 selection-background-color: {COLORS['accent']};
             }}
 
             QSpinBox:focus, QDoubleSpinBox:focus {{
-                border: 2px solid {COLORS['accent']};  
+                border: 2px solid {COLORS['accent']};
                 background-color: {COLORS['background_light']};
             }}
 
@@ -420,26 +420,26 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QCheckBox::indicator {{
-                width: 20px;  
+                width: 20px;
                 height: 20px;
                 border: 2px solid {COLORS['border']};
-                border-radius: 4px; 
+                border-radius: 4px;
                 background-color: {COLORS['background']};
             }}
 
             QCheckBox::indicator:checked {{
-                background-color: {COLORS['accent']};  
+                background-color: {COLORS['accent']};
                 border: 2px solid {COLORS['accent']};
             }}
 
             QCheckBox::indicator:hover {{
                 border: 2px solid {COLORS['accent_hover']};
             }}
-            
+
             QCheckBox:disabled {{
                 color: {COLORS['text_muted']};
             }}
-            
+
             QCheckBox::indicator:disabled {{
                 background-color: {COLORS['background_input']};
                 border-color: {COLORS['border']};
@@ -453,15 +453,15 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QRadioButton::indicator {{
-                width: 18px;  
+                width: 18px;
                 height: 18px;
                 border: 2px solid {COLORS['border']};
-                border-radius: 10px; 
+                border-radius: 10px;
                 background-color: {COLORS['background']};
             }}
 
             QRadioButton::indicator:checked {{
-                background-color: {COLORS['accent']};  
+                background-color: {COLORS['accent']};
                 border: 2px solid {COLORS['accent']};
             }}
 
@@ -473,7 +473,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             QScrollBar:vertical {{
                 border: none;
                 background: {COLORS['background']};
-                width: 10px; 
+                width: 10px;
                 margin: 2px;
                 border-radius: 5px;
             }}
@@ -485,13 +485,13 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QScrollBar::handle:vertical:hover {{
-                background: {COLORS['accent']}; 
+                background: {COLORS['accent']};
             }}
 
             QScrollBar:horizontal {{
                 border: none;
                 background: {COLORS['background']};
-                height: 10px; 
+                height: 10px;
                 margin: 2px;
                 border-radius: 5px;
             }}
@@ -503,7 +503,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QScrollBar::handle:horizontal:hover {{
-                background: {COLORS['accent']}; 
+                background: {COLORS['accent']};
             }}
 
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
@@ -511,7 +511,7 @@ def set_style_sheet(widget, font_type="Lexend"):
                 height: 0px;
                 width: 0px;
             }}
-            
+
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
                 background: none;
@@ -520,12 +520,12 @@ def set_style_sheet(widget, font_type="Lexend"):
             /* ========== GROUP BOX ========== */
             QGroupBox {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                border: 2px solid {COLORS['border']};  
+                border: 2px solid {COLORS['border']};
                 border-radius: 8px;
                 margin-top: 24px;
-                padding-top: 20px;  
+                padding-top: 20px;
                 font-weight: 600;
-                font-size: {FONT_SIZES['medium']};  
+                font-size: {FONT_SIZES['medium']};
                 background-color: {COLORS['background_light']};
             }}
 
@@ -534,7 +534,7 @@ def set_style_sheet(widget, font_type="Lexend"):
                 subcontrol-position: top left;
                 left: 16px;
                 padding: 4px 12px;
-                color: {COLORS['accent']};  
+                color: {COLORS['accent']};
                 background-color: {COLORS['background']};
                 border-radius: 4px;
             }}
@@ -556,7 +556,7 @@ def set_style_sheet(widget, font_type="Lexend"):
                     x1:0, y1:0, x2:1, y2:0,
                     stop:0 {COLORS['accent']},
                     stop:1 {COLORS['accent_light']}
-                );  
+                );
                 border-radius: 6px;
             }}
 
@@ -589,18 +589,18 @@ def set_style_sheet(widget, font_type="Lexend"):
             /* ========== TOOLTIP ========== */
             QToolTip {{
                 font-family: '{font_family}', 'Segoe UI', sans-serif;
-                background-color: {COLORS['background_hover']};  
-                color: #ffffff; 
-                border: 1px solid {COLORS['accent']};  
+                background-color: {COLORS['background_hover']};
+                color: #ffffff;
+                border: 1px solid {COLORS['accent']};
                 border-radius: 6px;
-                padding: 8px 12px;  
+                padding: 8px 12px;
                 font-size: {FONT_SIZES['small']};
             }}
 
             /* ========== SPLITTER ========== */
             QSplitter::handle {{
-                background-color: {COLORS['border']};  
-                width: 2px;  
+                background-color: {COLORS['border']};
+                width: 2px;
                 height: 2px;
             }}
 

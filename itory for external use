@@ -1,0 +1,14 @@
+warning: in the working copy of '.flake8', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'pyproject.toml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/batch_decompose.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/core/data_handler.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/core/filter_recalculation.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/gui/main_window.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/gui/tabs/config_tab.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/gui/tabs/decomposition_tab.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/gui/tabs/edition_tab.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/gui/widgets/mu_properties_panel.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scd_app/io/otb4_loader.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'uv.lock', LF will be replaced by CRLF the next time Git touches it

@@ -64,7 +64,7 @@ class MuapPopoutDialog(QDialog):
         )
         self._plot.addLabel(label, row=0, col=0, colspan=cols + 1, justify="center")
 
-        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:8pt;"
+        lbl_style = f"color:{COLORS.get('text_dim', '#6c7086')}; font-size:8pt;"
 
         def _add_lbl(text, row, col, **kw):
             lbl = self._plot.addLabel(text, row=row, col=col, **kw)

@@ -3,24 +3,19 @@ Main application window for SCD-edition.
 """
 
 import sys
-import pickle
 from pathlib import Path
 from typing import Optional
 
 import torch
 
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QTabWidget,
     QWidget,
     QVBoxLayout,
-    QMenuBar,
-    QMenu,
     QAction,
     QStatusBar,
-    QFileDialog,
     QMessageBox,
 )
 from PyQt5.QtGui import QKeySequence
@@ -255,6 +250,17 @@ def main():
 
     app = QApplication([sys.argv[0]] + qt_argv)
     app.setApplicationName("SCD-Edition")
+
+    if torch.cuda.is_available():
+        print(
+            f"SCD Edition device: CUDA ({torch.cuda.get_device_name(0)}) "
+            "because PyTorch detected a working CUDA device."
+        )
+    else:
+        print(
+            "SCD Edition device: CPU because PyTorch did not detect a working "
+            "CUDA device."
+        )
 
     set_style_sheet(app)
 

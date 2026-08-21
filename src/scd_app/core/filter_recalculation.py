@@ -26,7 +26,6 @@ Coordinate spaces:
 from __future__ import annotations
 
 import logging
-import traceback
 from typing import Optional, Dict, Any, Tuple, List
 
 import numpy as np
@@ -463,7 +462,7 @@ def compute_all_full_sources(
     picking up artefact peaks outside the decomposition window.
     """
     if device is None:
-        device = torch.device("cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     for key in (
         "preprocessing_config",
@@ -556,7 +555,7 @@ def compute_all_full_sources(
             ch_idx = np.asarray(channel_indices_all[port_idx], dtype=int)
             raw_port = raw_full[ch_idx, :].copy()
         else:
-            raw_port = raw_full[ch_offset : ch_offset + n_ch, :].copy()
+            raw_port = raw_full[ch_offset: ch_offset + n_ch, :].copy()
         _replace_bad_channels(raw_port, decomp_data, port_idx)
 
         w_mat = None
@@ -619,7 +618,7 @@ def recalculate_unit_filter(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Recalculate filter + source + timestamps for one MU after edits."""
     if device is None:
-        device = torch.device("cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     for key in ("preprocessing_config", "peel_off_sequence"):
         if key not in decomp_data:

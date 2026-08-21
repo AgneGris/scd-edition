@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QIntValidator
+from PyQt5.QtGui import QIntValidator
 
 from scd_app.core.config import (
     ConfigManager,
@@ -313,15 +313,15 @@ class GridCard(QFrame):
         self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self))
         self.remove_btn.setStyleSheet(
             f"""
-            QPushButton {{ 
-                background-color: transparent; 
-                color: {COLORS['text_muted']}; 
-                border-radius: 10px; 
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_muted']};
+                border-radius: 10px;
                 font-weight: bold; font-size: 18pt;
             }}
-            QPushButton:hover {{ 
-                background-color: {COLORS['error']}40; 
-                color: {COLORS['error_bright']}; 
+            QPushButton:hover {{
+                background-color: {COLORS['error']}40;
+                color: {COLORS['error_bright']};
             }}
         """
         )
@@ -332,14 +332,14 @@ class GridCard(QFrame):
     def _apply_styling(self):
         self.setStyleSheet(
             f"""
-            GridCard {{ 
-                background-color: {COLORS['background_light']}; 
-                border: 1px solid {COLORS['border']}; 
-                border-radius: 6px; 
+            GridCard {{
+                background-color: {COLORS['background_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
             }}
-            QLabel {{ 
-                color: {COLORS['foreground']}; 
-                font-family: '{FONT_FAMILY}'; 
+            QLabel {{
+                color: {COLORS['foreground']};
+                font-family: '{FONT_FAMILY}';
             }}
             QPushButton {{
                 color: {COLORS['foreground']};
@@ -587,15 +587,15 @@ class AuxChannelCard(QFrame):
         self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self))
         self.remove_btn.setStyleSheet(
             f"""
-            QPushButton {{ 
-                background-color: transparent; 
-                color: {COLORS['text_muted']}; 
-                border-radius: 10px; 
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_muted']};
+                border-radius: 10px;
                 font-weight: bold; font-size: 14pt;
             }}
-            QPushButton:hover {{ 
-                background-color: {COLORS['error']}40; 
-                color: {COLORS['error_bright']}; 
+            QPushButton:hover {{
+                background-color: {COLORS['error']}40;
+                color: {COLORS['error_bright']};
             }}
         """
         )
@@ -604,14 +604,14 @@ class AuxChannelCard(QFrame):
     def _apply_styling(self):
         self.setStyleSheet(
             f"""
-            AuxChannelCard {{ 
-                background-color: {COLORS['background_light']}; 
-                border: 1px solid {COLORS['border']}; 
-                border-radius: 6px; 
+            AuxChannelCard {{
+                background-color: {COLORS['background_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
             }}
-            QLabel {{ 
-                color: {COLORS['foreground']}; 
-                font-family: '{FONT_FAMILY}'; 
+            QLabel {{
+                color: {COLORS['foreground']};
+                font-family: '{FONT_FAMILY}';
             }}
         """
         )
@@ -1079,7 +1079,7 @@ class ConfigTab(QWidget):
         self.apply_btn.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COLORS['success']}, stop:1 #38A169);
                 color: white; border-radius: 6px; font-weight: bold;
                 font-size: {FONT_SIZES['medium']}; padding: 10px 24px;

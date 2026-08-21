@@ -1,0 +1,19 @@
+name: Smoke test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install --no-cache-dir . pytest
+      - run: python -m pytest tests/test_smoke.py

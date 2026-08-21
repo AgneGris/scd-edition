@@ -301,7 +301,7 @@ def _read_track_group(
             stream_cache[track.stream] = raw
 
         selected = raw[
-            :, track.channel_offset : track.channel_offset + track.n_channels
+            :, track.channel_offset: track.channel_offset + track.n_channels
         ]
         scale = _track_scale(track, file_path)
         arrays.append(selected.astype(np.float32) * np.float32(scale))

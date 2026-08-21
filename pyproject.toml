@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "scd-edition"
 version = "0.1.0"
 description = "GUI for editing and visualizing SCD decomposition results"
 readme = "README.md"
-license = {text = "CC-BY-NC-4.0"}
+license = "PolyForm-Noncommercial-1.0.0"
 authors = [
     {name = "Agnese Grison", email = "agnese.grison16@imperial.ac.uk"},
 ]
@@ -24,7 +24,7 @@ keywords = ["EMG", "decomposition", "GUI", "spike editing", "motor units"]
 
 dependencies = [
     "swarm-contrastive-decomposition>=0.2.0",
-    "motor_unit_toolbox @ git+https://github.com/imendezguerra/motor_unit_toolbox.git",
+    "motor_unit_toolbox @ git+https://github.com/imendezguerra/motor_unit_toolbox.git@d84dc6c943daa5d686b2911b48b13bf718628130",
     "numpy>=1.20.0",
     "scipy>=1.7.0",
     "matplotlib>=3.5.0",
