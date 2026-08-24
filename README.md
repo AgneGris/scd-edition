@@ -1,11 +1,14 @@
 # SCD Edition
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)
 
-A graphical application for decomposing high-density surface or intramuscular EMG recordings into individual motor unit spike trains, editing them manually, and visualising population-level discharge behaviour.
+A graphical application for researchers and engineers to decompose high-density surface or intramuscular EMG recordings into individual motor unit spike trains, edit them manually, and visualise population-level discharge behaviour.
+
+![SCD Edition demo](docs/demo.gif)
 
 Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris/swarm-contrastive-decomposition) algorithm.
+The desktop interface uses the official [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/) bindings.
 
 ---
 
@@ -23,12 +26,13 @@ Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris
 6. [File formats](#file-formats)
 7. [Force channel setup](#force-channel-setup)
 8. [Citation](#citation)
+9. [License](#license)
 
 ---
 
 ## Installation
 
-### From PyPI (recommended)
+### From GitHub (recommended)
 
 ```bash
 pip install git+https://github.com/AgneGris/scd-edition.git
@@ -36,20 +40,50 @@ pip install git+https://github.com/AgneGris/scd-edition.git
 
 All dependencies install automatically.
 
+On Windows, this route may install a CPU-only PyTorch build. Use the CUDA-enabled uv route below to ensure NVIDIA GPU support.
+
 ### From source with uv (recommended for development)
 
 [uv](https://github.com/astral-sh/uv) manages the virtual environment and dependencies automatically.
 
-**Windows / Linux — CUDA-enabled (recommended if you have an NVIDIA GPU):**
+Clone the repository, then choose the command for your platform:
+
 ```bash
-uv sync --extra cuda
+git clone https://github.com/AgneGris/scd-edition
+cd scd-edition
+```
+
+On Windows, install and require a uv-managed Python to avoid DLL conflicts with Conda or Anaconda:
+
+```powershell
+uv python install 3.13
+```
+
+**Windows — CUDA-enabled (recommended if you have an NVIDIA GPU):**
+```bash
+uv sync --python 3.13 --managed-python --extra cuda
 .venv\Scripts\Activate.ps1
 ```
 
-**macOS or CPU-only:**
+**Linux — CUDA-enabled:**
+```bash
+sudo apt-get install libegl1 libxkbcommon-x11-0 libxcb-cursor0
+uv sync --extra cuda
+source .venv/bin/activate
+```
+
+**macOS or CPU-only Linux:**
 ```bash
 uv sync --extra cpu
 source .venv/bin/activate
+```
+
+On CPU-only Linux, install the same Qt runtime packages shown in the CUDA-enabled Linux example before launching the GUI. Package names may differ on distributions that do not use `apt`.
+
+**CPU-only Windows:**
+```bash
+uv sync --python 3.13 --managed-python --extra cpu
+.venv\Scripts\Activate.ps1
 ```
 
 ### From source with pip
@@ -58,18 +92,6 @@ source .venv/bin/activate
 git clone https://github.com/AgneGris/scd-edition
 cd scd-edition
 pip install -e .
-```
-
-### Using uv 
-For Windows/Linux, CUDA-enabled PyTorch build is recommended. Otherwise use --extra cpu
-```bash
-uv sync --extra cuda
-.venv\Scripts\Activate.ps1
-```
-For macOS 
-```bash
-uv sync --extra cpu
-.venv\Scripts\Activate.ps1
 ```
 
 ## Usage 🚀
@@ -103,6 +125,7 @@ Click **Select Input File** and choose your EMG recording. Supported formats:
 | Extension | Format |
 |-----------|--------|
 | `.otb+`   | OTBiolab+ (Quattrocento amplifier) |
+| `.otb4`   | OTBiolab 4 (Novecento+ amplifier) |
 | `.mat`    | MATLAB |
 | `.h5`     | HDF5 |
 | `.npy`    | NumPy array |
@@ -130,7 +153,7 @@ If your recording includes force or other analogue channels, click **+ Add Aux C
 
 - **Name** — e.g. `Middle Ext`
 - **Unit label** — e.g. `Middle Ext` (used to auto-select the correct channel when visualising named tasks)
-- **Source** — `Signal` if the force data is stored as regular channels in the EMG file; `Aux file` if it is stored in a separate `.sip` stream inside an OTB+ archive
+- **Source** — `Signal` if force is stored as regular channels in the EMG array; `Auxiliary stream` for OTB+ `.sip` or Novecento+ external/AUX tracks
 - **Channel start / end** — channel indices within the file (or sip stream)
 - **MVC (mV)** — the maximum voluntary contraction value **in millivolts**. This is used to normalise force to %MVC in the visualisation. See [Force channel setup](#force-channel-setup) for how to find this value.
 
@@ -298,9 +321,13 @@ Decomposition results are stored as `.pkl` (Python pickle) files. Each file cont
 - Peel-off sequence (for filter recalculation)
 - Quality metrics
 
-To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select the `.pkl` file. The app will ask whether to re-run peel-off replay on the full signal (recommended for the first load) or to use the stored timestamps as-is (faster; appropriate when reloading a previously edited file).
+To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select the `.pkl` file. The app automatically recognises both SCD Edition files and raw `*_scddict.pkl` output from `swarm-contrastive-decomposition`. Raw SCD output is converted into a one-grid Edition session; the muscle label in the filename is used as the grid name, and any companion `*_scdcommit.txt` is retained as provenance.
 
-Saved files can be reloaded in any order and remain fully editable.
+SCD Edition files that contain the original EMG can replay peel-off and recalculate filters. Raw `swarm-contrastive-decomposition` output does not contain the original EMG, so its motor-unit spikes and source signals remain editable and can be saved from Edition, but filter/MUAP recalculation is unavailable unless the original EMG is supplied in an Edition file.
+
+For compatible SCD Edition files, the app may ask whether to re-run peel-off replay on the full signal (recommended for the first load) or to use the stored timestamps as-is (faster; appropriate when reloading a previously edited file).
+
+Saved Edition files can be reloaded in any order and remain fully editable.
 
 ---
 
@@ -339,8 +366,9 @@ Saved files can be reloaded in any order and remain fully editable.
 | Format | Notes |
 |--------|-------|
 | `.otb+` | OTBiolab+ archive (Quattrocento). EMG channels and auxiliary `.sip` channels (force, angle) are both supported. |
-| `.mat` | MATLAB v5 and v7.3 (HDF5-based). The field containing the EMG matrix is configurable via `resources/loaders_configs/loader_mat.yaml`. |
-| `.h5` | HDF5. Field path configurable via `resources/loaders_configs/loader_h5.yaml`. |
+| `.otb4` | OTBiolab 4 archive (Novecento+). EMG grids, external/AUX channels, sampling rate, and acquisition metadata are discovered from the embedded track metadata. |
+| `.mat` | MATLAB v5 and v7.3 (HDF5-based). The field containing the EMG matrix is configurable via `src/scd_app/resources/loaders_configs/loader_mat.yaml`. |
+| `.h5` | HDF5. Field path configurable via `src/scd_app/resources/loaders_configs/loader_h5.yaml`. |
 | `.npy` | NumPy array, shape `(channels, samples)` or `(samples, channels)` — the longer axis is assumed to be time. |
 | `.csv` | Rows = samples, columns = channels. |
 
@@ -382,6 +410,10 @@ Example: if OTBiolab+ shows `MVC = 0.049 V` for Middle Extension → enter `49` 
 
 You can find the displayed MVC value by opening the `.otb+` file in OTBiolab+ and reading the scale shown next to the force channel.
 
+**For Novecento+ recordings (.otb4):** external/AUX channels are converted
+using their per-track ADC metadata and retain the unit declared in the file
+(the supplied Novecento+ examples declare Volts). Enter MVC in that same unit.
+
 **For other formats:** use whatever MVC value is in the same units as the raw signal values in your file. You can check what the signal amplitude looks like by loading a decomposition and reading the console output — when data loads, the application prints the force channel min, max, and net amplitude so you can verify the units.
 
 ### Step 2 — Add the channel in the config
@@ -390,7 +422,7 @@ In Tab 1, click **+ Add Aux Channel** and fill in:
 
 - **Name** — descriptive label (e.g. `Middle Ext`)
 - **Unit label** — must match exactly if you want auto-selection by filename (e.g. `Middle Ext` will be auto-enabled for files with `mvc-15ext_fing-M` in the name)
-- **Source** — `Signal` (channel embedded in the EMG array) or `Aux file` (OTB+ `.sip` stream)
+- **Source** — `Signal` (channel embedded in the EMG array) or `Auxiliary stream` (OTB+ `.sip` or Novecento+ external/AUX track)
 - **Channel start / end** — 0-based index of the force channel
 - **MVC (mV)** — value from Step 1
 
@@ -416,7 +448,11 @@ If you use this software, please cite:
   title={A particle swarm optimised independence estimator for blind source separation of neurophysiological time series},
   author={Grison, Agnese and Clarke, Alexander Kenneth and Muceli, Silvia and Ib{\'a}{\~n}ez, Jaime and Kundu, Aritra and Farina, Dario},
   journal={IEEE Transactions on Biomedical Engineering},
-  year={2024},
+  volume={72},
+  number={1},
+  pages={227--237},
+  year={2025},
+  doi={10.1109/TBME.2024.3446806},
   publisher={IEEE}
 }
 
@@ -428,9 +464,16 @@ If you use this software, please cite:
   number={8},
   pages={2281--2300},
   year={2025},
+  doi={10.1113/JP287913},
   publisher={Wiley Online Library}
 }
 ```
+
+## License
+
+SCD Edition is open-source software licensed under the [BSD 3-Clause License](LICENSE).
+
+Third-party packages, including PySide6 and Qt, retain their own licences.
 
 ## Contact
 

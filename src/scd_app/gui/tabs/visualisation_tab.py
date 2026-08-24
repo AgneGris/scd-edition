@@ -11,8 +11,8 @@ from typing import Dict, List, Optional, Set
 
 import numpy as np
 import cmcrameri.cm as cmc
-from PyQt5.QtCore import Qt, pyqtSlot
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -194,7 +194,7 @@ class _VisAuxLegend(pg.LegendItem):
         self.update()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             y = event.pos().y()
             for i, (_sample, label) in enumerate(self.items):
                 rect = label.mapRectToParent(label.boundingRect())
@@ -334,7 +334,7 @@ class VisualisationTab(QWidget):
         outer.addWidget(toggle_row)
 
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {COLORS['border']}; background: {COLORS['border']};")
         sep.setFixedHeight(1)
         outer.addWidget(sep)
@@ -343,7 +343,9 @@ class VisualisationTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("border: none; background: transparent;")
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
 
         self._sidebar_container = QWidget()
         self._sidebar_container.setStyleSheet("background: transparent;")
@@ -408,8 +410,8 @@ class VisualisationTab(QWidget):
     @staticmethod
     def _make_sep() -> QFrame:
         sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFrameShadow(QFrame.Sunken)
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
         sep.setStyleSheet(f"color: {COLORS['border']};")
         sep.setFixedWidth(1)
         sep.setFixedHeight(20)
@@ -450,12 +452,12 @@ class VisualisationTab(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    @pyqtSlot()
+    @Slot()
     def on_data_modified(self):
         """Called when edition data changes — no-op; refresh happens on tab activation."""
         pass
 
-    @pyqtSlot()
+    @Slot()
     def on_tab_activated(self):
         """Called when the user switches to this tab — re-fetches and re-renders."""
         self._fetch_edition_data()
@@ -556,7 +558,8 @@ class VisualisationTab(QWidget):
         force_chs = [ch for ch in self._aux_channels if ch.get("type") == "force"]
         if not force_chs:
             return
-        print("\n── Force channel ranges (in mV as stored in file) ──")
+        print("\n── Force channel ranges (in acquisition units) ──")
+        units = set()
         for ch in force_chs:
             raw = np.asarray(ch.get("data", [])).squeeze()
             if raw.ndim != 1 or raw.size == 0:
@@ -569,12 +572,19 @@ class VisualisationTab(QWidget):
                 f"  config MVC={mvc_cfg}" if mvc_cfg is not None else "  (no MVC set)"
             )
             label = ch.get("unit") or ch.get("name", "?")
+            physical_unit = ch.get("physical_unit") or "mV"
+            units.add(physical_unit)
             print(
-                f"  {label:20s}  peak={peak:.5f} mV  baseline≈{baseline:.5f} mV  net={peak-baseline:.5f} mV{mvc_str}"
+                f"  {label:20s}  peak={peak:.5f} {physical_unit}  "
+                f"baseline≈{baseline:.5f} {physical_unit}  "
+                f"net={peak-baseline:.5f} {physical_unit}{mvc_str}"
             )
-        print(
-            "  → Use 'net' value as MVC in the config (these are mV from the Quattrocento ADC conversion)"
-        )
+        if units == {"mV"}:
+            print(
+                "  → Use 'net' as MVC in the config (mV from the Quattrocento ADC conversion)"
+            )
+        else:
+            print("  → Enter MVC in the same acquisition unit shown above")
         print()
 
     # ── Rendering ─────────────────────────────────────────────────────────────
@@ -798,7 +808,11 @@ class VisualisationTab(QWidget):
                 pg.InfiniteLine(
                     pos=threshold,
                     angle=0,
-                    pen=pg.mkPen(color="#ff6b6b", width=1.5, style=Qt.DashLine),
+                    pen=pg.mkPen(
+                        color="#ff6b6b",
+                        width=1.5,
+                        style=Qt.PenStyle.DashLine,
+                    ),
                 )
             )
             pw.getAxis("bottom").setTicks([ticks])
@@ -896,7 +910,11 @@ class VisualisationTab(QWidget):
             pw.plot(
                 x_fit,
                 np.polyval(coeffs, x_fit),
-                pen=pg.mkPen(color=COLORS["text_muted"], width=1.5, style=Qt.DashLine),
+                pen=pg.mkPen(
+                    color=COLORS["text_muted"],
+                    width=1.5,
+                    style=Qt.PenStyle.DashLine,
+                ),
             )
 
         # Set y-range with 10 % headroom around the IQR so one outlier

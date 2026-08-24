@@ -14,8 +14,8 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QLabel,
@@ -25,8 +25,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QGroupBox,
 )
-from PyQt5.QtGui import QFont
-
 # Re-use the app's colour / size tokens
 from scd_app.gui.style.styling import COLORS, FONT_SIZES, FONT_FAMILY
 
@@ -66,11 +64,11 @@ class _MetricRow(QWidget):
     """One label + value row inside the properties grid."""
 
     _LABEL_STYLE = (
-        f"color: {_C_DIM}; font-size: {FONT_SIZES.get('small','9pt')};"
+        f"color: {_C_DIM}; font-size: {FONT_SIZES.get('small', '9pt')};"
         f"font-family: {FONT_FAMILY};"
     )
     _VALUE_STYLE = (
-        f"color: {_C_FG}; font-size: {FONT_SIZES.get('small','9pt')};"
+        f"color: {_C_FG}; font-size: {FONT_SIZES.get('small', '9pt')};"
         f"font-family: {FONT_FAMILY}; font-weight: bold;"
     )
 
@@ -86,7 +84,9 @@ class _MetricRow(QWidget):
 
         self._val = QLabel("—")
         self._val.setStyleSheet(self._VALUE_STYLE)
-        self._val.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._val.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
         lay.addWidget(self._lbl)
         lay.addWidget(self._val, stretch=1)
@@ -111,7 +111,7 @@ class _Section(QGroupBox):
             f"""
             QGroupBox {{
                 color: {_C_INFO};
-                font-size: {FONT_SIZES.get('small','9pt')};
+                font-size: {FONT_SIZES.get('small', '9pt')};
                 font-family: {FONT_FAMILY};
                 font-weight: bold;
                 border: 1px solid {_C_BORD};
@@ -156,7 +156,9 @@ class MUPropertiesPanel(QFrame):
         self.setStyleSheet(
             f"background-color: {_C_BGS}; border-top: 1px solid {_C_BORD};"
         )
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 4, 8, 4)
@@ -168,12 +170,12 @@ class MUPropertiesPanel(QFrame):
         self._reliability_badge = QLabel("● RELIABLE")
         self._reliability_badge.setStyleSheet(
             f"color: {_C_OK}; font-weight: bold; "
-            f"font-size: {FONT_SIZES.get('small','9pt')}; font-family: {FONT_FAMILY};"
+            f"font-size: {FONT_SIZES.get('small', '9pt')}; font-family: {FONT_FAMILY};"
         )
         badge_row.addWidget(self._reliability_badge)
 
         _dup_style = (
-            f"color: {_C_WARN}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {_C_WARN}; font-size: {FONT_SIZES.get('small', '9pt')};"
             f" font-family: {FONT_FAMILY};"
         )
         self._within_dup_label = QLabel()
@@ -278,13 +280,13 @@ class MUPropertiesPanel(QFrame):
             self._reliability_badge.setText("● RELIABLE")
             self._reliability_badge.setStyleSheet(
                 f"color: {_C_OK}; font-weight: bold; "
-                f"font-size: {FONT_SIZES.get('small','9pt')};"
+                f"font-size: {FONT_SIZES.get('small', '9pt')};"
             )
         else:
             self._reliability_badge.setText("● UNRELIABLE")
             self._reliability_badge.setStyleSheet(
                 f"color: {_C_ERR}; font-weight: bold; "
-                f"font-size: {FONT_SIZES.get('small','9pt')};"
+                f"font-size: {FONT_SIZES.get('small', '9pt')};"
             )
 
         # — Within-port duplicate partners —
@@ -337,7 +339,7 @@ class MUPropertiesPanel(QFrame):
         self._reliability_badge.setText("● —")
         self._reliability_badge.setStyleSheet(
             f"color: {_C_DIM}; font-weight: bold; "
-            f"font-size: {FONT_SIZES.get('small','9pt')};"
+            f"font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         self._within_dup_label.setVisible(False)
         self._cross_dup_label.setVisible(False)

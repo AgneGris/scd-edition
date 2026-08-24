@@ -8,9 +8,9 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
-from PyQt5.QtWidgets import QDialog, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 from scd_app.gui.style.styling import COLORS, FONT_FAMILY
 
@@ -23,10 +23,10 @@ class MuapPopoutDialog(QDialog):
         self.setWindowTitle("MUAP Shapes")
         self.resize(850, 620)
         self.setWindowFlags(
-            Qt.Window
-            | Qt.WindowMinimizeButtonHint
-            | Qt.WindowMaximizeButtonHint
-            | Qt.WindowCloseButtonHint
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
         )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -64,7 +64,7 @@ class MuapPopoutDialog(QDialog):
         )
         self._plot.addLabel(label, row=0, col=0, colspan=cols + 1, justify="center")
 
-        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:8pt;"
+        lbl_style = f"color:{COLORS.get('text_dim', '#6c7086')}; font-size:8pt;"
 
         def _add_lbl(text, row, col, **kw):
             lbl = self._plot.addLabel(text, row=row, col=col, **kw)

@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-from scd_app.io.data_loader import load_layout, load_field
+from scd_app.io.data_loader import load_layout, load_field, load_metadata
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -27,8 +27,8 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QSizePolicy,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QIntValidator
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIntValidator
 
 from scd_app.core.config import (
     ConfigManager,
@@ -80,11 +80,11 @@ class ChannelAllocationBar(QFrame):
         if self.max_channels == 0:
             return
 
-        from PyQt5.QtGui import QPainter, QColor, QPen, QFont
-        from PyQt5.QtCore import QRect
+        from PySide6.QtGui import QPainter, QColor, QPen, QFont
+        from PySide6.QtCore import QRect
 
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         margin = 10
         bar_height = 25
@@ -125,9 +125,9 @@ class ChannelAllocationBar(QFrame):
 
             if segment_width > 40:
                 painter.setPen(QPen(QColor("#ffffff")))
-                label_font = QFont(FONT_FAMILY, 8, QFont.Bold)
+                label_font = QFont(FONT_FAMILY, 8, QFont.Weight.Bold)
                 painter.setFont(label_font)
-                painter.drawText(segment_rect, Qt.AlignCenter, name)
+                painter.drawText(segment_rect, Qt.AlignmentFlag.AlignCenter, name)
 
 
 class _NoScrollSpinBox(QSpinBox):
@@ -140,8 +140,8 @@ class _NoScrollSpinBox(QSpinBox):
 class GridCard(QFrame):
     """Card widget for configuring a single electrode grid."""
 
-    remove_requested = pyqtSignal(object)
-    changed = pyqtSignal()
+    remove_requested = Signal(object)
+    changed = Signal()
 
     GRID_COLORS = ["#4a9eff", "#a78bfa", "#48BB78", "#F6AD55", "#ff6b9d", "#63B3ED"]
 
@@ -189,6 +189,12 @@ class GridCard(QFrame):
                 "spacing_mm": 8.0,
                 "n_channels": 96,
             },
+            "Grid (HD08MM1606, channels 17-96)": {
+                "rows": 16,
+                "cols": 5,
+                "spacing_mm": 8.0,
+                "n_channels": 80,
+            },
             "Grid (HD08MM1305)": {
                 "rows": 13,
                 "cols": 5,
@@ -225,7 +231,7 @@ class GridCard(QFrame):
         self.index = index
         self.color = color
 
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(55)
 
         self._setup_ui()
@@ -246,7 +252,7 @@ class GridCard(QFrame):
         # Type badge
         type_label = QLabel("EMG")
         type_label.setFixedWidth(36)
-        type_label.setAlignment(Qt.AlignCenter)
+        type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         type_label.setStyleSheet(
             f"""
             QLabel {{
@@ -264,13 +270,13 @@ class GridCard(QFrame):
         # Name
         self.name_edit = QLineEdit(f"Grid_{self.index}")
         self.name_edit.setPlaceholderText("e.g., Biceps")
-        self.name_edit.textChanged.connect(self.changed.emit)
+        self.name_edit.textChanged.connect(self._notify_changed)
         main_layout.addWidget(self.name_edit, stretch=2)
 
         # Muscle
         self.muscle_edit = QLineEdit()
         self.muscle_edit.setPlaceholderText("Muscle")
-        self.muscle_edit.textChanged.connect(self.changed.emit)
+        self.muscle_edit.textChanged.connect(self._notify_changed)
         main_layout.addWidget(self.muscle_edit, stretch=2)
 
         # Electrode type
@@ -281,7 +287,7 @@ class GridCard(QFrame):
 
         # Electrode config
         self.config_combo = QComboBox()
-        self.config_combo.currentTextChanged.connect(self.changed.emit)
+        self.config_combo.currentTextChanged.connect(self._notify_changed)
         main_layout.addWidget(self.config_combo, stretch=2)
 
         # Channel range — managed externally by ConfigTab._recalculate_all_channel_ranges
@@ -307,15 +313,15 @@ class GridCard(QFrame):
         self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self))
         self.remove_btn.setStyleSheet(
             f"""
-            QPushButton {{ 
-                background-color: transparent; 
-                color: {COLORS['text_muted']}; 
-                border-radius: 10px; 
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_muted']};
+                border-radius: 10px;
                 font-weight: bold; font-size: 18pt;
             }}
-            QPushButton:hover {{ 
-                background-color: {COLORS['error']}40; 
-                color: {COLORS['error_bright']}; 
+            QPushButton:hover {{
+                background-color: {COLORS['error']}40;
+                color: {COLORS['error_bright']};
             }}
         """
         )
@@ -326,14 +332,14 @@ class GridCard(QFrame):
     def _apply_styling(self):
         self.setStyleSheet(
             f"""
-            GridCard {{ 
-                background-color: {COLORS['background_light']}; 
-                border: 1px solid {COLORS['border']}; 
-                border-radius: 6px; 
+            GridCard {{
+                background-color: {COLORS['background_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
             }}
-            QLabel {{ 
-                color: {COLORS['foreground']}; 
-                font-family: '{FONT_FAMILY}'; 
+            QLabel {{
+                color: {COLORS['foreground']};
+                font-family: '{FONT_FAMILY}';
             }}
             QPushButton {{
                 color: {COLORS['foreground']};
@@ -345,6 +351,10 @@ class GridCard(QFrame):
         self.index = index
         if self.name_edit.text().startswith("Grid_"):
             self.name_edit.setText(f"Grid_{index}")
+
+    def _notify_changed(self, *_args):
+        """Discard widget signal payloads before emitting the parameterless signal."""
+        self.changed.emit()
 
     def _on_type_change(self):
         electrode_type = self.type_combo.currentText()
@@ -424,8 +434,8 @@ class GridCard(QFrame):
 class AuxChannelCard(QFrame):
     """Card widget for configuring an auxiliary channel group (force, target, etc.)."""
 
-    remove_requested = pyqtSignal(object)
-    changed = pyqtSignal()
+    remove_requested = Signal(object)
+    changed = Signal()
 
     AUX_TYPES = [
         "Force",
@@ -443,7 +453,7 @@ class AuxChannelCard(QFrame):
         super().__init__(parent)
         self.index = index
 
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(55)
 
         self._setup_ui()
@@ -465,7 +475,7 @@ class AuxChannelCard(QFrame):
         # Type badge
         type_label = QLabel("AUX")
         type_label.setFixedWidth(36)
-        type_label.setAlignment(Qt.AlignCenter)
+        type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         type_label.setStyleSheet(
             f"""
             QLabel {{
@@ -483,18 +493,21 @@ class AuxChannelCard(QFrame):
         # Name
         self.name_edit = QLineEdit(f"Aux_{self.index}")
         self.name_edit.setPlaceholderText("e.g., Force_raw")
-        self.name_edit.textChanged.connect(self.changed.emit)
+        self.name_edit.textChanged.connect(self._notify_changed)
         main_layout.addWidget(self.name_edit, stretch=2)
 
         # Type
         self.type_combo = QComboBox()
         self.type_combo.addItems(self.AUX_TYPES)
-        self.type_combo.currentTextChanged.connect(self.changed.emit)
+        self.type_combo.currentTextChanged.connect(self._notify_changed)
         main_layout.addWidget(self.type_combo, stretch=2)
 
-        # Source: from main signal or from .sip aux files
+        # Source: from main signal, an acquisition-system auxiliary stream, or a
+        # named field in the data file.
         self.source_combo = QComboBox()
-        self.source_combo.addItems(["Signal channels", "Aux file (.sip)"])
+        self.source_combo.addItems(
+            ["Signal channels", "Auxiliary stream", "Data file field"]
+        )
         self.source_combo.currentIndexChanged.connect(self._on_source_change)
         main_layout.addWidget(self.source_combo, stretch=2)
 
@@ -502,25 +515,40 @@ class AuxChannelCard(QFrame):
         self.start_spin = _NoScrollSpinBox()
         self.start_spin.setRange(0, 2048)
         self.start_spin.setValue(0)
-        self.start_spin.valueChanged.connect(self.changed.emit)
+        self.start_spin.valueChanged.connect(self._notify_changed)
         main_layout.addWidget(self.start_spin, stretch=1)
 
         self.end_spin = _NoScrollSpinBox()
         self.end_spin.setRange(0, 2048)
         self.end_spin.setValue(0)
-        self.end_spin.valueChanged.connect(self.changed.emit)
+        self.end_spin.valueChanged.connect(self._notify_changed)
         main_layout.addWidget(self.end_spin, stretch=1)
+
+        # Field path (for "Data file field") — read straight out of the data file,
+        # e.g. a MATLAB struct field holding an already-calibrated force trace.
+        self.field_edit = QLineEdit()
+        self.field_edit.setPlaceholderText("e.g. signal.path")
+        self.field_edit.setToolTip(
+            "Name of the field inside the data file holding this signal.\n"
+            "Dot notation walks MATLAB structs (e.g. signal.path); "
+            "HDF5 uses slashes (e.g. signal/force)."
+        )
+        self.field_edit.textChanged.connect(self._notify_changed)
+        self.field_edit.setVisible(False)
+        main_layout.addWidget(self.field_edit, stretch=2)
 
         # Unit
         self.unit_edit = QLineEdit()
         self.unit_edit.setPlaceholderText("Unit")
-        self.unit_edit.textChanged.connect(self.changed.emit)
+        self.unit_edit.textChanged.connect(self._notify_changed)
         main_layout.addWidget(self.unit_edit, stretch=2)
 
         # MVC value
         mvc_label = QLabel("MVC:")
         mvc_label.setFixedWidth(32)
-        mvc_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        mvc_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         mvc_label.setStyleSheet(
             f"color: {COLORS['text_dim']}; font-size: {FONT_SIZES['small']};"
         )
@@ -534,7 +562,7 @@ class AuxChannelCard(QFrame):
             "OTB displays force in Volts — multiply by 1000 to get mV (e.g. 0.049 V → 49).\n"
             "Used to normalise force as % MVC. Leave blank to use relative normalisation."
         )
-        self.mvc_edit.textChanged.connect(self.changed.emit)
+        self.mvc_edit.textChanged.connect(self._notify_changed)
         main_layout.addWidget(self.mvc_edit)
 
         mvc_browse = QPushButton("...")
@@ -565,15 +593,15 @@ class AuxChannelCard(QFrame):
         self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self))
         self.remove_btn.setStyleSheet(
             f"""
-            QPushButton {{ 
-                background-color: transparent; 
-                color: {COLORS['text_muted']}; 
-                border-radius: 10px; 
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_muted']};
+                border-radius: 10px;
                 font-weight: bold; font-size: 14pt;
             }}
-            QPushButton:hover {{ 
-                background-color: {COLORS['error']}40; 
-                color: {COLORS['error_bright']}; 
+            QPushButton:hover {{
+                background-color: {COLORS['error']}40;
+                color: {COLORS['error_bright']};
             }}
         """
         )
@@ -582,23 +610,29 @@ class AuxChannelCard(QFrame):
     def _apply_styling(self):
         self.setStyleSheet(
             f"""
-            AuxChannelCard {{ 
-                background-color: {COLORS['background_light']}; 
-                border: 1px solid {COLORS['border']}; 
-                border-radius: 6px; 
+            AuxChannelCard {{
+                background-color: {COLORS['background_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
             }}
-            QLabel {{ 
-                color: {COLORS['foreground']}; 
-                font-family: '{FONT_FAMILY}'; 
+            QLabel {{
+                color: {COLORS['foreground']};
+                font-family: '{FONT_FAMILY}';
             }}
         """
         )
 
+    def _notify_changed(self, *_args):
+        """Discard widget signal payloads before emitting the parameterless signal."""
+        self.changed.emit()
+
     def _on_source_change(self, idx: int):
-        """Toggle channel range visibility based on source."""
-        is_signal = idx == 0
-        self.start_spin.setVisible(is_signal)
-        self.end_spin.setVisible(is_signal)
+        """Show the channel range for range-based sources, the field path otherwise."""
+        is_range = idx in (0, 1)
+        is_field = idx == 2
+        self.start_spin.setVisible(is_range)
+        self.end_spin.setVisible(is_range)
+        self.field_edit.setVisible(is_field)
         self.changed.emit()
 
     def _browse_mvc_file(self):
@@ -643,9 +677,17 @@ class AuxChannelCard(QFrame):
                 get_label_style(size="small", color="warning")
             )
 
+    # Combo index ↔ the value persisted in the channel-config JSON
+    SOURCES = ["signal", "aux_file", "data_field"]
+
     def get_source(self) -> str:
-        """'signal' if from main signal channels, 'aux_file' if from .sip files."""
-        return "signal" if self.source_combo.currentIndex() == 0 else "aux_file"
+        """'signal' = main signal channels, 'aux_file' = .sip streams,
+        'data_field' = a named field read straight out of the data file."""
+        idx = self.source_combo.currentIndex()
+        return self.SOURCES[idx] if 0 <= idx < len(self.SOURCES) else "signal"
+
+    def get_field_path(self) -> str:
+        return self.field_edit.text().strip()
 
     def get_channel_range(self) -> Tuple[int, int]:
         return self.start_spin.value(), self.end_spin.value()
@@ -660,6 +702,9 @@ class AuxChannelCard(QFrame):
             "end_chan": self.end_spin.value(),
             "unit": self.unit_edit.text(),
         }
+        field_path = self.get_field_path()
+        if field_path:
+            d["field_path"] = field_path
         mvc_text = self.mvc_edit.text().strip()
         if mvc_text:
             try:
@@ -677,14 +722,22 @@ class AuxChannelCard(QFrame):
         end: int = 0,
         unit: str = "",
         mvc: Optional[float] = None,
+        field_path: str = "",
     ):
         self.name_edit.setText(name)
-        type_idx = self.type_combo.findText(aux_type, Qt.MatchFixedString)
+        type_idx = self.type_combo.findText(
+            aux_type, Qt.MatchFlag.MatchFixedString
+        )
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
-        self.source_combo.setCurrentIndex(0 if source == "signal" else 1)
+        src_idx = self.SOURCES.index(source) if source in self.SOURCES else 0
+        self.source_combo.setCurrentIndex(src_idx)
+        # setCurrentIndex only fires _on_source_change when the index actually
+        # changes, so apply the visibility rules explicitly.
+        self._on_source_change(src_idx)
         self.start_spin.setValue(start)
         self.end_spin.setValue(end)
+        self.field_edit.setText(field_path)
         self.unit_edit.setText(unit)
         if mvc is not None:
             self.mvc_edit.setText(f"{mvc:g}")
@@ -695,7 +748,7 @@ class AuxChannelCard(QFrame):
 class ConfigTab(QWidget):
     """Streamlined configuration tab for EMG data loading and channel setup."""
 
-    config_applied = pyqtSignal(object, list)
+    config_applied = Signal(object, list)
 
     # 6 quaternion channels appended after each novecento-type grid (i.e. HD...) EMG channels
     HD_QUATERNION_CHANNELS = 6
@@ -706,6 +759,9 @@ class ConfigTab(QWidget):
         self.emg_path: Optional[Path] = None
         self.emg_paths: List[Path] = []  # all selected files for batch
         self.max_channels: int = 256
+        self.file_metadata: dict = {}
+        self._metadata_key = None
+        self._metadata_error = None
         self.grid_cards: List[GridCard] = []
         self.aux_cards: List[AuxChannelCard] = []
 
@@ -842,7 +898,7 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data Files",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4);;All Files (*.*)",
         )
         if paths:
             self.emg_paths = [Path(p) for p in paths]
@@ -851,6 +907,7 @@ class ConfigTab(QWidget):
                 f"{len(paths)} files selected (first: {self.emg_path.name})"
             )
             self._auto_select_loader(self.emg_path)
+            self._refresh_file_metadata()
 
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
@@ -938,9 +995,11 @@ class ConfigTab(QWidget):
 
         # Scroll area
         scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
             f"""
@@ -1034,7 +1093,7 @@ class ConfigTab(QWidget):
         self.apply_btn.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COLORS['success']}, stop:1 #38A169);
                 color: white; border-radius: 6px; font-weight: bold;
                 font-size: {FONT_SIZES['medium']}; padding: 10px 24px;
@@ -1103,6 +1162,11 @@ class ConfigTab(QWidget):
         fmt = layout.get("format", "") if layout else ""
         show = fmt in ("h5", "mat")
         self.emg_path_row.setVisible(show)
+        self.skip_quaternions_cb.setEnabled(fmt != "otb4")
+        if fmt == "otb4":
+            # The loader exposes only physical EMG channels, so its canonical
+            # channel array has no quaternion/buffer/ramp gaps.
+            self.skip_quaternions_cb.setChecked(False)
         if show and layout:
             emg_spec = layout.get("fields", {}).get("emg", {})
             self.emg_path_edit.setText(emg_spec.get("path", ""))
@@ -1110,6 +1174,7 @@ class ConfigTab(QWidget):
             idx = self.emg_orientation_combo.findText(orient)
             self.emg_orientation_combo.setCurrentIndex(idx if idx >= 0 else 0)
         if self.emg_path:
+            self._refresh_file_metadata()
             self._update_file_info()
 
     def _on_emg_path_changed(self):
@@ -1142,13 +1207,15 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+);;OTB+ Files (*.otb+);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4);;"
+            "OTB Files (*.otb+ *.otb4);;All Files (*.*)",
         )
         if path:
             self.emg_path = Path(path)
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(path)
             self._auto_select_loader(self.emg_path)
+            self._refresh_file_metadata()
 
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
@@ -1160,6 +1227,8 @@ class ConfigTab(QWidget):
                 self._add_grid()
 
     def _estimate_channels_from_file(self, file_path: Path) -> int:
+        if self.file_metadata.get("emg_channel_count") is not None:
+            return int(self.file_metadata["emg_channel_count"])
         layout = self._get_layout_with_overrides()
         if layout is None:
             return 256
@@ -1177,6 +1246,24 @@ class ConfigTab(QWidget):
         if layout is None or self.emg_path is None:
             return
         try:
+            if self._metadata_error:
+                raise ValueError(self._metadata_error)
+            if self.file_metadata.get("emg_channel_count") is not None:
+                n_samples = int(self.file_metadata["n_samples"])
+                n_channels = int(self.file_metadata["emg_channel_count"])
+                fs = int(self.file_metadata["sampling_frequency"])
+                duration_sec = n_samples / fs
+                n_grids = len(self.file_metadata.get("grids", []))
+                n_aux = int(self.file_metadata.get("aux_channel_count", 0))
+                self.max_channels = n_channels
+                self.allocation_bar.set_max_channels(n_channels)
+                self.file_info_label.setText(
+                    f"Loaded: {self.emg_path.name} | "
+                    f"Shape: {n_samples} samples × {n_channels} channels | "
+                    f"{n_grids} grid(s), {n_aux} aux | "
+                    f"Duration: {duration_sec:.1f}s @ {fs} Hz"
+                )
+                return
             layout_full = copy.deepcopy(layout)
             layout_full["fields"]["emg"].pop("channels", None)
             emg = load_field(self.emg_path, layout_full, "emg")
@@ -1195,6 +1282,26 @@ class ConfigTab(QWidget):
             self.file_info_label.setStyleSheet(
                 get_label_style(size="small", color="error")
             )
+
+    def _refresh_file_metadata(self):
+        """Load cheap archive metadata and apply its sampling frequency."""
+        layout = self._get_layout_with_overrides()
+        if layout is None or self.emg_path is None:
+            self.file_metadata = {}
+            return
+        key = (str(self.emg_path), layout.get("format"))
+        if key == self._metadata_key:
+            return
+        self._metadata_key = key
+        self._metadata_error = None
+        try:
+            self.file_metadata = load_metadata(self.emg_path, layout)
+            fs = self.file_metadata.get("sampling_frequency")
+            if fs is not None:
+                self.fsamp_edit.setText(str(int(fs)))
+        except Exception as exc:
+            self.file_metadata = {}
+            self._metadata_error = str(exc)
 
     def _add_grid(self):
         index = len(self.grid_cards) + 1
@@ -1349,9 +1456,9 @@ class ConfigTab(QWidget):
             self,
             "Clear All Channels",
             "Remove all grid and auxiliary channel configurations?",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             for card in self.grid_cards + self.aux_cards:
                 card.deleteLater()
             self.grid_cards.clear()
@@ -1377,6 +1484,15 @@ class ConfigTab(QWidget):
             start, end = card.get_channel_range()
             name = card.get_data()["name"]
 
+            expected = card.get_channel_count()
+            if end - start != expected:
+                msg = f"Expected {expected} channels"
+                warnings.append(
+                    f"{name}: configured range has {end - start} channels; "
+                    f"the selected electrode expects {expected}"
+                )
+                card.set_validation_status(False, msg)
+
             if end > self.max_channels:
                 msg = "Exceeds available channels"
                 warnings.append(
@@ -1400,7 +1516,35 @@ class ConfigTab(QWidget):
 
         # Validate signal-source aux channels
         for card in self.aux_cards:
-            if card.get_source() != "signal":
+            source = card.get_source()
+            if source == "data_field":
+                # No channel range to check — but the field name is mandatory,
+                # otherwise the worker has nothing to look up.
+                if not card.get_field_path():
+                    msg = "Field path required"
+                    warnings.append(
+                        f"{card.get_data()['name']}: "
+                        "a field path is required for the 'Data file field' source"
+                    )
+                    card.set_validation_status(False, msg)
+                continue
+            if source == "aux_file":
+                start, end = card.get_channel_range()
+                name = card.get_data()["name"]
+                available = self.file_metadata.get("aux_channel_count")
+                if start >= end:
+                    msg = "Start >= End"
+                    warnings.append(f"{name}: Start channel must be < End channel")
+                    card.set_validation_status(False, msg)
+                elif available is not None and end > int(available):
+                    msg = "Exceeds available aux channels"
+                    warnings.append(
+                        f"{name}: auxiliary range [{start},{end}) exceeds "
+                        f"the {int(available)} channels declared by the file"
+                    )
+                    card.set_validation_status(False, msg)
+                continue
+            if source != "signal":
                 continue
             start, end = card.get_channel_range()
             name = card.get_data()["name"]
@@ -1416,6 +1560,18 @@ class ConfigTab(QWidget):
                 msg = "Start >= End"
                 warnings.append(f"{name}: Start channel must be < End channel")
                 card.set_validation_status(False, msg)
+
+        metadata_fs = self.file_metadata.get("sampling_frequency")
+        if metadata_fs is not None:
+            try:
+                configured_fs = int(self.fsamp_edit.text())
+            except ValueError:
+                configured_fs = None
+            if configured_fs != int(metadata_fs):
+                warnings.append(
+                    f"Sampling rate {configured_fs!r} does not match file metadata "
+                    f"({int(metadata_fs)} Hz)"
+                )
 
         return len(warnings) == 0, warnings
 
@@ -1505,6 +1661,7 @@ class ConfigTab(QWidget):
             self.emg_path = Path(file_path)
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(file_path)
+            self._refresh_file_metadata()
             self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
             self.allocation_bar.set_max_channels(self.max_channels)
@@ -1561,6 +1718,7 @@ class ConfigTab(QWidget):
                 end=a.get("end_chan", 0),
                 unit=a.get("unit", ""),
                 mvc=a.get("mvc"),
+                field_path=a.get("field_path", ""),
             )
 
         self.output_dir_edit.setText(self.output_dir_edit.text())

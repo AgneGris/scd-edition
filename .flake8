@@ -1,3 +1,19 @@
 [flake8]
-exclude = .venv,__pycache__,.git
+exclude =
+    .git,
+    .venv,
+    __pycache__,
+    bats,
+    build,
+    data,
+    dist,
+    docs,
+    export,
+    jobs,
+    motor_unit_toolbox,
+    scripts/add_force_to_decomp.py,
+    scripts/assign_edition.py,
+    scripts/patch_mvc.py,
+    tests/filter_test.py,
+    tests/test_otb4_loader.py
 max-line-length = 120

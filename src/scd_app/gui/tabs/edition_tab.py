@@ -15,20 +15,18 @@ import traceback
 import numpy as np
 from scipy import signal as sp_signal
 
-from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QTimer
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer
+from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QSplitter,
     QToolBar,
-    QAction,
     QComboBox,
     QLabel,
     QPushButton,
     QFileDialog,
     QMessageBox,
-    QShortcut,
     QStatusBar,
     QApplication,
     QPlainTextEdit,
@@ -36,7 +34,16 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QSizePolicy,
 )
-from PyQt5.QtGui import QKeySequence, QFont, QPixmap, QIcon, QPainter, QColor
+from PySide6.QtGui import (
+    QAction,
+    QKeySequence,
+    QFont,
+    QPixmap,
+    QIcon,
+    QPainter,
+    QColor,
+    QShortcut,
+)
 import pyqtgraph as pg
 
 from scd_app.gui.style.styling import (
@@ -54,6 +61,7 @@ from scd_app.core.mu_properties import (
 )
 from scd_app.core.utils import to_numpy
 from scd_app.core.constants import ROA_THRESHOLD
+from scd_app.io.decomposition_loader import load_decomposition_file
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
 from scd_app.gui.widgets.source_plot_widget import (
     SelectionArm,
@@ -594,6 +602,19 @@ ELECTRODE_GRIDS = {
         "muap_mapping": {i: i + 1 for i in range(96)},
         "positions": GRID_POSITIONS_HD04MM1606,
     },
+    # Same 16x6 electrode with hardware channels 1-16 disconnected.  The
+    # remaining channels occupy five complete columns; re-key them locally so
+    # an 80-channel decomposition retains the correct physical arrangement.
+    "HD08MM1606, CHANNELS 17-96": {
+        "grid_shape": (16, 5),
+        "ied_mm": 8,
+        "n_channels": 80,
+        "muap_mapping": {i: i + 1 for i in range(80)},
+        "positions": {
+            local_ch: GRID_POSITIONS_HD04MM1606[local_ch + 16]
+            for local_ch in range(1, 81)
+        },
+    },
     "HD08MM1606": {
         "grid_shape": (16, 6),
         "ied_mm": 8,
@@ -641,8 +662,8 @@ def get_grid_config(electrode_type: Optional[str]) -> Optional[Dict]:
 
 
 class EditionTab(QWidget):
-    data_modified = pyqtSignal()
-    file_loaded = pyqtSignal()
+    data_modified = Signal()
+    file_loaded = Signal()
 
     def __init__(self, fsamp: float = 2048.0, parent=None):
         super().__init__(parent)
@@ -718,7 +739,7 @@ class EditionTab(QWidget):
         self.quality_bar.setMinimumHeight(110)
         root.addWidget(self.quality_bar)
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(2)
         splitter.addWidget(self._build_left_panel())
         splitter.addWidget(self._build_right_panel())
@@ -748,7 +769,7 @@ class EditionTab(QWidget):
     @staticmethod
     def _combo_style() -> str:
         return (
-            f"QComboBox {{ background-color: {COLORS.get('background_input','#33334d')};"
+            f"QComboBox {{ background-color: {COLORS.get('background_input', '#33334d')};"
             f" color: {COLORS['foreground']}; border: 1px solid {COLORS['border']};"
             f" border-radius: 4px; padding: 4px 8px; }}"
         )
@@ -763,10 +784,10 @@ class EditionTab(QWidget):
             f"  border: 1px solid transparent;"
             f"  border-radius: 4px;"
             f"  padding: 4px 10px;"
-            f"  font-size: {FONT_SIZES.get('small','9pt')};"
+            f"  font-size: {FONT_SIZES.get('small', '9pt')};"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background-color: {COLORS.get('background_input','#33334d')};"
+            f"  background-color: {COLORS.get('background_input', '#33334d')};"
             f"  border-color: {COLORS['border']};"
             f"}}"
             f"QPushButton:checked {{"
@@ -774,20 +795,20 @@ class EditionTab(QWidget):
             f"  border: 2px solid {accent};"
             f"  font-weight: bold;"
             f"}}"
-            f"QPushButton:disabled {{ color: {COLORS.get('text_dim','#6c7086')}; }}"
+            f"QPushButton:disabled {{ color: {COLORS.get('text_dim', '#6c7086')}; }}"
         )
 
     @staticmethod
     def _make_warning_icon(size: int = 14) -> QIcon:
         """Render ⚠ in warning yellow to a QIcon, independent of button text colour."""
         px = QPixmap(size, size)
-        px.fill(Qt.transparent)
+        px.fill(Qt.GlobalColor.transparent)
         p = QPainter(px)
         f = QFont()
         f.setPixelSize(size)
         p.setFont(f)
         p.setPen(QColor(COLORS["warning"]))
-        p.drawText(px.rect(), Qt.AlignCenter, "⚠")
+        p.drawText(px.rect(), Qt.AlignmentFlag.AlignCenter, "⚠")
         p.end()
         return QIcon(px)
 
@@ -820,14 +841,14 @@ class EditionTab(QWidget):
         tb.setStyleSheet(
             f"""
             QToolBar {{
-                background-color: {COLORS.get('background_light','#2a2a3c')};
+                background-color: {COLORS.get('background_light', '#2a2a3c')};
                 border-bottom: 1px solid {COLORS['border']};
                 spacing: 4px;
                 padding: 2px;
             }}
             QToolBar QLabel {{
                 color: {COLORS['foreground']};
-                font-size: {FONT_SIZES.get('small','9pt')};
+                font-size: {FONT_SIZES.get('small', '9pt')};
             }}
             QToolButton {{
                 color: {COLORS['foreground']};
@@ -835,15 +856,15 @@ class EditionTab(QWidget):
                 border: 1px solid transparent;
                 border-radius: 4px;
                 padding: 4px 8px;
-                font-size: {FONT_SIZES.get('small','9pt')};
+                font-size: {FONT_SIZES.get('small', '9pt')};
             }}
             QToolButton:hover {{
-                background-color: {COLORS.get('background_input','#33334d')};
+                background-color: {COLORS.get('background_input', '#33334d')};
                 border-color: {COLORS['border']};
             }}
             QToolButton:checked {{
-                background-color: {COLORS.get('info','#89b4fa')}30;
-                border-color: {COLORS.get('info','#89b4fa')};
+                background-color: {COLORS.get('info', '#89b4fa')}30;
+                border-color: {COLORS.get('info', '#89b4fa')};
             }}
         """
         )
@@ -854,7 +875,7 @@ class EditionTab(QWidget):
         tb.addAction(self.action_load)
 
         self.action_save = QAction("💾 Save", self)
-        self.action_save.setShortcut(QKeySequence.Save)
+        self.action_save.setShortcut(QKeySequence.StandardKey.Save)
         self.action_save.triggered.connect(self._save_file)
         tb.addAction(self.action_save)
 
@@ -899,12 +920,12 @@ class EditionTab(QWidget):
         # ── Undo / Redo ───────────────────────────────────────────────
         tb.addSeparator()
         self.action_undo = QAction("↩ Undo", self)
-        self.action_undo.setShortcut(QKeySequence.Undo)
+        self.action_undo.setShortcut(QKeySequence.StandardKey.Undo)
         self.action_undo.triggered.connect(self._undo)
         tb.addAction(self.action_undo)
 
         self.action_redo = QAction("↪ Redo", self)
-        self.action_redo.setShortcut(QKeySequence.Redo)
+        self.action_redo.setShortcut(QKeySequence.StandardKey.Redo)
         self.action_redo.triggered.connect(self._redo)
         tb.addAction(self.action_redo)
 
@@ -951,7 +972,9 @@ class EditionTab(QWidget):
         tb.addWidget(self.btn_auto_edit_mu)
 
         spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         tb.addWidget(spacer)
 
         self.btn_notes = QPushButton("📝 Notes")
@@ -981,7 +1004,7 @@ class EditionTab(QWidget):
         port_row = QHBoxLayout()
         port_lbl = QLabel("Port:")
         port_lbl.setStyleSheet(
-            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         port_row.addWidget(port_lbl)
         self.port_combo = QComboBox()
@@ -994,7 +1017,7 @@ class EditionTab(QWidget):
         mu_row = QHBoxLayout()
         mu_lbl = QLabel("Unit:")
         mu_lbl.setStyleSheet(
-            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['foreground']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         mu_row.addWidget(mu_lbl)
         self.mu_combo = QComboBox()
@@ -1096,7 +1119,7 @@ class EditionTab(QWidget):
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 0)
 
-        plot_splitter = QSplitter(Qt.Vertical)
+        plot_splitter = QSplitter(Qt.Orientation.Vertical)
         plot_splitter.setHandleWidth(2)
 
         self.source_plot = SourcePlotWidget()
@@ -1117,7 +1140,7 @@ class EditionTab(QWidget):
         return panel
 
     def eventFilter(self, obj, event):
-        if obj is self.muap_widget and event.type() == QEvent.Resize:
+        if obj is self.muap_widget and event.type() == QEvent.Type.Resize:
             self._reposition_muap_popout_btn()
         return super().eventFilter(obj, event)
 
@@ -1316,8 +1339,7 @@ class EditionTab(QWidget):
             QMessageBox.critical(self, "Load Error", f"File not found:\n{path}")
             return
         try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
+            data = load_decomposition_file(path)
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to read file:\n{e}")
             return
@@ -1333,10 +1355,10 @@ class EditionTab(QWidget):
                 self,
                 "Recalculate Filters?",
                 "This file was previously edited.\n\nDo you want to recalculate the filters for each motor unit?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            if reply == QMessageBox.Yes:
+            if reply == QMessageBox.StandardButton.Yes:
                 data["skip_filter_recalc"] = False
 
         can_full, _ = supports_full_source_computation(data)
@@ -1360,17 +1382,27 @@ class EditionTab(QWidget):
                     "Do you want to recalculate spike timestamps on the full signal?\n\n"
                     "Yes — re-detect timestamps from the source over the entire recording.\n"
                     "No  — keep the original timestamps from the decomposed section only.",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
                 )
-                self._redetect_timestamps = reply == QMessageBox.Yes
+                self._redetect_timestamps = (
+                    reply == QMessageBox.StandardButton.Yes
+                )
         else:
             self._redetect_timestamps = True
 
         try:
-            self._loaded_path = path  # must be set before _load_decomposition_data so _refresh_aux_controls sees the correct stem
+            # Set this before loading so _refresh_aux_controls sees the correct stem.
+            self._loaded_path = path
             self._load_decomposition_data(data)
-            self._update_status(f"Loaded: {path.name}")
+            imported_format = data.get("import_provenance", {}).get("format")
+            if imported_format:
+                self._update_status(
+                    f"Loaded: {path.name} (converted from {imported_format})"
+                )
+            else:
+                self._update_status(f"Loaded: {path.name}")
             self._update_file_label()
             self.file_loaded.emit()
         except Exception as e:
@@ -1395,6 +1427,7 @@ class EditionTab(QWidget):
             self._edit_history = []
         # Normalise aux channel structure: older saves nest metadata under "meta";
         # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
+        acquisition_format = decomp_data.get("acquisition_metadata", {}).get("format")
         for ch in decomp_data.get("aux_channels", []):
             meta = ch.pop("meta", None)
             if isinstance(meta, dict):
@@ -1403,10 +1436,14 @@ class EditionTab(QWidget):
             # Old files stored mvc in Volts (OTB display units); signal is in mV.
             # Any legitimate force MVC will be ≥ 1 mV, so mvc < 1.0 means it's in V.
             mvc = ch.get("mvc")
-            if mvc is not None and 0 < float(mvc) < 1.0:
+            if (
+                acquisition_format != "otb4"
+                and mvc is not None
+                and 0 < float(mvc) < 1.0
+            ):
                 corrected = float(mvc) * 1000.0
                 print(
-                    f"  [load] mvc unit fix: {ch.get('unit','?')} {mvc} V → {corrected} mV"
+                    f"  [load] mvc unit fix: {ch.get('unit', '?')} {mvc} V → {corrected} mV"
                 )
                 ch["mvc"] = corrected
 
@@ -1427,7 +1464,7 @@ class EditionTab(QWidget):
                 if match and match.get("mvc") is not None:
                     ch["mvc"] = match["mvc"]
                     print(
-                        f"  [load] filled mvc from config: {ch.get('unit','?')} = {ch['mvc']} mV"
+                        f"  [load] filled mvc from config: {ch.get('unit', '?')} = {ch['mvc']} mV"
                     )
 
         self._original_decomp_data = decomp_data
@@ -1614,7 +1651,7 @@ class EditionTab(QWidget):
                 else:
                     emg_port = emg_full[
                         valid_chs,
-                        max(0, start_sample) : min(end_sample, emg_full.shape[1]),
+                        max(0, start_sample): min(end_sample, emg_full.shape[1]),
                     ]
                 valid_port_chs = port_ch_idx[port_ch_idx < emg_full.shape[0]]
                 self._raw_port_channels[port_name] = emg_full[valid_port_chs, :]
@@ -1838,7 +1875,7 @@ class EditionTab(QWidget):
                 save_ts = [self._ts_to_plateau_local(mu.timestamps) for mu in mus]
                 save_src = [
                     (
-                        mu.source[self._start_sample : self._end_sample]
+                        mu.source[self._start_sample: self._end_sample]
                         if len(mu.source) > (self._end_sample - self._start_sample)
                         else mu.source
                     )
@@ -1891,6 +1928,8 @@ class EditionTab(QWidget):
                 "preprocessing_config",
                 "w_mat",
                 "selected_points",
+                "import_provenance",
+                "scd_metadata",
             ]:
                 val = self._original_decomp_data.get(key)
                 if val is not None and key not in save_data:
@@ -2340,10 +2379,10 @@ class EditionTab(QWidget):
             self,
             "Delete Flagged MUs",
             f"Permanently delete {total} flagged MU(s) from the current session?\n\nThis cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if reply != QMessageBox.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         # Remap peel_off_sequence before deletion so filter recalculation
@@ -2940,7 +2979,7 @@ class EditionTab(QWidget):
         buttons.rejected.connect(dlg.reject)
         lay.addWidget(buttons)
 
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             mu.notes = editor.toPlainText()
 
     def _update_status(self, msg: Optional[str] = None):
@@ -2979,7 +3018,7 @@ class EditionTab(QWidget):
     def _open_muap_popout(self):
         if self._muap_popout is None or not self._muap_popout.isVisible():
             self._muap_popout = MuapPopoutDialog(parent=None)
-            self._muap_popout.setAttribute(Qt.WA_DeleteOnClose)
+            self._muap_popout.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             self._muap_popout.destroyed.connect(self._on_muap_popout_closed)
         self._muap_popout.show()
         self._muap_popout.raise_()
@@ -3076,7 +3115,7 @@ class EditionTab(QWidget):
         self._muap_cell_plots = {}
         self._muap_waveform_items = {}
 
-        lbl_style = f"color:{COLORS.get('text_dim','#6c7086')}; font-size:7pt;"
+        lbl_style = f"color:{COLORS.get('text_dim', '#6c7086')}; font-size:7pt;"
 
         def _add_lbl(widget, text, row, col, **kw):
             lbl = widget.addLabel(text, row=row, col=col, **kw)

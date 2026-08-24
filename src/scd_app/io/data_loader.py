@@ -34,7 +34,7 @@ def load_field(
     Parameters
     ----------
     file_path : Path
-        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+)
+        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+, .otb4)
     layout : dict
         Parsed YAML layout descriptor (from load_layout)
     field : str
@@ -63,7 +63,30 @@ def load_field(
     if raw.ndim == 2:
         raw = _fix_orientation(raw, field_spec.get("orientation", "auto"))
 
+    expected_channels = field_spec.get("expected_channels")
+    if expected_channels is not None:
+        actual_channels = raw.shape[1] if raw.ndim == 2 else 1
+        if actual_channels != int(expected_channels):
+            raise ValueError(
+                f"Field '{field}' in {file_path.name} contains {actual_channels} "
+                f"channels, but layout '{layout['name']}' expects "
+                f"{int(expected_channels)}"
+            )
+
     return torch.from_numpy(raw).to(dtype=torch.float32)
+
+
+def load_metadata(
+    file_path: Union[str, Path], layout: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Load acquisition metadata when the selected format provides it."""
+    file_path = Path(file_path)
+    fmt = layout["format"]
+    if fmt == "otb4":
+        from scd_app.io.otb4_loader import read_otb4_metadata
+
+        return read_otb4_metadata(file_path)
+    return {"format": fmt}
 
 
 def _read_array(
@@ -86,6 +109,10 @@ def _read_array(
         return np.load(str(file_path))
     elif fmt == "otb":
         return _read_otb(file_path, field_name)
+    elif fmt == "otb4":
+        from scd_app.io.otb4_loader import read_otb4
+
+        return read_otb4(file_path, field_name)
     else:
         raise ValueError(f"Unsupported format: '{fmt}'")
 
@@ -147,7 +174,14 @@ def _read_mat(file_path: Path, var_name: str, fallbacks: List[str]) -> np.ndarra
                     return None
             else:
                 return None
-        return np.asarray(obj, dtype=np.float64)
+        # A path that stops on a struct (or on a non-numeric field) is not a
+        # usable array — treat it as a miss so the next fallback gets a turn.
+        if isinstance(obj, np.ndarray) and obj.dtype.names:
+            return None
+        try:
+            return np.asarray(obj, dtype=np.float64)
+        except (ValueError, TypeError):
+            return None
 
     # Try primary path (dot-notation aware)
     result = _traverse(var_name)
@@ -261,7 +295,7 @@ def _read_otb_emg(
     for adapter_idx, raw_start, n_ch in active_adapters:
         gain = float(adapter_info[adapter_idx].attrib["Gain"])
         scale = (power_supply * 1000) / (2**nADbit * gain)
-        emg[:, col : col + n_ch] = raw[:, raw_start : raw_start + n_ch] * scale
+        emg[:, col: col + n_ch] = raw[:, raw_start: raw_start + n_ch] * scale
         col += n_ch
 
     return emg  # (samples, channels) in mV
@@ -299,7 +333,7 @@ def _slice_channels(data: np.ndarray, channels_spec) -> np.ndarray:
     ch = list(channels_spec)
 
     if len(ch) == 2 and ch[1] > ch[0]:
-        return data[ch[0] : ch[1], :]
+        return data[ch[0]: ch[1], :]
     else:
         # Explicit list of indices
         return data[ch, :]

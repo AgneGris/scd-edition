@@ -3,27 +3,21 @@ Main application window for SCD-edition.
 """
 
 import sys
-import pickle
 from pathlib import Path
 from typing import Optional
 
 import torch
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QTabWidget,
     QWidget,
     QVBoxLayout,
-    QMenuBar,
-    QMenu,
-    QAction,
     QStatusBar,
-    QFileDialog,
     QMessageBox,
 )
-from PyQt5.QtGui import QKeySequence
+from PySide6.QtGui import QAction, QKeySequence
 
 from scd_app.gui.tabs.config_tab import ConfigTab
 from scd_app.gui.tabs.decomposition_tab import DecompositionTab
@@ -103,7 +97,7 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("&File")
 
         exit_action = QAction("E&xit", self)
-        exit_action.setShortcut(QKeySequence.Quit)
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
@@ -201,7 +195,8 @@ class MainWindow(QMainWindow):
             self,
             "About SCD Suite",
             "SCD Suite\nEMG Decomposition & Edition\n\n"
-            "Real-time motor unit decomposition and spike editing",
+            "Real-time motor unit decomposition and spike editing\n\n"
+            "Licensed under the BSD 3-Clause License.",
         )
 
     def closeEvent(self, event):
@@ -212,12 +207,14 @@ class MainWindow(QMainWindow):
                 self,
                 "Unsaved Changes",
                 "Save changes before closing?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
             )
-            if reply == QMessageBox.Save:
+            if reply == QMessageBox.StandardButton.Save:
                 self.edition_tab._save_file()
                 event.accept()
-            elif reply == QMessageBox.Discard:
+            elif reply == QMessageBox.StandardButton.Discard:
                 event.accept()
             else:
                 event.ignore()
@@ -256,6 +253,17 @@ def main():
     app = QApplication([sys.argv[0]] + qt_argv)
     app.setApplicationName("SCD-Edition")
 
+    if torch.cuda.is_available():
+        print(
+            f"SCD Edition device: CUDA ({torch.cuda.get_device_name(0)}) "
+            "because PyTorch detected a working CUDA device."
+        )
+    else:
+        print(
+            "SCD Edition device: CPU because PyTorch did not detect a working "
+            "CUDA device."
+        )
+
     set_style_sheet(app)
 
     window = MainWindow()
@@ -269,12 +277,12 @@ def main():
     if args.open_path:
         open_path = Path(args.open_path)
         # Defer until the event loop is running so the window is fully shown
-        from PyQt5.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         QTimer.singleShot(0, lambda: _open_on_startup(window, open_path))
 
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 def _open_on_startup(window: "MainWindow", path: Path):
@@ -283,7 +291,7 @@ def _open_on_startup(window: "MainWindow", path: Path):
         window.tabs.setCurrentWidget(window.edition_tab)
     except Exception as e:
         print(f"ERROR: Could not open file '{path}': {e}", file=sys.stderr)
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.critical(window, "Load Error", f"Could not open file:\n{e}")
         sys.exit(1)

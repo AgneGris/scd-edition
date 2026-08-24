@@ -116,9 +116,9 @@ def _run_channel_check_gui(
     Saves progress to *output_path* after every file.
     Returns the complete {filename: {grid: mask}} dict.
     """
-    from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
-    from PyQt5.QtCore import QEventLoop, QTimer
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
+    from PySide6.QtCore import QEventLoop, QTimer
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     from matplotlib.widgets import Button, SpanSelector
     from scd_app.io.data_loader import load_field
@@ -659,7 +659,7 @@ def _run_channel_check_gui(
         # Launch event loop for this file
         win._current_loop = event_loop
         draw_grid(0)
-        event_loop.exec_()
+        event_loop.exec()
         win._current_loop = None
 
         if win.aborted:

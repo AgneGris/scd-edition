@@ -16,8 +16,8 @@ from typing import Dict, List, Optional, Set
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtCore import Qt, QPoint, QRect, QSize, pyqtSignal
-from PyQt5.QtWidgets import QRubberBand
+from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal
+from PySide6.QtWidgets import QRubberBand
 
 from scd_app.core.mu_model import EditMode
 from scd_app.gui.style.styling import COLORS
@@ -94,11 +94,11 @@ class SelectionArm:
 class XZoomViewBox(pg.ViewBox):
     def wheelEvent(self, ev, axis=None):
         mods = ev.modifiers()
-        if mods & Qt.ShiftModifier:
+        if mods & Qt.KeyboardModifier.ShiftModifier:
             delta = ev.delta()
             self.translateBy(x=-delta / 200.0, y=0)
             ev.accept()
-        elif mods & Qt.ControlModifier:
+        elif mods & Qt.KeyboardModifier.ControlModifier:
             super().wheelEvent(ev, axis=None)
         else:
             super().wheelEvent(ev, axis=0)
@@ -156,7 +156,7 @@ class _AuxLegend(pg.LegendItem):
         self.setVisible(bool(channels))
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             y = event.pos().y()
             for i, (_sample, label) in enumerate(self.items):
                 rect = label.mapRectToParent(label.boundingRect())
@@ -191,9 +191,9 @@ class SourcePlotWidget(pg.PlotWidget):
        Stays armed until explicitly disarmed.  Each drag fires immediately.
     """
 
-    spike_add_requested = pyqtSignal(int)
-    spike_delete_requested = pyqtSignal(int)
-    region_selected = pyqtSignal(float, float, float, float)
+    spike_add_requested = Signal(int)
+    spike_delete_requested = Signal(int)
+    region_selected = Signal(float, float, float, float)
 
     def __init__(self, parent=None):
         super().__init__(
@@ -258,14 +258,16 @@ class SourcePlotWidget(pg.PlotWidget):
 
     def _apply_cursor(self):
         if self._sel_arm != SelectionArm.NONE:
-            self.setCursor(Qt.CrossCursor)
+            self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             cursors = {
-                EditMode.VIEW: Qt.ArrowCursor,
-                EditMode.ADD: Qt.CrossCursor,
-                EditMode.DELETE: Qt.PointingHandCursor,
+                EditMode.VIEW: Qt.CursorShape.ArrowCursor,
+                EditMode.ADD: Qt.CursorShape.CrossCursor,
+                EditMode.DELETE: Qt.CursorShape.PointingHandCursor,
             }
-            self.setCursor(cursors.get(self._edit_mode, Qt.ArrowCursor))
+            self.setCursor(
+                cursors.get(self._edit_mode, Qt.CursorShape.ArrowCursor)
+            )
 
     # ------------------------------------------------------------------
     # Data
@@ -296,7 +298,11 @@ class SourcePlotWidget(pg.PlotWidget):
             values=(t0, t1),
             movable=False,
             brush=pg.mkBrush(137, 180, 250, 20),
-            pen=pg.mkPen(color=(137, 180, 250, 60), width=1, style=Qt.DashLine),
+            pen=pg.mkPen(
+                color=(137, 180, 250, 60),
+                width=1,
+                style=Qt.PenStyle.DashLine,
+            ),
         )
         self._plateau_region.setZValue(-10)
         self.addItem(self._plateau_region)
@@ -409,13 +415,13 @@ class SourcePlotWidget(pg.PlotWidget):
     # ------------------------------------------------------------------
 
     def mousePressEvent(self, ev):
-        if ev.button() != Qt.LeftButton:
+        if ev.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(ev)
             return
         if self._sel_arm != SelectionArm.NONE:
             self._rb_origin = ev.pos()
             if self._rb_widget is None:
-                self._rb_widget = QRubberBand(QRubberBand.Rectangle, self)
+                self._rb_widget = QRubberBand(QRubberBand.Shape.Rectangle, self)
             self._rb_widget.setGeometry(QRect(self._rb_origin, QSize()))
             self._rb_widget.show()
             ev.accept()
@@ -437,7 +443,7 @@ class SourcePlotWidget(pg.PlotWidget):
             super().mouseMoveEvent(ev)
 
     def mouseReleaseEvent(self, ev):
-        if ev.button() != Qt.LeftButton or self._rb_origin is None:
+        if ev.button() != Qt.MouseButton.LeftButton or self._rb_origin is None:
             super().mouseReleaseEvent(ev)
             return
 

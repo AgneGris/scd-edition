@@ -55,6 +55,11 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
+from scd.processing.preprocess import (
+    estimate_baseline_noise,
+    replace_bad_channels_with_noise,
+)
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -297,8 +302,6 @@ def decompose_files(
     This is the Qt-free equivalent of DecompositionWorker.run() + _save_results().
     The source_callback is omitted (saves ~15 % wall time per MU on large sessions).
     """
-    from scd_app.core.decomp_worker import DecompositionWorker
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for file_idx, file_path in enumerate(file_paths):
@@ -437,7 +440,7 @@ def decompose_concatenated(
         from os.path import commonprefix
 
         prefix = commonprefix(stems).rstrip("_")
-        suffixes = [s[len(prefix) :].lstrip("_") for s in stems]
+        suffixes = [s[len(prefix):].lstrip("_") for s in stems]
         suffixes = [s for s in suffixes if s]  # drop empty
         if suffixes:
             output_stem = prefix + "_" + "_".join(suffixes) + "_concat"
@@ -566,9 +569,10 @@ class _HeadlessWorker:
                     )
                     rejected = np.zeros(len(channels), dtype=int)
 
+                # Baseline amplitude, also reused by the time-mask fill below
                 good_channels = np.where(rejected == 0)[0]
                 noise_std = (
-                    grid_data[:, good_channels].std().item()
+                    estimate_baseline_noise(grid_data[:, good_channels])
                     if len(good_channels) > 0
                     else 1e-6
                 )
@@ -576,17 +580,13 @@ class _HeadlessWorker:
                 bad_channels = np.where(rejected == 1)[0]
                 if len(bad_channels) > 0:
                     print(f"    Masked channels : {list(bad_channels)}")
-                    gen = torch.Generator()
-                    gen.manual_seed(42)
-                    noise = (
-                        torch.randn(
-                            grid_data.shape[0], len(bad_channels), generator=gen
-                        )
-                        * noise_std
+                    # Delegated to SCD so this matches decomp_worker and
+                    # filter_recalculation._replace_bad_channels exactly.
+                    replace_bad_channels_with_noise(
+                        grid_data, bad_channels.tolist()
                     )
-                    grid_data[:, bad_channels] = noise
                 else:
-                    print(f"    Masked channels : none")
+                    print("    Masked channels : none")
 
                 # Apply time masks: replace all channels in masked segments with noise
                 grid_time_masks = (

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Set
 import re
 import numpy as np
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -27,23 +27,18 @@ from PyQt5.QtWidgets import (
     QApplication,
     QScrollArea,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QEventLoop
+from PySide6.QtCore import Qt, QTimer, Signal, QEventLoop
 
 # Visualization
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.widgets import Button
 from matplotlib.ticker import FuncFormatter
-import matplotlib.pyplot as plt
 
 from scd_app.gui.style.styling import (
     COLORS,
     FONT_SIZES,
-    SPACING,
-    FONT_FAMILY,
     get_section_header_style,
-    get_label_style,
-    get_button_style,
 )
 
 from scd_app.core.config import SessionConfig
@@ -92,7 +87,7 @@ class DecompositionTab(QWidget):
     """Decomposition tab for EMG signal decomposition."""
 
     # Signal emits the decomp file path so Edition tab can load it
-    decomposition_complete = pyqtSignal(Path)
+    decomposition_complete = Signal(Path)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -108,6 +103,10 @@ class DecompositionTab(QWidget):
         self.sampling_rate = 2048
         self.rejected_channels = []
         self.plateau_coords = None
+
+        # Cache of filtered/downsampled display arrays for the channel-rejection view,
+        # so toggling a channel does not re-filter the full-resolution EMG.
+        self._disp_cache = {}
 
         # UI References
         self.grid_selector = None
@@ -177,7 +176,7 @@ class DecompositionTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(2)
 
         left_widget = self._create_left_panel()
@@ -200,8 +199,10 @@ class DecompositionTab(QWidget):
         # ── Scrollable content ────────────────────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -260,7 +261,7 @@ class DecompositionTab(QWidget):
 
         # Separator
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {COLORS['border']};")
         layout.addWidget(sep)
 
@@ -300,7 +301,7 @@ class DecompositionTab(QWidget):
         layout.addWidget(downsample_cb)
 
         sep2 = QFrame()
-        sep2.setFrameShape(QFrame.HLine)
+        sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet(f"color: {COLORS['border']};")
         layout.addWidget(sep2)
 
@@ -334,7 +335,7 @@ class DecompositionTab(QWidget):
 
         self.start_btn = QPushButton("Start Decomposition")
         self.start_btn.setMinimumHeight(45)
-        self.start_btn.setCursor(Qt.PointingHandCursor)
+        self.start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_btn.clicked.connect(self._start_decomposition)
         self.start_btn.setStyleSheet(
             f"""
@@ -397,7 +398,7 @@ class DecompositionTab(QWidget):
         layout.setSpacing(5)
 
         self.file_path_label = QLabel("No file loaded")
-        self.file_path_label.setAlignment(Qt.AlignLeft)
+        self.file_path_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.file_path_label.setStyleSheet(
             f"color: {COLORS['text_dim']}; font-size: 10pt; "
             f"padding: 5px; margin: 5px;"
@@ -417,17 +418,17 @@ class DecompositionTab(QWidget):
 
         # --- Time window bar (shown below header when Manual selection) ---
         _edit_style = (
-            f"QLineEdit {{ background-color: {COLORS.get('background_input','#33334d')};"
+            f"QLineEdit {{ background-color: {COLORS.get('background_input', '#33334d')};"
             f" color: {COLORS['foreground']}; border: 1px solid {COLORS['border']};"
             f" border-radius: 3px; padding: 2px 6px;"
-            f" font-size: {FONT_SIZES.get('small','9pt')}; }}"
+            f" font-size: {FONT_SIZES.get('small', '9pt')}; }}"
         )
         _ts_btn_style = (
-            f"QPushButton {{ background-color: {COLORS.get('background_input','#33334d')};"
+            f"QPushButton {{ background-color: {COLORS.get('background_input', '#33334d')};"
             f" color: {COLORS['foreground']}; border: 1px solid {COLORS['border']};"
             f" border-radius: 4px; padding: 3px 10px;"
-            f" font-size: {FONT_SIZES.get('small','9pt')}; }}"
-            f"QPushButton:hover {{ border-color: {COLORS.get('info','#4a9eff')}; }}"
+            f" font-size: {FONT_SIZES.get('small', '9pt')}; }}"
+            f"QPushButton:hover {{ border-color: {COLORS.get('info', '#4a9eff')}; }}"
         )
         self.time_sel_widget = QWidget()
         ts_bar = QHBoxLayout(self.time_sel_widget)
@@ -436,7 +437,7 @@ class DecompositionTab(QWidget):
 
         lbl_s = QLabel("Start (s):")
         lbl_s.setStyleSheet(
-            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         self.start_time_edit = QLineEdit("0.00")
         self.start_time_edit.setStyleSheet(_edit_style)
@@ -445,7 +446,7 @@ class DecompositionTab(QWidget):
 
         lbl_e = QLabel("End (s):")
         lbl_e.setStyleSheet(
-            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small','9pt')};"
+            f"color: {COLORS['info_light']}; font-size: {FONT_SIZES.get('small', '9pt')};"
         )
         self.end_time_edit = QLineEdit()
         self.end_time_edit.setPlaceholderText("…")
@@ -459,7 +460,7 @@ class DecompositionTab(QWidget):
 
         instr_lbl = QLabel("  Click plot: 1st = start,  2nd = end")
         instr_lbl.setStyleSheet(
-            f"color: {COLORS.get('text_muted','#6c7086')}; font-size: 8pt; font-style: italic;"
+            f"color: {COLORS.get('text_muted', '#6c7086')}; font-size: 8pt; font-style: italic;"
         )
 
         ts_bar.addWidget(lbl_s)
@@ -475,7 +476,9 @@ class DecompositionTab(QWidget):
 
         self.figure = Figure(facecolor=COLORS["background"])
         self.canvas = FigureCanvas(self.figure)
-        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
         self.ax = self.figure.add_subplot(111)
         self.ax.set_facecolor(COLORS["background"])
@@ -581,7 +584,7 @@ class DecompositionTab(QWidget):
     ) -> QWidget:
         page = QWidget()
         layout = QGridLayout(page)
-        layout.setAlignment(Qt.AlignTop)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setSpacing(10)
 
         widgets = {}
@@ -684,6 +687,7 @@ class DecompositionTab(QWidget):
         src = self.param_widgets.get(source_port)
         if src is None:
             return
+        updated_count = 0
         for port_name, dst in self.param_widgets.items():
             if port_name == source_port:
                 continue
@@ -695,6 +699,22 @@ class DecompositionTab(QWidget):
             dst["notch_harmonics"].setChecked(src["notch_harmonics"].isChecked())
             dst["peel_off"].setCurrentText(src["peel_off"].currentText())
             dst["muap_window_ms"].setValue(src["muap_window_ms"].value())
+            updated_count += 1
+
+        if updated_count:
+            grid_label = "grid" if updated_count == 1 else "grids"
+            QMessageBox.information(
+                self,
+                "Configuration Applied to All Grids",
+                f'The decomposition configuration from "{source_port}" was copied '
+                f"to {updated_count} other {grid_label}.",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "No Other Grids",
+                "There are no other grids to update.",
+            )
 
     # ------------------------------------------------------------------ #
     #  Aux / force channel helpers                                        #
@@ -714,7 +734,7 @@ class DecompositionTab(QWidget):
         """Apply bandpass and notch filters to a (samples, channels) float array.
         Returns filtered array of the same shape. Falls back to raw on error."""
         try:
-            from scipy.signal import butter, sosfiltfilt, iirnotch, filtfilt
+            from scipy.signal import butter, sosfiltfilt, iirnotch, tf2sos
 
             nyq = fs / 2.0
             highpass = float(params.get("highpass_hz", 10))
@@ -722,28 +742,35 @@ class DecompositionTab(QWidget):
             notch_str = str(params.get("notch_filter", "None"))
             notch_harmonics = bool(params.get("notch_harmonics", False))
 
+            # Build every section first, then run ONE zero-phase pass.  Filtering each
+            # section separately meant a float64/float32 round-trip of the whole array per
+            # section — with 50 Hz harmonics up to Nyquist that is ~100 passes and tens of
+            # GB of copies, which made the channel-rejection view unusably slow.
+            sections = []
+
             hp = max(highpass, 1.0) / nyq
             lp = min(lowpass, nyq * 0.999) / nyq
             if 0 < hp < lp < 1:
-                sos = butter(4, [hp, lp], btype="band", output="sos")
-                data = sosfiltfilt(sos, data.astype(np.float64), axis=0).astype(
-                    np.float32
-                )
+                sections.append(butter(4, [hp, lp], btype="band", output="sos"))
 
             if notch_str not in ("None", ""):
                 notch_freq = float(notch_str)
-                freqs = []
+                # Harmonics above the low-pass cutoff are already removed by the bandpass,
+                # so notching them is pure cost for no effect.
+                notch_limit = min(lowpass, nyq * 0.999)
                 f = notch_freq
-                while f < nyq:
-                    freqs.append(f)
+                while f < notch_limit:
+                    b, a = iirnotch(f, 30.0, fs)
+                    sections.append(tf2sos(b, a))
                     if not notch_harmonics:
                         break
                     f += notch_freq
-                for freq in freqs:
-                    b, a = iirnotch(freq, 30.0, fs)
-                    data = filtfilt(b, a, data.astype(np.float64), axis=0).astype(
-                        np.float32
-                    )
+
+            if sections:
+                sos = np.vstack(sections)
+                data = sosfiltfilt(sos, data.astype(np.float64), axis=0).astype(
+                    np.float32
+                )
         except Exception as e:
             print(f"Warning: filter failed, showing raw: {e}")
         return data
@@ -755,6 +782,10 @@ class DecompositionTab(QWidget):
 
         self._cleanup_matplotlib_widgets()
         self.figure.set_facecolor(COLORS["background"])
+
+        # Display-data cache for draw_grid — keyed per grid + filter/downsample settings.
+        # Reset here because self.emg_data belongs to the file we are about to inspect.
+        self._disp_cache = {}
 
         # Build grid list
         grid_list = list(self.grid_configs.items())
@@ -774,19 +805,32 @@ class DecompositionTab(QWidget):
         _aux_cfgs = getattr(self.config, "aux_channels", []) if self.config else []
         _stem = self.emg_path.stem if self.emg_path else ""
         _aux_to_show = _filter_aux_for_task(_aux_cfgs, _stem)
+        _aux_stream_data = None
+        if any(a.get("source") == "aux_file" for a in _aux_to_show):
+            try:
+                from scd_app.io.data_loader import load_field
+
+                _aux_stream_data = load_field(
+                    self.emg_path, self.config.data_layout, "aux"
+                ).numpy()
+            except Exception as exc:
+                print(f"Warning: Could not load auxiliary preview: {exc}")
 
         import time
 
         nav = {"current": 0, "show_force": bool(_aux_to_show)}
 
-        def draw_grid(grid_idx, restore_view=None, fixed_separation=None):
+        def draw_grid(grid_idx, restore_view=None, prev_separation=None):
             """Draw a single grid's channels.
 
             Args:
-                restore_view:      optional ((x0, x1), (y0, y1)) — preserves zoom/pan.
-                fixed_separation:  optional float — reuse an existing separation value
-                                   so the channel geometry doesn't shift when a channel
-                                   is toggled and the active-channel std changes.
+                restore_view:     optional ((x0, x1), (y0, y1)) — preserves zoom/pan.
+                prev_separation:  optional float — the separation the restored view was
+                                  built with.  Row positions (ch * separation) and the
+                                  y-limits are both proportional to `separation`, so
+                                  scaling the restored y-limits by (new / prev) leaves
+                                  every channel at the same place on screen while the
+                                  traces renormalise to the new set of good channels.
             """
             self.figure.clf()
 
@@ -831,7 +875,8 @@ class DecompositionTab(QWidget):
             self.figure.text(
                 0.5,
                 0.08,
-                "Click = Toggle channel  |  Scroll = Zoom X  |  Shift+Scroll = Pan  |  Ctrl+Scroll = Zoom XY  |  Drag = Pan ",
+                "Click = Toggle channel  |  Scroll = Zoom X  |  "
+                "Shift+Scroll = Pan  |  Ctrl+Scroll = Zoom XY  |  Drag = Pan ",
                 ha="center",
                 va="center",
                 fontsize=10,
@@ -839,35 +884,66 @@ class DecompositionTab(QWidget):
                 color=COLORS["info"],
             )
 
-            raw_data = self.emg_data[:, channels].numpy()
-
-            # Apply the per-grid filters (bandpass + notch) for display
-            raw_data = self._apply_emg_filters(
-                raw_data, self.sampling_rate, grid_params
-            )
-
-            # Downsample for display option (if enabled, does not affect actual decomposition data)
+            # Slicing + filtering the full-resolution EMG costs far more than the plotting
+            # itself, and toggling a channel does not change the signal — only which lines
+            # are drawn.  So cache the filtered/downsampled display array and reuse it
+            # across redraws.  Cached per (grid, filter settings, downsample geometry);
+            # the cache is cleared whenever a new file is loaded.
             use_downsample = self.global_widgets["downsample_display"].isChecked()
-            if use_downsample:
-                canvas_width_px = self.canvas.get_width_height()[0] or 1000
-                disp_data, step = self._downsample_for_display(
-                    raw_data, canvas_width_px
+            canvas_width_px = self.canvas.get_width_height()[0] or 1000
+            cache_key = (
+                grid_idx,
+                hp,
+                lp,
+                notch,
+                grid_params.get("notch_harmonics"),
+                use_downsample,
+                canvas_width_px if use_downsample else None,
+            )
+            cached = self._disp_cache.get(cache_key)
+            if cached is None:
+                raw_data = self.emg_data[:, channels].numpy()
+
+                # Apply the per-grid filters (bandpass + notch) for display
+                raw_data = self._apply_emg_filters(
+                    raw_data, self.sampling_rate, grid_params
                 )
+
+                # Downsample for display (does not affect the decomposition data)
+                if use_downsample:
+                    disp_data, step = self._downsample_for_display(
+                        raw_data, canvas_width_px
+                    )
+                else:
+                    disp_data = raw_data
+                    step = 1
+                # Per-channel moments, so the pooled std over whatever subset of channels
+                # is currently active can be recomputed in O(n_channels) on every toggle
+                # instead of re-reducing the whole display array.
+                d64 = disp_data.astype(np.float64, copy=False)
+                stats = (
+                    float(disp_data.shape[0]),  # samples per channel
+                    d64.sum(axis=0),  # Σx   per channel
+                    np.einsum("ij,ij->j", d64, d64),  # Σx²  per channel
+                )
+                self._disp_cache[cache_key] = (disp_data, step, stats)
             else:
-                disp_data = raw_data
-                step = 1
+                disp_data, step, stats = cached
             max_len = disp_data.shape[0]
 
-            # Normalise separation using only active (non-rejected) channels.
-            if fixed_separation is not None:
-                separation = fixed_separation
+            # Renormalise the separation using ONLY the currently active channels, so
+            # rejecting a noisy channel immediately rescales the remaining traces.
+            active_idx = np.where(mask == 0)[0]
+            sel = active_idx if len(active_idx) > 0 else np.arange(n_channels)
+            n_per_ch, sum_x, sum_x2 = stats
+            n_tot = n_per_ch * len(sel)
+            if n_tot > 0:
+                mean = sum_x[sel].sum() / n_tot
+                var = sum_x2[sel].sum() / n_tot - mean**2
+                active_std = float(np.sqrt(max(var, 0.0)))
             else:
-                active_idx = np.where(mask == 0)[0]
-                ref_data = (
-                    disp_data[:, active_idx] if len(active_idx) > 0 else disp_data
-                )
-                active_std = np.std(ref_data)
-                separation = active_std * 15 if active_std > 0 else 1.0
+                active_std = 0.0
+            separation = active_std * 15 if active_std > 0 else 1.0
 
             for ch in range(n_channels):
                 is_rejected = mask[ch] == 1
@@ -908,10 +984,17 @@ class DecompositionTab(QWidget):
             ax.set_ylim(-separation, total_height)
             ax.margins(0)
 
-            # Restore zoom/pan if the user was already viewing a sub-region
+            # Restore zoom/pan if the user was already viewing a sub-region.  Scale the
+            # y-limits by the change in separation: row y-positions are ch * separation,
+            # so the same factor keeps every channel at an identical screen position while
+            # the traces themselves renormalise.
             if restore_view is not None:
                 ax.set_xlim(restore_view[0])
-                ax.set_ylim(restore_view[1])
+                y0, y1 = restore_view[1]
+                if prev_separation and prev_separation > 0:
+                    scale = separation / prev_separation
+                    y0, y1 = y0 * scale, y1 * scale
+                ax.set_ylim(y0, y1)
 
             # Hide everything except the bottom time axis
             ax.set_yticks([])
@@ -942,10 +1025,18 @@ class DecompositionTab(QWidget):
                 for a in _aux_to_show:
                     s = int(a.get("start_chan", 0))
                     e = int(a.get("end_chan", s + 1))
-                    n_total_ch = self.emg_data.shape[1]
+                    if a.get("source") == "aux_file":
+                        source_data = _aux_stream_data
+                    elif a.get("source", "signal") == "signal":
+                        source_data = self.emg_data.numpy()
+                    else:
+                        continue
+                    if source_data is None:
+                        continue
+                    n_total_ch = source_data.shape[1]
                     if s >= e or e > n_total_ch:
                         continue
-                    raw = self.emg_data[:, s:e].numpy().mean(axis=1)  # (samples,)
+                    raw = source_data[:, s:e].mean(axis=1)  # (samples,)
                     if step > 1:
                         raw = raw[::step]
                     sig = raw - raw.mean()  # remove DC offset
@@ -964,13 +1055,14 @@ class DecompositionTab(QWidget):
                         label=label,
                     )
                     first_label = False
-                ax.legend(
-                    loc="upper right",
-                    fontsize=7,
-                    facecolor=COLORS["background_light"],
-                    labelcolor=force_color,
-                    framealpha=0.7,
-                )
+                if not first_label:
+                    ax.legend(
+                        loc="upper right",
+                        fontsize=7,
+                        facecolor=COLORS["background_light"],
+                        labelcolor=force_color,
+                        framealpha=0.7,
+                    )
 
             # --- Navigation buttons ---
             prev_ax = self.figure.add_axes([0.05, 0.01, 0.12, 0.05])
@@ -1054,7 +1146,7 @@ class DecompositionTab(QWidget):
 
             # Rejected count for this grid
             n_rej = np.sum(mask)
-            rej_text = self.figure.text(
+            self.figure.text(
                 0.285,
                 0.03,
                 (f"{n_rej} ch. rejected" if n_rej > 0 else ""),
@@ -1148,7 +1240,6 @@ class DecompositionTab(QWidget):
 
                 if state["press_event"] is None:
                     return
-                press = state["press_event"]
                 state["press_event"] = None
 
                 # Guard: ignore click if it arrived shortly after a scroll
@@ -1171,12 +1262,13 @@ class DecompositionTab(QWidget):
                     return
 
                 mask[closest_ch] = 1 - mask[closest_ch]
-                # Preserve zoom/pan and channel geometry across the redraw
+                # Renormalise to the new set of good channels, but pass the old separation
+                # so the view is rescaled with it and the rows stay put on screen.
                 saved_view = (ax.get_xlim(), ax.get_ylim())
                 saved_sep = separation
                 disconnect()
                 draw_grid(
-                    nav["current"], restore_view=saved_view, fixed_separation=saved_sep
+                    nav["current"], restore_view=saved_view, prev_separation=saved_sep
                 )
 
             def on_scroll(event):
@@ -1185,8 +1277,10 @@ class DecompositionTab(QWidget):
                 state["last_scroll_time"] = time.time()
 
                 modifiers = QApplication.keyboardModifiers()
-                ctrl_held = bool(modifiers & Qt.ControlModifier)
-                shift_held = bool(modifiers & Qt.ShiftModifier)
+                ctrl_held = bool(
+                    modifiers & Qt.KeyboardModifier.ControlModifier
+                )
+                shift_held = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
                 zoom_scale = 0.85 if event.button == "up" else 1.18
 
@@ -1371,7 +1465,7 @@ class DecompositionTab(QWidget):
 
         event_loop = QEventLoop()
         draw_grid(0)
-        event_loop.exec_()
+        event_loop.exec()
 
     def _cleanup_matplotlib_widgets(self):
         """Disconnect all active matplotlib event handlers before redrawing the canvas."""
@@ -1600,7 +1694,9 @@ class DecompositionTab(QWidget):
         self._update_confirm_btn_visibility()
 
     def _start_decomposition(self):
-        if not self.config or not self.emg_paths or self.emg_data is None:
+        # emg_data is not required here: the phase-1 path below loads each file itself,
+        # and the later phases only run once a file has been loaded.
+        if not self.config or not self.emg_paths:
             QMessageBox.warning(self, "Error", "No session loaded.")
             return
 
@@ -1656,10 +1752,25 @@ class DecompositionTab(QWidget):
         else:
             self._prepare_current_file()
 
-    def _prepare_current_file(self):
-        """Load file, do channel rejection + RMS, then wait for time window (per file)."""
+    def _load_emg_full(self, file_path: Path):
+        """Load a file's EMG with no channel filter applied.
+
+        The filter is removed so that force/aux "signal" channels (which may sit
+        beyond the EMG grid range) are included in the array and available for the
+        worker to save.
+        """
+        import copy
+
         from scd_app.io.data_loader import load_field
 
+        layout = getattr(self.config, "data_layout", None)
+        layout_full = copy.deepcopy(layout) if layout else layout
+        if layout_full and "fields" in layout_full and "emg" in layout_full["fields"]:
+            layout_full["fields"]["emg"].pop("channels", None)
+        return load_field(file_path, layout_full, "emg")
+
+    def _prepare_current_file(self):
+        """Load file, do channel rejection + RMS, then wait for time window (per file)."""
         if self._file_idx >= len(self._file_queue):
             self.grid_indicator_label.setText("All files complete")
             self._reset_ui_state()
@@ -1673,22 +1784,8 @@ class DecompositionTab(QWidget):
             f"File {self._file_idx + 1}/{n_total}: {file_path.name}"
         )
 
-        # Load this file's EMG data — remove any channel filter so that
-        # force/aux "signal" channels (which may sit beyond the EMG grid range)
-        # are included in the array and available for the worker to save.
         try:
-            import copy
-
-            layout = getattr(self.config, "data_layout", None)
-            layout_full = copy.deepcopy(layout) if layout else layout
-            if (
-                layout_full
-                and "fields" in layout_full
-                and "emg" in layout_full["fields"]
-            ):
-                layout_full["fields"]["emg"].pop("channels", None)
-            emg = load_field(file_path, layout_full, "emg")
-            self.emg_data = emg
+            self.emg_data = self._load_emg_full(file_path)
             self.emg_path = file_path
         except Exception as e:
             QMessageBox.critical(
@@ -1765,6 +1862,14 @@ class DecompositionTab(QWidget):
         save_path = self._output_dir / f"{file_path.stem}_decomp_output.pkl"
 
         aux_configs = getattr(self.config, "aux_channels", [])
+
+        # Retire the previous worker before rebinding. decomposition_finished is emitted
+        # from inside run(), so the thread can still be alive here, and dropping the last
+        # reference to a running QThread aborts the process. It is at the end of run(),
+        # so this returns immediately.
+        if self.worker is not None:
+            self.worker.wait()
+
         self.worker = DecompositionWorker(
             self.emg_data,
             self.grid_configs,
@@ -1774,9 +1879,10 @@ class DecompositionTab(QWidget):
             save_path,
             aux_configs=aux_configs,
             emg_file_path=file_path,
+            data_layout=getattr(self.config, "data_layout", None),
         )
         self.worker.progress.connect(self._update_grid_indicator)
-        self.worker.finished.connect(self._on_file_decomposition_finished)
+        self.worker.decomposition_finished.connect(self._on_file_decomposition_finished)
         self.worker.stopped.connect(self._on_worker_stopped)
         self.worker.error.connect(self._on_decomposition_error)
         self.worker.source_found.connect(self._on_source_found)
@@ -1789,8 +1895,6 @@ class DecompositionTab(QWidget):
     def _batch_setup_next_file(self):
         """Load one file and collect its manual channel rejection + time window.
         Called repeatedly until all files are set up, then triggers decomposition."""
-        from scd_app.io.data_loader import load_field
-
         if self._setup_idx >= len(self._file_queue):
             # All files set up — start decomposing
             n = len(self._file_setups)
@@ -1810,18 +1914,7 @@ class DecompositionTab(QWidget):
 
         # Load EMG
         try:
-            import copy
-
-            layout = getattr(self.config, "data_layout", None)
-            layout_full = copy.deepcopy(layout) if layout else layout
-            if (
-                layout_full
-                and "fields" in layout_full
-                and "emg" in layout_full["fields"]
-            ):
-                layout_full["fields"]["emg"].pop("channels", None)
-            emg = load_field(file_path, layout_full, "emg")
-            self.emg_data = emg
+            self.emg_data = self._load_emg_full(file_path)
             self.emg_path = file_path
         except Exception as e:
             QMessageBox.critical(
@@ -1854,10 +1947,12 @@ class DecompositionTab(QWidget):
         self._show_rms_plot()
 
         if self._use_full_file:
+            # Only the setup decisions are kept — the EMG itself is reloaded at
+            # decomposition time. Holding every file's array here would put the whole
+            # batch's raw data in RAM at once.
             self._file_setups.append(
                 {
                     "file_path": file_path,
-                    "emg_data": self.emg_data,
                     "rejected_channels": rejected_snapshot,
                     "plateau_coords": np.array([0, self.emg_data.shape[0]]),
                 }
@@ -1896,7 +1991,6 @@ class DecompositionTab(QWidget):
         self._file_setups.append(
             {
                 "file_path": file_path,
-                "emg_data": self.emg_data,
                 "rejected_channels": self._batch_setup_rejected_snapshot,
                 "plateau_coords": plateau,
             }
@@ -1921,16 +2015,30 @@ class DecompositionTab(QWidget):
             return
 
         setup = self._file_setups[self._file_idx]
-        self.emg_data = setup["emg_data"]
-        self.emg_path = setup["file_path"]
-        self.rejected_channels = setup["rejected_channels"]
-        self.plateau_coords = setup["plateau_coords"]
+        file_path = setup["file_path"]
 
         n_total = len(self._file_setups)
         self.grid_indicator_label.setText(
-            f"File {self._file_idx + 1}/{n_total}: {self.emg_path.name}"
+            f"File {self._file_idx + 1}/{n_total}: {file_path.name}"
         )
-        self.file_path_label.setText(f"\U0001f4c4 {self.emg_path.name}")
+        self.file_path_label.setText(f"\U0001f4c4 {file_path.name}")
+        QApplication.processEvents()  # show the label before the (blocking) load
+
+        # Drop the previous file's array before loading the next one
+        self.emg_data = None
+        try:
+            self.emg_data = self._load_emg_full(file_path)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Load Error", f"Failed to load {file_path.name}:\n{e}"
+            )
+            self._file_idx += 1
+            self._batch_decompose_next_file()
+            return
+
+        self.emg_path = file_path
+        self.rejected_channels = setup["rejected_channels"]
+        self.plateau_coords = setup["plateau_coords"]
 
         self._run_current_file()
 
@@ -1938,6 +2046,12 @@ class DecompositionTab(QWidget):
         """One file done — move to next."""
         decomp_path = Path(results.get("path"))
         self._last_decomp_path = decomp_path
+
+        # Let the thread exit and release it — it holds this file's EMG array, which
+        # would otherwise stay in RAM alongside the next file's.
+        if self.worker is not None:
+            self.worker.wait()
+            self.worker = None
 
         self._file_idx += 1
         if getattr(self, "_file_setups", None):
@@ -1973,7 +2087,7 @@ class DecompositionTab(QWidget):
         outer.setSpacing(16)
 
         title = QLabel("<b>Stop Decomposition?</b>")
-        title.setAlignment(Qt.AlignCenter)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 12pt;")
         outer.addWidget(title)
 
@@ -1983,7 +2097,7 @@ class DecompositionTab(QWidget):
             else "  \u2014  no grids completed yet."
         )
         subtitle = QLabel(f"Grids completed: <b>{n_complete} / {total}</b>{disc_note}")
-        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet(
             f"color: {COLORS.get('text_muted', '#888')}; font-size: 10pt;"
         )
@@ -2036,7 +2150,7 @@ class DecompositionTab(QWidget):
         stop_btn.clicked.connect(_pick_stop)
         cancel_btn.clicked.connect(_pick_cancel)
 
-        dlg.exec_()
+        dlg.exec()
 
         if choice[0] == "wait":
             self._show_waiting_dialog()
@@ -2052,7 +2166,9 @@ class DecompositionTab(QWidget):
         Closes automatically when the worker emits stopped()."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Waiting for current grid…")
-        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowCloseButtonHint)
+        dlg.setWindowFlags(
+            dlg.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
+        )
         dlg.setMinimumWidth(420)
 
         layout = QVBoxLayout(dlg)
@@ -2060,7 +2176,7 @@ class DecompositionTab(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
 
         title_lbl = QLabel("<b>Finishing current grid…</b>")
-        title_lbl.setAlignment(Qt.AlignCenter)
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_lbl.setStyleSheet("font-size: 13pt;")
         layout.addWidget(title_lbl)
 
@@ -2068,13 +2184,13 @@ class DecompositionTab(QWidget):
             "The current grid will be allowed to finish normally.<br>"
             "All previously completed grids will be saved."
         )
-        info_lbl.setAlignment(Qt.AlignCenter)
+        info_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_lbl.setWordWrap(True)
         info_lbl.setStyleSheet(f"color: {COLORS.get('text_muted', '#888')};")
         layout.addWidget(info_lbl)
 
         iter_lbl = QLabel("Current iteration: <b>0</b>")
-        iter_lbl.setAlignment(Qt.AlignCenter)
+        iter_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         iter_lbl.setStyleSheet(
             f"color: {COLORS.get('info', '#4a9eff')}; font-size: 11pt;"
         )
@@ -2116,7 +2232,7 @@ class DecompositionTab(QWidget):
         # Tell the worker to stop after this grid completes
         self.worker.stop()
 
-        dlg.exec_()
+        dlg.exec()
 
     def _on_worker_stopped(self, _info: dict):
         """Called when the worker emits stopped() after finishing the current grid.
