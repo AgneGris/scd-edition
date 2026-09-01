@@ -213,6 +213,12 @@ class GridCard(QFrame):
                 "spacing_mm": 5.0,
                 "n_channels": 32,
             },
+            "Grid (SIM10X32)": {
+                "rows": 10,
+                "cols": 32,
+                "spacing_mm": 4.0,
+                "n_channels": 320,
+            },
         },
         "Intramuscular": {
             "Thin-film (40ch)": {

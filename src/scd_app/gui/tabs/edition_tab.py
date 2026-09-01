@@ -552,6 +552,12 @@ GRID_POSITIONS_8x4 = {
 }
 
 
+# SIM10X32: simulated 10 rows x 32 cols = 320 channels.
+# Row-major channel order (ch = row * 32 + col), matching the ch_map dataset in
+# the simulation HDF5 files, so port-local indices are already grid keys.
+GRID_POSITIONS_SIM10x32 = {i: (i // 32, i % 32) for i in range(320)}
+
+
 ELECTRODE_GRIDS = {
     "GR04MM1305": {
         "grid_shape": (13, 5),
@@ -642,6 +648,13 @@ ELECTRODE_GRIDS = {
         "n_channels": 32,
         "muap_mapping": {i: i + 1 for i in range(32)},
         "positions": GRID_POSITIONS_8x4,
+    },
+    "SIM10X32": {
+        "grid_shape": (10, 32),
+        "ied_mm": 4,
+        "n_channels": 320,
+        "muap_mapping": {i: i for i in range(320)},
+        "positions": GRID_POSITIONS_SIM10x32,
     },
 }
 

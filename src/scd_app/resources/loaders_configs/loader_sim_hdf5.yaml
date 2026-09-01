@@ -1,0 +1,34 @@
+# Loader — Simulated sEMG grid (Z:/projects/thinfilmdata/live/simulations/static)
+#
+# File structure (semg_*_prepro_*mvc_*dB_bs*.hdf5), fs = 2048 Hz, 20 s:
+#   emg            (40960, 320)  float64  → samples x channels, already preprocessed
+#   noise          (40960, 320)  float64  → noise-only realisation of the same signal
+#   force_profile  (40960,)      float64  → target force (constant %MVC per file)
+#   angle_profile  (40960,)      float64
+#   rms            (40960,)      float64  → signal envelope
+#   timestamps     (40960,)      float64  → seconds, 0 .. 20
+#   spikes         (40960, 100)  int64    → ground-truth spike trains (binary)
+#   spikes_muscles (100,)        bytes    → muscle label per simulated MU
+#   ch_map         (10, 32)      int64    → ch_map[r, c] = r * 32 + c
+#   fs             scalar        int64    → 2048
+#
+# Channel order is row-major over the 10 x 32 map: channels 0-31 are grid row 0,
+# 32-63 row 1, and so on.
+#
+# Other fields (noise, rms, angle_profile, spikes) can be pulled in the GUI with an
+# AUX channel set to "Data file field" and the dataset name typed as its field path.
+
+name: "Simulated grid (.hdf5)"
+format: h5
+
+fields:
+  emg:
+    path: "emg"
+    channels: null                 # null = all 320; channel selection is done in the GUI
+    orientation: samples_first     # file already stores (samples, channels)
+    expected_channels: null        # set to 320 to hard-fail on an unexpected file
+  force:
+    path: "force_profile"          # constant target level, e.g. 10.0 for the 10mvc files
+    channels: null
+  timestamps:
+    path: "timestamps"
