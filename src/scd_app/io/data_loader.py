@@ -4,7 +4,7 @@ Reads any EMG file given a YAML layout descriptor.
 """
 
 from pathlib import Path
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List, Optional, Union
 import yaml
 import numpy as np
 import torch
@@ -74,6 +74,71 @@ def load_field(
             )
 
     return torch.from_numpy(raw).to(dtype=torch.float32)
+
+
+# File extensions each layout format can describe. Used when picking a preset
+# for a file: an HDF5-backed format opens a .hdf5 file whatever its fields are
+# called, so the format has to be ruled in by extension before its dataset
+# paths are probed.
+FORMAT_EXTENSIONS: Dict[str, tuple] = {
+    "h5": (".h5", ".hdf5"),
+    "mat": (".mat",),
+    "npy": (".npy",),
+    "otb": (".otb", ".otb+"),
+    "otb4": (".otb4",),
+}
+
+
+def format_matches_extension(fmt: str, ext: str) -> bool:
+    """True when a layout format can describe a file with this extension."""
+    known = FORMAT_EXTENSIONS.get(fmt)
+    # An unrecognised format is not evidence of a mismatch — leave it in play.
+    return True if known is None else ext.lower() in known
+
+
+def can_read_field(
+    file_path: Union[str, Path],
+    layout: Dict[str, Any],
+    field: str = "emg",
+) -> Optional[bool]:
+    """
+    Check whether a layout's field resolves in a file, without reading the data.
+
+    Several presets can describe the same extension (a generic ".hdf5" and a
+    study-specific one, say), so callers need to tell them apart before loading
+    hundreds of megabytes with the wrong dataset path.
+
+    Returns
+    -------
+    True / False
+        The field was found / not found in the file.
+    None
+        The format offers no cheap probe (scipy .mat, OTB, .npy). "Unknown" is
+        not "unreadable" — the caller should fall back to its own heuristic.
+    """
+    file_path = Path(file_path)
+    field_spec = layout.get("fields", {}).get(field)
+    if field_spec is None:
+        return False
+
+    fmt = layout.get("format")
+    if fmt not in ("h5", "mat"):
+        return None
+
+    keys = [field_spec.get("path")] + list(field_spec.get("fallback_keys", []))
+    keys = [k for k in keys if k]
+    if not keys:
+        return False
+
+    import h5py
+
+    try:
+        with h5py.File(file_path, "r") as f:
+            return any(key in f and isinstance(f[key], h5py.Dataset) for key in keys)
+    except OSError:
+        # Not an HDF5 container. A "mat" layout then points at a v5/v7 file,
+        # which scipy reads and h5py cannot probe — unknown, not unreadable.
+        return None if fmt == "mat" else False
 
 
 def load_metadata(

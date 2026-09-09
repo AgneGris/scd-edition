@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-from scd_app.io.data_loader import load_layout, load_field, load_metadata
+from scd_app.io.data_loader import (
+    load_layout,
+    load_field,
+    load_metadata,
+    can_read_field,
+    format_matches_extension,
+)
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -765,6 +771,9 @@ class ConfigTab(QWidget):
         self.emg_path: Optional[Path] = None
         self.emg_paths: List[Path] = []  # all selected files for batch
         self.max_channels: int = 256
+        # False whenever max_channels is a placeholder rather than a count read
+        # from the file — a wrong loader must not masquerade as a small file.
+        self._channel_count_known: bool = False
         self.file_metadata: dict = {}
         self._metadata_key = None
         self._metadata_error = None
@@ -915,9 +924,7 @@ class ConfigTab(QWidget):
             self._auto_select_loader(self.emg_path)
             self._refresh_file_metadata()
 
-            self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
-            self.allocation_bar.set_max_channels(self.max_channels)
             self._update_summary()
 
             if not self.grid_cards:
@@ -1156,12 +1163,50 @@ class ConfigTab(QWidget):
                     print(f"Warning: Could not load preset {yaml_file.name}: {e}")
 
     def _auto_select_loader(self, file_path: Path):
-        """Select the loader whose name matches the file extension, if available."""
+        """
+        Select a loader for the file, preferring one that can actually read it.
+
+        Matching the file extension against the preset name is not enough on its
+        own: several presets can share an extension (a generic ".hdf5" and a
+        study-specific one, say), so a name match alone would silently replace a
+        working loader with one whose EMG dataset path is absent from the file.
+        That failure surfaces much later as a bogus channel-count error.
+        """
         ext = file_path.suffix.lower()
-        for i in range(self.loader_combo.count()):
-            if self.loader_combo.itemText(i).lower() == ext:
-                self.loader_combo.setCurrentIndex(i)
+
+        def usable(layout) -> bool:
+            """The layout is for this kind of file *and* resolves its EMG field."""
+            return bool(
+                format_matches_extension(layout.get("format", ""), ext)
+                and can_read_field(file_path, layout, "emg")
+            )
+
+        current = self._get_current_layout()
+        if current is not None and usable(current):
+            return
+
+        names = [
+            self.loader_combo.itemText(i) for i in range(self.loader_combo.count())
+        ]
+        # Extension matches get first refusal; sorted() is stable, so the rest
+        # keep their preset order.
+        for name in sorted(names, key=lambda n: n.lower() != ext):
+            layout = self._loader_layouts.get(name)
+            if layout is not None and usable(layout):
+                self._select_loader(name)
                 return
+
+        # No preset could be confirmed (or the format has no cheap probe):
+        # fall back to the plain extension match.
+        for name in names:
+            if name.lower() == ext:
+                self._select_loader(name)
+                return
+
+    def _select_loader(self, name: str):
+        idx = self.loader_combo.findText(name)
+        if idx >= 0:
+            self.loader_combo.setCurrentIndex(idx)
 
     def _on_loader_changed(self):
         layout = self._get_current_layout()
@@ -1223,31 +1268,21 @@ class ConfigTab(QWidget):
             self._auto_select_loader(self.emg_path)
             self._refresh_file_metadata()
 
-            self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
-
-            self.allocation_bar.set_max_channels(self.max_channels)
             self._update_summary()
 
             if not self.grid_cards:
                 self._add_grid()
 
-    def _estimate_channels_from_file(self, file_path: Path) -> int:
-        if self.file_metadata.get("emg_channel_count") is not None:
-            return int(self.file_metadata["emg_channel_count"])
-        layout = self._get_layout_with_overrides()
-        if layout is None:
-            return 256
-        try:
-            layout_full = copy.deepcopy(layout)
-            layout_full["fields"]["emg"].pop("channels", None)
-            emg = load_field(file_path, layout_full, "emg")
-            return emg.shape[1]
-        except Exception as e:
-            print(f"Warning: Could not determine channel count: {e}")
-            return 256
-
     def _update_file_info(self):
+        """
+        Read the channel count from the selected file and report it.
+
+        Sole owner of max_channels: when the file cannot be read, the count stays
+        unknown rather than falling back to a placeholder, so the configuration
+        is reported as unreadable instead of as too small.
+        """
+        self._channel_count_known = False
         layout = self._get_layout_with_overrides()
         if layout is None or self.emg_path is None:
             return
@@ -1261,9 +1296,8 @@ class ConfigTab(QWidget):
                 duration_sec = n_samples / fs
                 n_grids = len(self.file_metadata.get("grids", []))
                 n_aux = int(self.file_metadata.get("aux_channel_count", 0))
-                self.max_channels = n_channels
-                self.allocation_bar.set_max_channels(n_channels)
-                self.file_info_label.setText(
+                self._set_channel_count(n_channels)
+                self._set_file_info(
                     f"Loaded: {self.emg_path.name} | "
                     f"Shape: {n_samples} samples × {n_channels} channels | "
                     f"{n_grids} grid(s), {n_aux} aux | "
@@ -1276,18 +1310,29 @@ class ConfigTab(QWidget):
             n_samples, n_channels = emg.shape
             fs = int(self.fsamp_edit.text() or 2048)
             duration_sec = n_samples / fs
-            self.max_channels = n_channels
-            self.allocation_bar.set_max_channels(n_channels)
-            self.file_info_label.setText(
+            self._set_channel_count(n_channels)
+            self._set_file_info(
                 f"Loaded: {self.emg_path.name} | "
                 f"Shape: {n_samples} samples × {n_channels} channels | "
                 f"Duration: {duration_sec:.1f}s @ {fs} Hz"
             )
         except Exception as e:
-            self.file_info_label.setText(f"⚠ Load failed: {e}")
-            self.file_info_label.setStyleSheet(
-                get_label_style(size="small", color="error")
+            self._set_file_info(
+                f"⚠ Load failed with the '{self.loader_combo.currentText()}' "
+                f"loader: {e}",
+                error=True,
             )
+
+    def _set_channel_count(self, n_channels: int):
+        self.max_channels = n_channels
+        self._channel_count_known = True
+        self.allocation_bar.set_max_channels(n_channels)
+
+    def _set_file_info(self, text: str, error: bool = False):
+        self.file_info_label.setText(text)
+        self.file_info_label.setStyleSheet(
+            get_label_style(size="small", color="error" if error else "text_dim")
+        )
 
     def _refresh_file_metadata(self):
         """Load cheap archive metadata and apply its sampling frequency."""
@@ -1483,6 +1528,17 @@ class ConfigTab(QWidget):
         for card in self.aux_cards:
             card.set_validation_status(True)
 
+        # Without a channel count read from the file there is nothing to check
+        # ranges against; say so rather than measuring them against a placeholder.
+        if not self._channel_count_known:
+            warnings.append(
+                f"Channel count unknown: "
+                f"{self.emg_path.name if self.emg_path else 'the selected file'} "
+                f"could not be read with the "
+                f"'{self.loader_combo.currentText()}' loader — check the data "
+                f"format preset and the EMG dataset path"
+            )
+
         # Collect all channel ranges (grids + signal-source aux)
         ranges = []
 
@@ -1499,7 +1555,7 @@ class ConfigTab(QWidget):
                 )
                 card.set_validation_status(False, msg)
 
-            if end > self.max_channels:
+            if self._channel_count_known and end > self.max_channels:
                 msg = "Exceeds available channels"
                 warnings.append(
                     f"{name}: channels exceed file ({end} > {self.max_channels})"
@@ -1555,7 +1611,7 @@ class ConfigTab(QWidget):
             start, end = card.get_channel_range()
             name = card.get_data()["name"]
 
-            if end > self.max_channels:
+            if self._channel_count_known and end > self.max_channels:
                 msg = "Exceeds available channels"
                 warnings.append(
                     f"{name}: channels exceed file ({end} > {self.max_channels})"
@@ -1668,9 +1724,7 @@ class ConfigTab(QWidget):
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(file_path)
             self._refresh_file_metadata()
-            self.max_channels = self._estimate_channels_from_file(self.emg_path)
             self._update_file_info()
-            self.allocation_bar.set_max_channels(self.max_channels)
 
         # Clear existing
         for card in self.grid_cards + self.aux_cards:
