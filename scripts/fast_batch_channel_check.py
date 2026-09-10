@@ -222,7 +222,9 @@ def _run_channel_check_gui(
         # Count how many channels were pre-inherited
         n_pre = sum(int(np.sum(sm == _INHERITED)) for sm in state_masks)
         if n_pre:
-            print(f"  [{fname}] pre-inherited {n_pre} channel rejection(s) from prior files")
+            print(
+                f"  [{fname}] pre-inherited {n_pre} channel rejection(s) from prior files"
+            )
 
         nav = {
             "current": 0,

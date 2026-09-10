@@ -750,6 +750,8 @@ class EditionTab(QWidget):
 
         self.quality_bar = MUPropertiesPanel()
         self.quality_bar.setMinimumHeight(110)
+        self.quality_bar.reliability_toggled.connect(self._toggle_reliability)
+        self.quality_bar.reliability_reset.connect(self._reset_reliability)
         root.addWidget(self.quality_bar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -985,9 +987,7 @@ class EditionTab(QWidget):
         tb.addWidget(self.btn_auto_edit_mu)
 
         spacer = QWidget()
-        spacer.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(spacer)
 
         self.btn_notes = QPushButton("📝 Notes")
@@ -1173,6 +1173,8 @@ class EditionTab(QWidget):
         QShortcut(QKeySequence("D"), self, lambda: self.btn_sel_delete.setChecked(True))
         QShortcut(QKeySequence("Escape"), self, lambda: self._set_mode(EditMode.VIEW))
         QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
+        QShortcut(QKeySequence("T"), self, self._toggle_reliability)
+        QShortcut(QKeySequence("Shift+T"), self, self._reset_reliability)
 
     def _pan_source(self, fraction: float):
         """Pan the source plot by `fraction` of the current visible width."""
@@ -1395,13 +1397,10 @@ class EditionTab(QWidget):
                     "Do you want to recalculate spike timestamps on the full signal?\n\n"
                     "Yes — re-detect timestamps from the source over the entire recording.\n"
                     "No  — keep the original timestamps from the decomposed section only.",
-                    QMessageBox.StandardButton.Yes
-                    | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
-                self._redetect_timestamps = (
-                    reply == QMessageBox.StandardButton.Yes
-                )
+                self._redetect_timestamps = reply == QMessageBox.StandardButton.Yes
         else:
             self._redetect_timestamps = True
 
@@ -1506,10 +1505,13 @@ class EditionTab(QWidget):
         elif can_full:
             try:
                 self._update_status("Computing full-length sources (peel-off replay)…")
-                full_port_results, start_sample, end_sample, err = (
-                    compute_all_full_sources(
-                        decomp_data, redetect_timestamps=self._redetect_timestamps
-                    )
+                (
+                    full_port_results,
+                    start_sample,
+                    end_sample,
+                    err,
+                ) = compute_all_full_sources(
+                    decomp_data, redetect_timestamps=self._redetect_timestamps
                 )
                 if err:
                     logger.warning("Full source warning: %s", err)
@@ -1664,7 +1666,7 @@ class EditionTab(QWidget):
                 else:
                     emg_port = emg_full[
                         valid_chs,
-                        max(0, start_sample): min(end_sample, emg_full.shape[1]),
+                        max(0, start_sample) : min(end_sample, emg_full.shape[1]),
                     ]
                 valid_port_chs = port_ch_idx[port_ch_idx < emg_full.shape[0]]
                 self._raw_port_channels[port_name] = emg_full[valid_port_chs, :]
@@ -1788,6 +1790,12 @@ class EditionTab(QWidget):
             if 0 <= idx < len(motor_units):
                 motor_units[idx].flagged_duplicate = True
 
+        # Restore manual reliability verdicts (absent in older files)
+        overrides = decomp_data.get("reliability_overrides", {}).get(port_name, {})
+        for idx, value in overrides.items():
+            if 0 <= idx < len(motor_units) and motor_units[idx].props is not None:
+                motor_units[idx].props.reliability_override = bool(value)
+
         # Restore per-unit notes (absent in older files → default empty string)
         port_notes = decomp_data.get("mu_notes", [])
         if port_idx < len(port_notes):
@@ -1875,20 +1883,34 @@ class EditionTab(QWidget):
         import dataclasses
 
         ports = list(self._ports.keys())
-        discharge_times, pulse_trains, mu_filters, mu_properties, mu_notes = [], [], [], [], []
+        discharge_times, pulse_trains, mu_filters, mu_properties, mu_notes = (
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
         flagged_mus_per_port = {}
+        reliability_overrides_per_port = {}
 
         for port_name in ports:
             mus = self._ports[port_name]
             flagged_mus_per_port[port_name] = [
                 i for i, mu in enumerate(mus) if mu.flagged_duplicate
             ]
+            # Manual reliability verdicts, keyed by unit index.  Properties are
+            # recomputed on load, so the override has to be stored separately.
+            reliability_overrides_per_port[port_name] = {
+                i: mu.props.reliability_override
+                for i, mu in enumerate(mus)
+                if mu.props is not None and mu.props.reliability_is_overridden
+            }
 
             if self._full_source_mode:
                 save_ts = [self._ts_to_plateau_local(mu.timestamps) for mu in mus]
                 save_src = [
                     (
-                        mu.source[self._start_sample: self._end_sample]
+                        mu.source[self._start_sample : self._end_sample]
                         if len(mu.source) > (self._end_sample - self._start_sample)
                         else mu.source
                     )
@@ -1908,6 +1930,10 @@ class EditionTab(QWidget):
                     d = dataclasses.asdict(mu.props)
                     d.pop("muap_grid", None)
                     d.pop("duplicate_candidates", None)
+                    # Derived properties are not dataclass fields, so add the
+                    # reliability verdict explicitly for downstream readers.
+                    d["is_reliable"] = mu.props.is_reliable
+                    d["auto_reliable"] = mu.props.auto_reliable
                     port_props.append(d)
                 else:
                     port_props.append({})
@@ -1924,6 +1950,7 @@ class EditionTab(QWidget):
             "mu_properties": mu_properties,
             "mu_notes": mu_notes,
             "flagged_mus": flagged_mus_per_port,
+            "reliability_overrides": reliability_overrides_per_port,
             "edit_history": self._edit_history,
         }
 
@@ -2099,7 +2126,8 @@ class EditionTab(QWidget):
         """Append one entry to _edit_history for any kind of event.
 
         event_type: "edit" | "undo" | "redo" | "flag" | "unflag" |
-                    "delete_flagged" | "flag_within_duplicates" | "flag_cross_duplicates"
+                    "delete_flagged" | "flag_within_duplicates" |
+                    "flag_cross_duplicates" | "reliability_override"
         extra: any additional serialisable fields to include in the record.
         """
         from datetime import datetime
@@ -2381,6 +2409,66 @@ class EditionTab(QWidget):
             f"MU {mu.id} {'flagged' if mu.flagged_duplicate else 'unflagged'}"
         )
 
+    # ------------------------------------------------------------------
+    # Reliability override
+    # ------------------------------------------------------------------
+
+    def _toggle_reliability(self):
+        """Flip the current MU's reliability verdict.
+
+        Flipping to a value that matches the automatic verdict clears the
+        override, so the unit goes back to tracking its quality metrics.
+        """
+        mu = self._current_mu()
+        if mu is None or mu.props is None:
+            self._update_status("No quality data for this MU")
+            return
+
+        wanted = not mu.props.is_reliable
+        if wanted == mu.props.auto_reliable:
+            mu.props.reliability_override = None
+            how = "automatic"
+        else:
+            mu.props.reliability_override = wanted
+            how = "manual"
+
+        self._refresh_mu_combo()
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        self._update_quality_panel(mu)
+        self._log_event(
+            "reliability_override",
+            f"set MU {mu.id} to {'reliable' if wanted else 'unreliable'} ({how})",
+            self._current_port or "",
+            self._current_mu_idx,
+        )
+        self._update_status(
+            f"MU {mu.id} marked {'RELIABLE' if wanted else 'UNRELIABLE'} ({how})"
+        )
+
+    def _reset_reliability(self):
+        """Drop the current MU's manual override and follow the metrics again."""
+        mu = self._current_mu()
+        if mu is None or mu.props is None:
+            return
+        if not mu.props.reliability_is_overridden:
+            self._update_status("MU reliability already follows the quality metrics")
+            return
+
+        mu.props.reliability_override = None
+        self._refresh_mu_combo()
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        self._update_quality_panel(mu)
+        self._log_event(
+            "reliability_override",
+            f"cleared manual reliability for MU {mu.id}",
+            self._current_port or "",
+            self._current_mu_idx,
+        )
+        self._update_status(
+            f"MU {mu.id} reliability back to automatic: "
+            f"{'RELIABLE' if mu.props.is_reliable else 'UNRELIABLE'}"
+        )
+
     def _delete_all_flagged(self):
         ports = list(self._ports.keys())
         total = sum(1 for p in ports for mu in self._ports[p] if mu.flagged_duplicate)
@@ -2445,10 +2533,22 @@ class EditionTab(QWidget):
             -1,
             deleted_by_port=deleted_by_port,
         )
-        self._current_mu_idx = 0
-        self._refresh_mu_combo()
-        if self.mu_combo.count() > 0:
-            self.mu_combo.setCurrentIndex(0)
+        # Jump back to the first unit of the first port that still has units.
+        # `_on_port_changed` is called directly rather than relying on the
+        # combo's signal: the signal does not fire when the port is unchanged,
+        # which would leave the plots showing a unit that no longer exists.
+        self._current_mu_idx = -1
+        remaining_ports = [p for p in ports if self._ports.get(p)]
+        if remaining_ports:
+            first_port = remaining_ports[0]
+            self.port_combo.blockSignals(True)
+            self.port_combo.setCurrentText(first_port)
+            self.port_combo.blockSignals(False)
+            self._on_port_changed(first_port)
+        else:
+            self._current_port = None
+            self._refresh_mu_combo()
+            self._clear_plots()
         self._update_status(f"Deleted {total} flagged MU(s)")
 
     def _remove_outliers(self):
@@ -2637,9 +2737,17 @@ class EditionTab(QWidget):
 
         self._clear_duplicate_roles("within")
 
+        found_pairs: list = []
+        skipped_ports: list = []
+        failed_ports: list = []
+        n_compared = 0
+
         for port_name, mus in self._ports.items():
             if len(mus) < 2:
+                if mus:
+                    skipped_ports.append(port_name)
                 continue
+            n_compared += len(mus)
 
             n_samples = max(len(mu.source) for mu in mus)
             spike_mat = build_spike_train_matrix(
@@ -2655,6 +2763,7 @@ class EditionTab(QWidget):
                 )
             except Exception as exc:
                 logger.warning("Within-port RoA failed for %s: %s", port_name, exc)
+                failed_ports.append(port_name)
                 continue
 
             n = len(mus)
@@ -2663,6 +2772,9 @@ class EditionTab(QWidget):
                     # Use max of both directions for a symmetric score
                     score = float(max(roa[i, j], roa[j, i]))
                     if score >= ROA_THRESHOLD:
+                        found_pairs.append(
+                            (port_name, mus[i].id, port_name, mus[j].id, score)
+                        )
                         mus[i].within_duplicate_partners.append(
                             (port_name, mus[j].id, score)
                         )
@@ -2700,6 +2812,16 @@ class EditionTab(QWidget):
         self._update_status(
             f"Within-port duplicates: flagged {n_flagged} MU(s) for deletion"
         )
+        self._show_duplicate_report(
+            title="Within-Port Duplicates",
+            scope="within each grid/probe",
+            pairs=found_pairs,
+            flagged_by_port=flagged_by_port,
+            n_compared=n_compared,
+            skipped_ports=skipped_ports,
+            failed_ports=failed_ports,
+            skipped_reason="fewer than 2 MUs",
+        )
 
     def _flag_cross_duplicates(self):
         """Detect and flag lower-quality cross-port duplicate MUs for deletion."""
@@ -2715,6 +2837,10 @@ class EditionTab(QWidget):
             return
 
         self._clear_duplicate_roles("cross")
+
+        found_pairs: list = []
+        failed_ports: list = []
+        n_compared = sum(len(self._ports[p]) for p in port_names)
 
         for idx_a in range(len(port_names)):
             for idx_b in range(idx_a + 1, len(port_names)):
@@ -2747,6 +2873,7 @@ class EditionTab(QWidget):
                     logger.warning(
                         "Cross-port RoA failed for %s vs %s: %s", port_a, port_b, exc
                     )
+                    failed_ports.append(f"{port_a} ↔ {port_b}")
                     continue
 
                 na, nb = roa.shape[0], roa.shape[1]
@@ -2754,6 +2881,9 @@ class EditionTab(QWidget):
                     for j in range(min(len(mus_b), nb)):
                         score = float(roa[i, j])
                         if score >= ROA_THRESHOLD:
+                            found_pairs.append(
+                                (port_a, mus_a[i].id, port_b, mus_b[j].id, score)
+                            )
                             mus_a[i].cross_duplicate_partners.append(
                                 (port_b, mus_b[j].id, score)
                             )
@@ -2800,6 +2930,115 @@ class EditionTab(QWidget):
         self._update_status(
             f"Cross-port duplicates: flagged {n_flagged} MU(s) for deletion"
         )
+        self._show_duplicate_report(
+            title="Cross-Port Duplicates",
+            scope="across grids/probes",
+            pairs=found_pairs,
+            flagged_by_port=flagged_by_port,
+            n_compared=n_compared,
+            skipped_ports=[],
+            failed_ports=failed_ports,
+            skipped_reason="",
+        )
+
+    def _show_duplicate_report(
+        self,
+        *,
+        title: str,
+        scope: str,
+        pairs: list,
+        flagged_by_port: dict,
+        n_compared: int,
+        skipped_ports: list,
+        failed_ports: list,
+        skipped_reason: str,
+    ):
+        """Summarise a duplicate scan in a dialog so the result isn't missed.
+
+        `pairs` holds one (port_a, id_a, port_b, id_b, roa) tuple per detected
+        duplicate pair; `flagged_by_port` maps a port name to the ids flagged
+        for deletion in it.
+        """
+        n_pairs = len(pairs)
+        n_flagged = sum(len(v) for v in flagged_by_port.values())
+
+        if n_compared == 0:
+            reason = (
+                f"every port was skipped ({skipped_reason})"
+                if skipped_reason
+                else "no units are loaded"
+            )
+            summary = f"Nothing to compare {scope} — {reason}."
+        elif n_pairs == 0:
+            summary = (
+                f"No duplicate pairs found {scope}.<br><br>"
+                f"Compared {n_compared} MU(s) at a rate-of-agreement threshold "
+                f"of {ROA_THRESHOLD:.0%}."
+            )
+        else:
+            summary = (
+                f"Found <b>{n_pairs}</b> duplicate pair(s) {scope} among "
+                f"{n_compared} MU(s), and flagged <b>{n_flagged}</b> "
+                f"lower-quality MU(s) for deletion.<br><br>"
+                f"Rate-of-agreement threshold: {ROA_THRESHOLD:.0%}."
+            )
+
+        # Details: every pair with its RoA score, strongest first, grouped by
+        # the port (or port pair) it was found in.
+        grouped: dict = {}
+        for port_a, id_a, port_b, id_b, score in pairs:
+            label = port_a if port_a == port_b else f"{port_a} ↔ {port_b}"
+            grouped.setdefault(label, []).append((port_a, id_a, port_b, id_b, score))
+
+        detail_lines = []
+        for label, group in grouped.items():
+            detail_lines.append(label)
+            for port_a, id_a, port_b, id_b, score in sorted(group, key=lambda x: -x[4]):
+                to_delete = [
+                    f"MU {mid}"
+                    for pname, mid in ((port_a, id_a), (port_b, id_b))
+                    if mid in flagged_by_port.get(pname, [])
+                ]
+                marks = "   → delete " + ", ".join(to_delete) if to_delete else ""
+                detail_lines.append(
+                    f"    MU {id_a} ↔ MU {id_b}   RoA {score:.1%}{marks}"
+                )
+            detail_lines.append("")
+
+        for port_name, ids in flagged_by_port.items():
+            if ids:
+                detail_lines.append(
+                    f"Flagged in {port_name}: "
+                    + ", ".join(f"MU {i}" for i in sorted(ids))
+                )
+        if skipped_ports:
+            detail_lines.append("")
+            detail_lines.append(
+                f"Skipped ({skipped_reason}): " + ", ".join(skipped_ports)
+            )
+        if failed_ports:
+            detail_lines.append("")
+            detail_lines.append(
+                "Comparison failed (see log): " + ", ".join(failed_ports)
+            )
+
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setIcon(
+            QMessageBox.Icon.Warning if failed_ports else QMessageBox.Icon.Information
+        )
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(summary)
+        if n_flagged:
+            box.setInformativeText(
+                "Flagged units are marked ⚠ in the MU list — review them, "
+                "then use “Delete All Flagged MUs” to remove them."
+            )
+        detail = "\n".join(detail_lines).strip()
+        if detail:
+            box.setDetailedText(detail)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def _refresh_port_combo(self):
         cur = self.port_combo.currentText()
@@ -2832,6 +3071,8 @@ class EditionTab(QWidget):
                     label += "  ⚠"
                 if mu.props is not None:
                     label += "  ✓" if mu.props.is_reliable else "  ✗"
+                    if mu.props.reliability_is_overridden:
+                        label += "*"  # verdict set by hand, not by the metrics
                 is_dup_delete = (
                     mu.within_duplicate_role == "delete"
                     or mu.cross_duplicate_role == "delete"
@@ -2966,7 +3207,9 @@ class EditionTab(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Notes — {self._current_port}  MU {mu.id}")
         dlg.resize(420, 260)
-        dlg.setStyleSheet(f"background-color: {COLORS['background']}; color: {COLORS['foreground']};")
+        dlg.setStyleSheet(
+            f"background-color: {COLORS['background']}; color: {COLORS['foreground']};"
+        )
 
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(12, 12, 12, 12)

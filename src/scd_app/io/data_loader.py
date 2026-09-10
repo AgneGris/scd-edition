@@ -360,7 +360,7 @@ def _read_otb_emg(
     for adapter_idx, raw_start, n_ch in active_adapters:
         gain = float(adapter_info[adapter_idx].attrib["Gain"])
         scale = (power_supply * 1000) / (2**nADbit * gain)
-        emg[:, col: col + n_ch] = raw[:, raw_start: raw_start + n_ch] * scale
+        emg[:, col : col + n_ch] = raw[:, raw_start : raw_start + n_ch] * scale
         col += n_ch
 
     return emg  # (samples, channels) in mV
@@ -398,7 +398,7 @@ def _slice_channels(data: np.ndarray, channels_spec) -> np.ndarray:
     ch = list(channels_spec)
 
     if len(ch) == 2 and ch[1] > ch[0]:
-        return data[ch[0]: ch[1], :]
+        return data[ch[0] : ch[1], :]
     else:
         # Explicit list of indices
         return data[ch, :]

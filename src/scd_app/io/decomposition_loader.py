@@ -80,7 +80,9 @@ class _CPUCompatibleUnpickler(pickle.Unpickler):
 def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
     """Convert one raw upstream SCD dictionary into a one-port editor file."""
     if detect_decomposition_format(data) != UPSTREAM_SCD_FORMAT:
-        raise UnsupportedDecompositionFormat("The supplied dictionary is not raw SCD output.")
+        raise UnsupportedDecompositionFormat(
+            "The supplied dictionary is not raw SCD output."
+        )
 
     timestamps_raw = _first_present(data, _SCD_TIMESTAMP_KEYS)
     timestamps = _timestamp_list(timestamps_raw)
@@ -90,7 +92,9 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
     n_units = len(timestamps)
     sources = [
         np.asarray(item).flatten()
-        for item in _unit_list(_first_present(data, _SCD_SOURCE_KEYS), n_units, "source")
+        for item in _unit_list(
+            _first_present(data, _SCD_SOURCE_KEYS), n_units, "source"
+        )
     ]
     if any(source.size == 0 for source in sources):
         raise UnsupportedDecompositionFormat("One or more SCD sources are empty.")
@@ -114,7 +118,9 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
     editor_filters = None if all(item is None for item in filters) else filters
     preprocessing_config = data.get("preprocessing_config") or {}
     if not isinstance(preprocessing_config, dict):
-        raise UnsupportedDecompositionFormat("SCD preprocessing_config must be a dictionary.")
+        raise UnsupportedDecompositionFormat(
+            "SCD preprocessing_config must be a dictionary."
+        )
 
     sampling_rate = data.get(
         "sampling_rate",
@@ -127,7 +133,9 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
             "The SCD result does not record a valid sampling frequency."
         ) from exc
     if sampling_rate <= 0:
-        raise UnsupportedDecompositionFormat("The SCD sampling frequency must be positive.")
+        raise UnsupportedDecompositionFormat(
+            "The SCD sampling frequency must be positive."
+        )
 
     w_mat_raw = data.get("w_mat")
     w_mat = to_numpy(w_mat_raw) if w_mat_raw is not None else None
@@ -194,7 +202,9 @@ def _timestamp_list(value: Any) -> list[np.ndarray]:
     for item in items:
         arr = to_numpy(item).flatten()
         if arr.size and not np.all(np.isfinite(arr)):
-            raise UnsupportedDecompositionFormat("SCD timestamps contain non-finite values.")
+            raise UnsupportedDecompositionFormat(
+                "SCD timestamps contain non-finite values."
+            )
         result.append(arr.astype(np.int64, copy=False))
     return result
 
@@ -226,10 +236,7 @@ def _unit_list(value: Any, n_units: int, field_name: str) -> list[np.ndarray]:
 def _filter_list(value: Any, n_units: int) -> list[np.ndarray | None]:
     if value is None:
         return [None] * n_units
-    return [
-        np.asarray(item).flatten()
-        for item in _unit_list(value, n_units, "filter")
-    ]
+    return [np.asarray(item).flatten() for item in _unit_list(value, n_units, "filter")]
 
 
 def _infer_channel_count(

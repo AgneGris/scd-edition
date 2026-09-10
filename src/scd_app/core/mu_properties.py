@@ -33,7 +33,18 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from scd_app.core.constants import MIN_PEAK_SEP, MUAP_WIN_MS, ROA_THRESHOLD
+from scd_app.core.constants import (
+    COV_THRESHOLD_PCT,
+    DR_MAX_HZ,
+    DR_MIN_HZ,
+    MIN_N_SPIKES,
+    MIN_PEAK_SEP,
+    MUAP_WIN_MS,
+    PNR_THRESHOLD_DB,
+    RELIABILITY_CRITERIA,
+    ROA_THRESHOLD,
+    SIL_THRESHOLD,
+)
 from scd_app.core.utils import to_numpy  # noqa: F401 — re-exported for callers
 
 logger = logging.getLogger(__name__)
@@ -108,8 +119,12 @@ class MUProperties:
     muap_median_freq_hz: float = float("nan")  # median spectral freq
     muap_mean_freq_hz: float = float("nan")  # mean spectral freq
 
-    # ── reliability flag  (from toolbox thresholds) ────────────────────────
-    is_reliable: bool = False
+    # ── reliability ────────────────────────────────────────────────────────
+    #  `is_reliable` is *derived*: it is True when every quality criterion in
+    #  `quality_flags` passes — i.e. exactly when every metric in the
+    #  properties panel is green.  Setting `reliability_override` to True or
+    #  False pins the verdict manually; None returns it to automatic.
+    reliability_override: Optional[bool] = None
 
     # ── full MUAP array in grid layout  (rows × cols × win_samples) ───────
     #    stored here so the GUI can render it without re-computation
@@ -122,16 +137,53 @@ class MUProperties:
     def quality_flags(self) -> Dict[str, bool]:
         """Return a dict of pass/fail flags for each quality criterion."""
         return {
-            "sil": self.sil >= 0.9 if not np.isnan(self.sil) else False,
-            "pnr": self.pnr_db >= 30 if not np.isnan(self.pnr_db) else False,
-            "cov": self.cov_pct <= 40 if not np.isnan(self.cov_pct) else False,
+            "sil": self.sil >= SIL_THRESHOLD if not np.isnan(self.sil) else False,
+            "pnr": (
+                self.pnr_db >= PNR_THRESHOLD_DB if not np.isnan(self.pnr_db) else False
+            ),
+            "cov": (
+                self.cov_pct <= COV_THRESHOLD_PCT
+                if not np.isnan(self.cov_pct)
+                else False
+            ),
             "dr": (
-                (3 <= self.discharge_rate_hz <= 40)
+                (DR_MIN_HZ <= self.discharge_rate_hz <= DR_MAX_HZ)
                 if not np.isnan(self.discharge_rate_hz)
                 else False
             ),
-            "n_spikes": self.n_spikes >= 10,
+            "n_spikes": self.n_spikes >= MIN_N_SPIKES,
         }
+
+    @property
+    def auto_reliable(self) -> bool:
+        """Automatic verdict: True when every quality criterion passes.
+
+        This is deliberately the same rule that drives the green/red colouring
+        of the individual metrics, so a unit showing all-green metrics can
+        never be reported as unreliable.
+        """
+        return all(self.quality_flags.values())
+
+    @property
+    def is_reliable(self) -> bool:
+        """Effective verdict — the manual override if set, else `auto_reliable`."""
+        if self.reliability_override is not None:
+            return self.reliability_override
+        return self.auto_reliable
+
+    @property
+    def reliability_is_overridden(self) -> bool:
+        """True when the user has pinned the verdict manually."""
+        return self.reliability_override is not None
+
+    @property
+    def failed_criteria(self) -> List[str]:
+        """Human-readable descriptions of the criteria this unit fails."""
+        return [
+            RELIABILITY_CRITERIA[key]
+            for key, ok in self.quality_flags.items()
+            if not ok and key in RELIABILITY_CRITERIA
+        ]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -272,6 +324,21 @@ def _nanval(arr: np.ndarray, idx: int) -> float:
         return float("nan")
 
 
+def _finite_mean(arr: np.ndarray) -> float:
+    """Mean over the finite entries of `arr`, or NaN when there are none.
+
+    Toolbox spectral helpers return NaN for de-selected or silent channels;
+    averaging an all-NaN array would otherwise raise an empty-slice warning.
+    """
+    try:
+        finite = np.asarray(arr)[np.isfinite(arr)]
+    except Exception:
+        return float("nan")
+    if finite.size == 0:
+        return float("nan")
+    return float(np.mean(finite))
+
+
 def compute_unit_properties(
     timestamps: np.ndarray,
     source: np.ndarray,
@@ -350,41 +417,44 @@ def compute_unit_properties(
         try:
             muap4 = muap_grid[np.newaxis]  # (1, rows, cols, win_samples)
 
-            ptp = tb_props.get_muap_ptp(muap4, sel_chs_by=None)
-            props.muap_max_ptp_uv = float(np.nanmax(ptp))
+            # Channels with no signal (empty / rejected grid positions are
+            # zero-filled) give a zero power spectrum, so the toolbox's
+            # spectral helpers hit 0/0 and emit "invalid value encountered in
+            # divide".  The NaNs they produce are handled below, so silence the
+            # numpy warnings rather than letting them reach the console.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ptp = tb_props.get_muap_ptp(muap4, sel_chs_by=None)
+                props.muap_max_ptp_uv = float(np.nanmax(ptp))
 
-            energy = tb_props.get_muap_energy(muap4, sel_chs_by=None)
-            props.muap_max_energy = float(np.nanmax(energy))
+                energy = tb_props.get_muap_energy(muap4, sel_chs_by=None)
+                props.muap_max_energy = float(np.nanmax(energy))
 
-            wl = tb_props.get_muap_waveform_length(muap4, sel_chs_by=None)
-            props.muap_max_wl = float(np.nanmax(wl))
+                wl = tb_props.get_muap_waveform_length(muap4, sel_chs_by=None)
+                props.muap_max_wl = float(np.nanmax(wl))
 
-            peak_f = tb_props.get_muap_peak_frequency(
-                muap4, sel_chs_by="iqr", fs=fsamp_int
-            )
-            props.muap_peak_freq_hz = float(np.nanmean(peak_f[np.isfinite(peak_f)]))
-
-            med_f = tb_props.get_muap_median_frequency(
-                muap4, sel_chs_by="iqr", fs=fsamp_int
-            )
-            props.muap_median_freq_hz = float(np.nanmean(med_f[np.isfinite(med_f)]))
-
-            mean_f = tb_props.get_muap_mean_frequency(
-                muap4, sel_chs_by="iqr", fs=fsamp_int
-            )
-            props.muap_mean_freq_hz = float(np.nanmean(mean_f[np.isfinite(mean_f)]))
+                props.muap_peak_freq_hz = _finite_mean(
+                    tb_props.get_muap_peak_frequency(
+                        muap4, sel_chs_by="iqr", fs=fsamp_int
+                    )
+                )
+                props.muap_median_freq_hz = _finite_mean(
+                    tb_props.get_muap_median_frequency(
+                        muap4, sel_chs_by="iqr", fs=fsamp_int
+                    )
+                )
+                props.muap_mean_freq_hz = _finite_mean(
+                    tb_props.get_muap_mean_frequency(
+                        muap4, sel_chs_by="iqr", fs=fsamp_int
+                    )
+                )
 
         except Exception as e:
             logger.debug("MUAP feature computation failed: %s", e)
 
     props.muap_grid = muap_grid
 
-    # ── Reliability: SIL >= 0.8 AND PNR >= 32 dB ─────────────────────────
-    sil = props.sil
-    pnr = props.pnr_db
-    props.is_reliable = (
-        not np.isnan(sil) and sil >= 0.8 and not np.isnan(pnr) and pnr >= 32
-    )
+    # Reliability is derived from `quality_flags` (see MUProperties.is_reliable),
+    # so there is nothing to assign here.
 
     return props
 

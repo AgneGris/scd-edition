@@ -265,9 +265,7 @@ class SourcePlotWidget(pg.PlotWidget):
                 EditMode.ADD: Qt.CursorShape.CrossCursor,
                 EditMode.DELETE: Qt.CursorShape.PointingHandCursor,
             }
-            self.setCursor(
-                cursors.get(self._edit_mode, Qt.CursorShape.ArrowCursor)
-            )
+            self.setCursor(cursors.get(self._edit_mode, Qt.CursorShape.ArrowCursor))
 
     # ------------------------------------------------------------------
     # Data
@@ -510,7 +508,9 @@ class SourcePlotWidget(pg.PlotWidget):
 
 class FiringRatePlotWidget(pg.PlotWidget):
     def __init__(self, parent=None):
-        super().__init__(parent, background=COLORS["background"], viewBox=XZoomViewBox())
+        super().__init__(
+            parent, background=COLORS["background"], viewBox=XZoomViewBox()
+        )
         self.showGrid(x=True, y=True, alpha=0.15)
         self.setLabel("bottom", "Time (s)", color=COLORS.get("text_dim", "#6c7086"))
         self.setLabel("left", "IFR (Hz)", color=COLORS.get("text_dim", "#6c7086"))

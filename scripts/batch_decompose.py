@@ -440,7 +440,7 @@ def decompose_concatenated(
         from os.path import commonprefix
 
         prefix = commonprefix(stems).rstrip("_")
-        suffixes = [s[len(prefix):].lstrip("_") for s in stems]
+        suffixes = [s[len(prefix) :].lstrip("_") for s in stems]
         suffixes = [s for s in suffixes if s]  # drop empty
         if suffixes:
             output_stem = prefix + "_" + "_".join(suffixes) + "_concat"
@@ -582,9 +582,7 @@ class _HeadlessWorker:
                     print(f"    Masked channels : {list(bad_channels)}")
                     # Delegated to SCD so this matches decomp_worker and
                     # filter_recalculation._replace_bad_channels exactly.
-                    replace_bad_channels_with_noise(
-                        grid_data, bad_channels.tolist()
-                    )
+                    replace_bad_channels_with_noise(grid_data, bad_channels.tolist())
                 else:
                     print("    Masked channels : none")
 

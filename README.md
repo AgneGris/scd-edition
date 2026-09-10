@@ -229,7 +229,15 @@ This is the main editing environment. It shows one motor unit at a time.
 - Use the **Unit** dropdown or the **Up/Down arrow keys** to switch between motor units within a port.
 - The **properties panel** on the right updates automatically:
   - **Spike count, mean discharge rate, CoV ISI, minimum ISI**
-  - **SIL and PNR** — quality scores. A unit is **RELIABLE** if SIL ≥ 0.8 and PNR ≥ 30 dB.
+  - **SIL and PNR** — quality scores.
+  - **Reliability badge** — a unit is automatically **RELIABLE** when *every*
+    quality criterion passes, i.e. when every metric in the panel is green:
+    SIL ≥ 0.9, PNR ≥ 30 dB, CoV ISI ≤ 40 %, discharge rate 3–40 Hz and
+    at least 10 spikes. Hover the badge to see which criteria a unit fails.
+    Left-click the badge (or press `T`) to override the verdict by hand — an
+    overridden badge is italic and marked *(manual)*, and the unit is shown as
+    `✓*` / `✗*` in the unit dropdown. Right-click (or press `Shift+T`) to go
+    back to the automatic verdict. Manual verdicts are saved with the session.
   - **MUAP amplitude, waveform length, peak and median frequency**
   - **Duplicate warning** — if the current unit is very similar to another unit in the same port
 
@@ -277,9 +285,9 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 | **Auto-edit** | — | Automatically removes obvious outlier spikes based on physiological firing rate limits. |
 | **Remove outliers** | — | Removes spikes with very short or very long ISIs. |
 | **Flag unit** | `X` | Marks the unit for deletion. Duplicates are auto-flagged. |
-| **Flag within-port duplicates** | — | Compares all units in the current port and flags pairs with high cross-correlation. |
-| **Flag cross-port duplicates** | — | Same, across all ports. |
-| **Delete All Flagged MUs** | — | Permanently removes all flagged units from the session (cannot be undone). |
+| **Flag within-port duplicates** | — | Compares all units in each port and flags the lower-quality unit of every pair whose rate of agreement is above threshold. A summary dialog reports the pairs found, their RoA scores and which units were flagged. |
+| **Flag cross-port duplicates** | — | Same, across all ports, with the same summary dialog. |
+| **Delete All Flagged MUs** | — | Permanently removes all flagged units from the session (cannot be undone). Afterwards the view jumps back to the first unit of the first port. |
 
 #### Saving
 
@@ -303,7 +311,7 @@ If force channels are configured, they appear as overlays on the time-domain plo
 
 **CST (Cumulative Spike Train)** — sum of all discharge rate traces. Approximates the neural drive to the muscle.
 
-**Quality** — SIL and PNR bar charts for all units, with dashed threshold lines (SIL ≥ 0.8, PNR ≥ 32 dB). Units above the threshold are considered reliable.
+**Quality** — SIL and PNR bar charts for all units, with dashed threshold lines at the reliability thresholds (SIL ≥ 0.9, PNR ≥ 30 dB).
 
 **DR vs Force** — scatter plot of each motor unit's recruitment force (%MVC at first spike) against its mean discharge rate during the plateau. A regression line is drawn when three or more units are present. This plot requires at least one active force channel.
 
@@ -348,6 +356,8 @@ Saved Edition files can be reloaded in any order and remain fully editable.
 | `Shift+D` | Delete spikes in ROI |
 | `F` | Recalculate Filter |
 | `X` | Flag unit |
+| `T` | Toggle the reliability verdict of the current unit |
+| `Shift+T` | Reset reliability to the automatic verdict |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
 | `Ctrl+S` | Save |

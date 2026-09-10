@@ -16,7 +16,9 @@ On recalculate (recalculate_unit_filter):
     2. Replay peel-off for entries before target unit (same as load).
     3. STA(peeled_emg, edited_timestamps) → new filter.
     4. Apply new filter to peeled EMG → new source.
-    5. source_to_timestamps → new timestamps.
+    5. Snap the edited timestamps onto the peaks of the new source.
+       Spikes are NOT re-detected: the edited spike set is locked, and only
+       its sample-level alignment is corrected.
 
 Coordinate spaces:
     plateau-local — 0-based within plateau window (stored in .pkl files).
@@ -246,6 +248,64 @@ def _extract_timestamps(
         min_peak_separation=min_peak_sep,
     )
     return locs.cpu().numpy().astype(np.int64)
+
+
+def snap_to_local_peak(
+    source: np.ndarray,
+    timestamps: np.ndarray,
+    max_shift: int,
+    square_source: bool = True,
+) -> np.ndarray:
+    """Re-align each timestamp to the tallest sample within ±`max_shift`.
+
+    Recalculating a filter changes the source slightly, so its peaks move by a
+    sample or two.  Timestamps are deliberately *locked* across a recalculation
+    (see `recalculate_unit_filter`) to preserve manual edits, which would
+    otherwise leave every marker sitting on the flank of a spike rather than on
+    its apex.  Snapping keeps the spike set exactly as the user left it and
+    only corrects the alignment.
+
+    The number of spikes is never changed: if two timestamps would collide the
+    originals are kept instead.
+    """
+    orig = np.asarray(timestamps, dtype=np.int64)
+    if orig.size == 0 or max_shift < 1 or source.size == 0:
+        return orig
+
+    sig = np.nan_to_num(source, nan=0.0, posinf=0.0, neginf=0.0)
+    if square_source:
+        sig = sig**2
+    n = sig.shape[0]
+
+    lo = np.clip(orig - max_shift, 0, max(n - 1, 0))
+    hi = np.clip(orig + max_shift + 1, 0, n)
+    snapped = orig.copy()
+    for i in range(orig.size):
+        a, b = int(lo[i]), int(hi[i])
+        if a >= b:
+            continue
+        cand = a + int(np.argmax(sig[a:b]))
+        # Only move a spike onto a genuinely taller sample.  Without this a
+        # timestamp sitting in a flat stretch of the source would slide to the
+        # start of its search window instead of staying put.
+        if 0 <= orig[i] < n and sig[cand] > sig[orig[i]]:
+            snapped[i] = cand
+
+    if np.unique(snapped).size != snapped.size:
+        # Revert only the colliding entries; if that still leaves duplicates,
+        # keep the original timestamps so no spike is ever lost.
+        seen: Dict[int, int] = {}
+        for i, v in enumerate(snapped):
+            key = int(v)
+            if key in seen:
+                snapped[i] = orig[i]
+            else:
+                seen[key] = i
+        if np.unique(snapped).size != snapped.size:
+            logger.debug("Peak snapping produced duplicates — keeping originals")
+            return orig
+
+    return np.sort(snapped)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -555,7 +615,7 @@ def compute_all_full_sources(
             ch_idx = np.asarray(channel_indices_all[port_idx], dtype=int)
             raw_port = raw_full[ch_idx, :].copy()
         else:
-            raw_port = raw_full[ch_offset: ch_offset + n_ch, :].copy()
+            raw_port = raw_full[ch_offset : ch_offset + n_ch, :].copy()
         _replace_bad_channels(raw_port, decomp_data, port_idx)
 
         w_mat = None
@@ -615,8 +675,12 @@ def recalculate_unit_filter(
     end_sample: int,
     current_port_filters: List[Optional[np.ndarray]],
     device: Optional[torch.device] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Recalculate filter + source + timestamps for one MU after edits."""
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Recalculate filter + source for one MU after edits.
+
+    Returns (filter, full-length source, timestamps).  The timestamps are the
+    edited ones re-aligned to the peaks of the new source, never re-detected.
+    """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -688,9 +752,7 @@ def recalculate_unit_filter(
     # ── Step 3: STA filter from all edited timestamps (full signal) ───────
     ts_valid = edited_timestamps_abs[edited_timestamps_abs < emg_peeled.shape[0]]
     if len(ts_valid) < 2:
-        raise ValueError(
-            "Need at least 2 spikes for filter recalculation."
-        )
+        raise ValueError("Need at least 2 spikes for filter recalculation.")
 
     ts_tensor = torch.from_numpy(np.asarray(ts_valid, dtype=np.int64)).to(device)
     sta = fn["spike_triggered_average"](emg_peeled, ts_tensor, 1)
@@ -702,11 +764,23 @@ def recalculate_unit_filter(
     plateau_slice = source_t[start_sample:end_sample]
     source_t = (source_t - plateau_slice.mean()) / plateau_slice.std().clamp(min=1e-8)
     source_t = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
+    source_np = source_t.detach().cpu().numpy().astype(np.float64)
+
+    # ── Step 5: Re-align the locked timestamps to the new source ──────────
+    # Timestamps are NOT re-detected — that would discard manual edits — but
+    # the new filter shifts each peak by a sample or two, so every spike is
+    # snapped back onto its apex.  The spike set is unchanged.
+    new_timestamps_abs = snap_to_local_peak(
+        source_np,
+        edited_timestamps_abs,
+        max_shift=max(1, min_peak_sep // 2),
+        square_source=square_source,
+    )
 
     return (
         filt.detach().cpu().numpy(),
-        source_t.detach().cpu().numpy().astype(np.float64),
-        edited_timestamps_abs,
+        source_np,
+        new_timestamps_abs,
     )
 
 

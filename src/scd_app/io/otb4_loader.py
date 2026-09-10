@@ -165,7 +165,9 @@ def _parse_archive_metadata(
         "gain": _required_float(device_root, "Gain", file_path),
         "adc_range": _required_float(device_root, "ADC_Range", file_path),
     }
-    tracks = [_parse_track(node, file_path) for node in tracks_root.findall("TrackInfo")]
+    tracks = [
+        _parse_track(node, file_path) for node in tracks_root.findall("TrackInfo")
+    ]
     if not tracks:
         raise ValueError(f"No TrackInfo records found in {file_path.name}")
     return device, tracks
@@ -301,7 +303,7 @@ def _read_track_group(
             stream_cache[track.stream] = raw
 
         selected = raw[
-            :, track.channel_offset: track.channel_offset + track.n_channels
+            :, track.channel_offset : track.channel_offset + track.n_channels
         ]
         scale = _track_scale(track, file_path)
         arrays.append(selected.astype(np.float32) * np.float32(scale))

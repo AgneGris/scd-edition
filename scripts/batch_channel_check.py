@@ -226,7 +226,6 @@ def _run_channel_check_gui(
             _n_files=n_files,
             _aux_to_show=aux_to_show,
         ):
-
             _win.figure.clf()
             port_name, cfg = _grid_list[grid_idx]
             channels = cfg["channels"]

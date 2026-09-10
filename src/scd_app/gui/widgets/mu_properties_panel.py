@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QGroupBox,
 )
+
 # Re-use the app's colour / size tokens
 from scd_app.gui.style.styling import COLORS, FONT_SIZES, FONT_FAMILY
 
@@ -55,6 +56,24 @@ def _fmt(value: float, decimals: int = 2, unit: str = "") -> str:
         return "—"
     text = f"{value:.{decimals}f}"
     return f"{text} {unit}".strip() if unit else text
+
+
+class _ClickableLabel(QLabel):
+    """QLabel that reports left- and right-clicks."""
+
+    clicked = Signal()
+    right_clicked = Signal()
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 — Qt naming
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.right_clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 # ── small reusable widgets ─────────────────────────────────────────────────────
@@ -151,14 +170,17 @@ class MUPropertiesPanel(QFrame):
     whenever the current motor unit changes or is edited.
     """
 
+    #: emitted when the user left-clicks the badge to flip the verdict
+    reliability_toggled = Signal()
+    #: emitted when the user right-clicks the badge to drop a manual override
+    reliability_reset = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(
             f"background-color: {_C_BGS}; border-top: 1px solid {_C_BORD};"
         )
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 4, 8, 4)
@@ -167,11 +189,13 @@ class MUPropertiesPanel(QFrame):
         # ── reliability badge (top row) ──────────────────────────────────
         badge_row = QHBoxLayout()
         badge_row.setSpacing(8)
-        self._reliability_badge = QLabel("● RELIABLE")
+        self._reliability_badge = _ClickableLabel("● RELIABLE")
         self._reliability_badge.setStyleSheet(
             f"color: {_C_OK}; font-weight: bold; "
             f"font-size: {FONT_SIZES.get('small', '9pt')}; font-family: {FONT_FAMILY};"
         )
+        self._reliability_badge.clicked.connect(self.reliability_toggled)
+        self._reliability_badge.right_clicked.connect(self.reliability_reset)
         badge_row.addWidget(self._reliability_badge)
 
         _dup_style = (
@@ -276,18 +300,7 @@ class MUPropertiesPanel(QFrame):
         self._r_med_f.set_value(_fmt(props.muap_median_freq_hz, 0, "Hz"))
 
         # — Reliability badge —
-        if props.is_reliable:
-            self._reliability_badge.setText("● RELIABLE")
-            self._reliability_badge.setStyleSheet(
-                f"color: {_C_OK}; font-weight: bold; "
-                f"font-size: {FONT_SIZES.get('small', '9pt')};"
-            )
-        else:
-            self._reliability_badge.setText("● UNRELIABLE")
-            self._reliability_badge.setStyleSheet(
-                f"color: {_C_ERR}; font-weight: bold; "
-                f"font-size: {FONT_SIZES.get('small', '9pt')};"
-            )
+        self._set_reliability_badge(props)
 
         # — Within-port duplicate partners —
         if within_partners:
@@ -320,6 +333,48 @@ class MUPropertiesPanel(QFrame):
         else:
             self._cross_dup_label.setVisible(False)
 
+    def _set_reliability_badge(self, props: MUProperties):
+        """Render the badge text, colour and tooltip for `props`."""
+        reliable = props.is_reliable
+        overridden = props.reliability_is_overridden
+
+        text = "● RELIABLE" if reliable else "● UNRELIABLE"
+        if overridden:
+            text += "  (manual)"
+        color = _C_OK if reliable else _C_ERR
+        # A manual verdict is drawn in italics so it is obvious at a glance
+        # that it no longer follows the metrics.
+        style = (
+            f"color: {color}; font-weight: bold; "
+            f"font-size: {FONT_SIZES.get('small', '9pt')};"
+        )
+        if overridden:
+            style += " font-style: italic; text-decoration: underline;"
+        self._reliability_badge.setText(text)
+        self._reliability_badge.setStyleSheet(style)
+
+        failed = props.failed_criteria
+        lines = []
+        if overridden:
+            lines.append(
+                "Manually set to "
+                + ("RELIABLE" if reliable else "UNRELIABLE")
+                + " — the automatic verdict is "
+                + ("RELIABLE" if props.auto_reliable else "UNRELIABLE")
+                + "."
+            )
+        if failed:
+            lines.append("Fails: " + "; ".join(failed))
+        else:
+            lines.append("Passes every quality criterion.")
+        lines.append("")
+        lines.append("Left-click (or press T) to flip the verdict.")
+        if overridden:
+            lines.append(
+                "Right-click (or press Shift+T) to go back to the automatic verdict."
+            )
+        self._reliability_badge.setToolTip("\n".join(lines))
+
     def clear_properties(self):
         for row in (
             self._r_nspikes,
@@ -341,6 +396,7 @@ class MUPropertiesPanel(QFrame):
             f"color: {_C_DIM}; font-weight: bold; "
             f"font-size: {FONT_SIZES.get('small', '9pt')};"
         )
+        self._reliability_badge.setToolTip("")
         self._within_dup_label.setVisible(False)
         self._cross_dup_label.setVisible(False)
 

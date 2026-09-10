@@ -27,6 +27,7 @@ import pyqtgraph as pg
 
 from motor_unit_toolbox.props import get_inst_discharge_rate
 
+from scd_app.core.constants import PNR_THRESHOLD_DB, SIL_THRESHOLD
 from scd_app.core.mu_model import MotorUnit
 from scd_app.gui.style.styling import COLORS, FONT_SIZES
 
@@ -343,9 +344,7 @@ class VisualisationTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("border: none; background: transparent;")
-        scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._sidebar_container = QWidget()
         self._sidebar_container.setStyleSheet("background: transparent;")
@@ -780,9 +779,11 @@ class VisualisationTab(QWidget):
         ticks = [(i, f"MU {mu.id}") for i, (_, mu) in enumerate(sorted_mus)]
         xs = np.arange(n, dtype=float)
 
+        # Threshold lines come from the shared reliability constants so the
+        # charts agree with the RELIABLE / UNRELIABLE badge in the Edition tab.
         for pw, attr, threshold, y_top_min in (
-            (self._sil_plot, "sil", 0.8, 1.05),
-            (self._pnr_plot, "pnr_db", 32.0, 40.0),
+            (self._sil_plot, "sil", SIL_THRESHOLD, 1.05),
+            (self._pnr_plot, "pnr_db", PNR_THRESHOLD_DB, 40.0),
         ):
             pw.clear()
             if n == 0:

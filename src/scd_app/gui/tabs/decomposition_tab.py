@@ -199,9 +199,7 @@ class DecompositionTab(QWidget):
         # ── Scrollable content ────────────────────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         content = QWidget()
@@ -642,7 +640,9 @@ class DecompositionTab(QWidget):
 
         copy_btn = QPushButton("Copy to All Grids")
         copy_btn.setToolTip("Apply these parameters to every other grid")
-        copy_btn.clicked.connect(lambda _checked, p=port_name: self._copy_params_to_all(p))
+        copy_btn.clicked.connect(
+            lambda _checked, p=port_name: self._copy_params_to_all(p)
+        )
         layout.addWidget(copy_btn, row, 0, 1, 2)
 
         return page
@@ -1277,9 +1277,7 @@ class DecompositionTab(QWidget):
                 state["last_scroll_time"] = time.time()
 
                 modifiers = QApplication.keyboardModifiers()
-                ctrl_held = bool(
-                    modifiers & Qt.KeyboardModifier.ControlModifier
-                )
+                ctrl_held = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
                 shift_held = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
                 zoom_scale = 0.85 if event.button == "up" else 1.18
@@ -2166,9 +2164,7 @@ class DecompositionTab(QWidget):
         Closes automatically when the worker emits stopped()."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Waiting for current grid…")
-        dlg.setWindowFlags(
-            dlg.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
-        )
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
         dlg.setMinimumWidth(420)
 
         layout = QVBoxLayout(dlg)

@@ -114,9 +114,7 @@ class DecompositionWorker(QThread):
                     # filter_recalculation._replace_bad_channels fill the
                     # channels identically. Fixed seed inside, so the noise is
                     # reproducible when sources are recomputed on load.
-                    replace_bad_channels_with_noise(
-                        grid_data, bad_channels.tolist()
-                    )
+                    replace_bad_channels_with_noise(grid_data, bad_channels.tolist())
 
                 # Slice to selected time window
                 start_sample = int(self.plateau_coords[0])
@@ -365,9 +363,7 @@ class DecompositionWorker(QThread):
                     if entry is not None:
                         s = int(a.get("start_chan", 0))
                         e = int(a.get("end_chan", s + 1))
-                        channel_meta = acquisition_metadata.get(
-                            "aux_channels", []
-                        )[s:e]
+                        channel_meta = acquisition_metadata.get("aux_channels", [])[s:e]
                         if channel_meta:
                             entry["channel_metadata"] = channel_meta
                             if len(channel_meta) == 1:

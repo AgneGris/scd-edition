@@ -737,9 +737,7 @@ class AuxChannelCard(QFrame):
         field_path: str = "",
     ):
         self.name_edit.setText(name)
-        type_idx = self.type_combo.findText(
-            aux_type, Qt.MatchFlag.MatchFixedString
-        )
+        type_idx = self.type_combo.findText(aux_type, Qt.MatchFlag.MatchFixedString)
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
         src_idx = self.SOURCES.index(source) if source in self.SOURCES else 0
@@ -1009,9 +1007,7 @@ class ConfigTab(QWidget):
         # Scroll area
         scroll = QScrollArea()
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet(
