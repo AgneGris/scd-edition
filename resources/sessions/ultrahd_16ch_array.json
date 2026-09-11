@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "_comment": [
+    "Ultra-HD 16-channel 4x4 array (250 um pitch) recorded on an Intan RHS2000.",
+    "The channel-to-position map is carried by the 'Grid (UltraHD 4x4)' preset.",
+    "Select the .rhs recording in Tab 1, then 'Load Config'. sampling_rate is the file's native",
+    "rate; 'decimate' (editable next to it in Tab 1) makes the loader deliver",
+    "20 kHz / 5 = 4 kHz, matching the amplifier's 500 Hz upper bandwidth. Also",
+    "accepted by scripts/batch_decompose.py --channel-config.",
+    "Tab 2 per-grid settings to match the amplifier: low-pass 500 Hz, notch 60 Hz",
+    "with harmonics."
+  ],
+  "loader": ".rhs",
+  "sampling_rate": 20000,
+  "decimate": 5,
+  "file_path": null,
+  "output_dir": "",
+  "skip_quaternions": false,
+  "grids": [
+    {
+      "name": "Array_1",
+      "muscle": "",
+      "type": "Surface",
+      "config": "Grid (UltraHD 4x4)",
+      "start_chan": 0,
+      "end_chan": 16,
+      "color": "#4a9eff"
+    }
+  ],
+  "aux_channels": []
+}

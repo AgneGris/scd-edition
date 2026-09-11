@@ -4,6 +4,7 @@ Configuration Tab - EMG data loading and electrode configuration.
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -224,6 +225,13 @@ class GridCard(QFrame):
                 "cols": 32,
                 "spacing_mm": 4.0,
                 "n_channels": 320,
+            },
+            # Ultra-high-density 4x4 array, 250 um pitch.
+            "Grid (UltraHD 4x4)": {
+                "rows": 4,
+                "cols": 4,
+                "spacing_mm": 0.25,
+                "n_channels": 16,
             },
         },
         "Intramuscular": {
@@ -846,6 +854,30 @@ class ConfigTab(QWidget):
         fs_layout.addWidget(fs_label)
         fs_layout.addWidget(self.fsamp_edit)
         fs_layout.addWidget(fs_hz)
+
+        # Sampling rate is the file's native rate; decimation is applied by the
+        # loader on read, so the decomposition sees native / factor.
+        fs_layout.addSpacing(16)
+        decimate_label = QLabel("Decimate by:")
+        decimate_label.setStyleSheet(get_label_style(size="normal"))
+        self.decimate_spin = _NoScrollSpinBox()
+        self.decimate_spin.setRange(1, 64)
+        self.decimate_spin.setValue(1)
+        # Match the sampling-rate box: the global QSpinBox style pads 12 px per
+        # side and reserves the arrow column, so anything narrower clips the digits.
+        self.decimate_spin.setFixedWidth(100)
+        self.decimate_spin.setToolTip(
+            "Integer factor by which the loader reduces the sampling rate "
+            "(anti-aliased). 1 = keep the file's native rate."
+        )
+        self.decimate_spin.valueChanged.connect(self._on_decimate_changed)
+        self.delivered_fs_label = QLabel("")
+        self.delivered_fs_label.setStyleSheet(
+            get_label_style(size="small", color="text_dim")
+        )
+        fs_layout.addWidget(decimate_label)
+        fs_layout.addWidget(self.decimate_spin)
+        fs_layout.addWidget(self.delivered_fs_label)
         fs_layout.addStretch()
         layout.addLayout(fs_layout)
 
@@ -911,7 +943,7 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data Files",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4 *.rhs);;All Files (*.*)",
         )
         if paths:
             self.emg_paths = [Path(p) for p in paths]
@@ -1209,10 +1241,10 @@ class ConfigTab(QWidget):
         fmt = layout.get("format", "") if layout else ""
         show = fmt in ("h5", "mat")
         self.emg_path_row.setVisible(show)
-        self.skip_quaternions_cb.setEnabled(fmt != "otb4")
-        if fmt == "otb4":
-            # The loader exposes only physical EMG channels, so its canonical
-            # channel array has no quaternion/buffer/ramp gaps.
+        self.skip_quaternions_cb.setEnabled(fmt not in ("otb4", "rhs"))
+        if fmt in ("otb4", "rhs"):
+            # These loaders expose only physical EMG channels, so their
+            # canonical channel arrays have no quaternion/buffer/ramp gaps.
             self.skip_quaternions_cb.setChecked(False)
         if show and layout:
             emg_spec = layout.get("fields", {}).get("emg", {})
@@ -1220,9 +1252,52 @@ class ConfigTab(QWidget):
             orient = emg_spec.get("orientation", "auto")
             idx = self.emg_orientation_combo.findText(orient)
             self.emg_orientation_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._set_decimate(self._layout_decimate(layout))
         if self.emg_path:
             self._refresh_file_metadata()
             self._update_file_info()
+
+    @staticmethod
+    def _layout_decimate(layout: Optional[dict]) -> int:
+        """Decimation factor a loader preset declares (1 when absent/invalid)."""
+        try:
+            return max(1, int((layout or {}).get("decimate") or 1))
+        except (TypeError, ValueError):
+            return 1
+
+    def _set_decimate(self, factor: int):
+        self.decimate_spin.blockSignals(True)
+        self.decimate_spin.setValue(int(factor))
+        self.decimate_spin.blockSignals(False)
+        self._update_delivered_fs_label()
+
+    def _on_decimate_changed(self):
+        self._update_delivered_fs_label()
+        if self.emg_path:
+            self._refresh_file_metadata()
+            self._update_file_info()
+        self._update_summary()
+
+    def _native_fs(self) -> Optional[int]:
+        try:
+            return int(self.fsamp_edit.text())
+        except ValueError:
+            return None
+
+    def _effective_fs(self) -> Optional[float]:
+        """Sampling rate the decomposition sees: native rate / decimation."""
+        fs = self._native_fs()
+        if fs is None:
+            return None
+        return fs / self.decimate_spin.value()
+
+    def _update_delivered_fs_label(self):
+        q = self.decimate_spin.value()
+        fs = self._effective_fs()
+        if q <= 1 or fs is None:
+            self.delivered_fs_label.setText("")
+        else:
+            self.delivered_fs_label.setText(f"→ {fs:g} Hz delivered")
 
     def _on_emg_path_changed(self):
         if self.emg_path:
@@ -1243,9 +1318,11 @@ class ConfigTab(QWidget):
         orientation = self.emg_orientation_combo.currentText()
         if orientation != "auto":
             layout["fields"]["emg"]["orientation"] = orientation
+        layout["decimate"] = self.decimate_spin.value()
         return layout
 
     def _on_fsamp_changed(self):
+        self._update_delivered_fs_label()
         if self.emg_path:
             self._update_file_info()
 
@@ -1254,8 +1331,8 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4);;"
-            "OTB Files (*.otb+ *.otb4);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4 *.rhs);;"
+            "OTB Files (*.otb+ *.otb4);;Intan Files (*.rhs);;All Files (*.*)",
         )
         if path:
             self.emg_path = Path(path)
@@ -1304,13 +1381,13 @@ class ConfigTab(QWidget):
             layout_full["fields"]["emg"].pop("channels", None)
             emg = load_field(self.emg_path, layout_full, "emg")
             n_samples, n_channels = emg.shape
-            fs = int(self.fsamp_edit.text() or 2048)
+            fs = self._effective_fs() or 2048
             duration_sec = n_samples / fs
             self._set_channel_count(n_channels)
             self._set_file_info(
                 f"Loaded: {self.emg_path.name} | "
                 f"Shape: {n_samples} samples × {n_channels} channels | "
-                f"Duration: {duration_sec:.1f}s @ {fs} Hz"
+                f"Duration: {duration_sec:.1f}s @ {fs:g} Hz"
             )
         except Exception as e:
             self._set_file_info(
@@ -1336,14 +1413,16 @@ class ConfigTab(QWidget):
         if layout is None or self.emg_path is None:
             self.file_metadata = {}
             return
-        key = (str(self.emg_path), layout.get("format"))
+        key = (str(self.emg_path), layout.get("format"), layout.get("decimate"))
         if key == self._metadata_key:
             return
         self._metadata_key = key
         self._metadata_error = None
         try:
             self.file_metadata = load_metadata(self.emg_path, layout)
-            fs = self.file_metadata.get("sampling_frequency")
+            fs = self.file_metadata.get(
+                "native_sampling_frequency", self.file_metadata.get("sampling_frequency")
+            )
             if fs is not None:
                 self.fsamp_edit.setText(str(int(fs)))
         except Exception as exc:
@@ -1389,9 +1468,13 @@ class ConfigTab(QWidget):
 
     @staticmethod
     def _is_hd_grid(card: "GridCard") -> bool:
-        """Return True if the card's electrode config name contains 'HD'."""
+        """True for OT Bioelettronica HD grids (HD<ied>MM<rows><cols>).
+
+        Only those adapters append quaternion channels; other presets that
+        merely contain "HD" in their name (e.g. the UltraHD 4x4 array) do not.
+        """
         config_name = card.config_combo.currentText()
-        return "HD" in config_name.upper()
+        return re.search(r"\bHD\d{2}MM", config_name.upper()) is not None
 
     def _quaternion_gap(self, card: "GridCard") -> int:
         """Return 6 if skip-quaternions is enabled and the card is an HD grid, else 0."""
@@ -1619,17 +1702,23 @@ class ConfigTab(QWidget):
                 warnings.append(f"{name}: Start channel must be < End channel")
                 card.set_validation_status(False, msg)
 
-        metadata_fs = self.file_metadata.get("sampling_frequency")
+        metadata_fs = self.file_metadata.get(
+            "native_sampling_frequency", self.file_metadata.get("sampling_frequency")
+        )
         if metadata_fs is not None:
-            try:
-                configured_fs = int(self.fsamp_edit.text())
-            except ValueError:
-                configured_fs = None
+            configured_fs = self._native_fs()
             if configured_fs != int(metadata_fs):
                 warnings.append(
                     f"Sampling rate {configured_fs!r} does not match file metadata "
                     f"({int(metadata_fs)} Hz)"
                 )
+        native_fs = self._native_fs()
+        q = self.decimate_spin.value()
+        if native_fs is not None and q > 1 and native_fs % q:
+            warnings.append(
+                f"Sampling rate {native_fs} Hz is not divisible by the decimation "
+                f"factor {q}"
+            )
 
         return len(warnings) == 0, warnings
 
@@ -1672,6 +1761,7 @@ class ConfigTab(QWidget):
             "version": 1,
             "loader": self.loader_combo.currentText(),
             "sampling_rate": int(self.fsamp_edit.text() or 2048),
+            "decimate": self.decimate_spin.value(),
             "file_path": str(self.emg_path) if self.emg_path else None,
             "output_dir": self.output_dir_edit.text(),
             "skip_quaternions": self.skip_quaternions_cb.isChecked(),
@@ -1705,8 +1795,12 @@ class ConfigTab(QWidget):
             if idx >= 0:
                 self.emg_orientation_combo.setCurrentIndex(idx)
 
-        # Sampling rate
+        # Sampling rate (native) and decimation. Configs saved before the
+        # decimate field existed fall back to the loader preset's own value.
         self.fsamp_edit.setText(str(cfg.get("sampling_rate", 2048)))
+        self._set_decimate(
+            cfg.get("decimate", self._layout_decimate(self._get_current_layout()))
+        )
 
         # Defaults to True for configs saved before this field existed
         self.skip_quaternions_cb.setChecked(cfg.get("skip_quaternions", True))
@@ -1817,6 +1911,8 @@ class ConfigTab(QWidget):
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Sampling rate must be a number")
             return
+        # The loader decimates on read, so downstream stages see this rate.
+        fs //= self.decimate_spin.value()
 
         config = self.config_manager.create_default_session(
             name="Decomposition Session"

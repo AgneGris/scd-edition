@@ -34,7 +34,7 @@ def load_field(
     Parameters
     ----------
     file_path : Path
-        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+, .otb4)
+        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+, .otb4, .rhs)
     layout : dict
         Parsed YAML layout descriptor (from load_layout)
     field : str
@@ -45,6 +45,11 @@ def load_field(
     torch.Tensor
         For 2D fields: (samples, channels) — always this orientation.
         For 1D fields: (samples,)
+
+    A top-level ``decimate: q`` in the layout reduces the sampling rate of
+    every field by an integer factor ``q`` (anti-aliased for signals, plain
+    subsampling for timestamps). Use it for recordings sampled far above the
+    amplifier bandwidth so extension factors stay meaningful in milliseconds.
     """
     file_path = Path(file_path)
     fmt = layout["format"]
@@ -73,7 +78,41 @@ def load_field(
                 f"{int(expected_channels)}"
             )
 
-    return torch.from_numpy(raw).to(dtype=torch.float32)
+    q = decimation_factor(layout)
+    if q > 1:
+        raw = _decimate(raw, q, subsample_only=(field == "timestamps"))
+
+    return torch.from_numpy(np.ascontiguousarray(raw)).to(dtype=torch.float32)
+
+
+def decimation_factor(layout: Dict[str, Any]) -> int:
+    """Integer decimation factor declared by a layout (1 when absent)."""
+    q = layout.get("decimate")
+    if q is None:
+        return 1
+    try:
+        q = int(q)
+    except (TypeError, ValueError):
+        raise ValueError(f"Layout 'decimate' must be an integer, got {q!r}")
+    if q < 1:
+        raise ValueError(f"Layout 'decimate' must be >= 1, got {q}")
+    return q
+
+
+def _decimate(data: np.ndarray, q: int, subsample_only: bool = False) -> np.ndarray:
+    """Reduce the sample rate along axis 0 by an integer factor.
+
+    Signals are low-pass filtered with a zero-phase FIR before subsampling so
+    nothing above the new Nyquist folds back. Timestamps are only subsampled —
+    filtering a time axis would be meaningless.
+    """
+    if subsample_only:
+        return data[::q]
+    from scipy.signal import decimate
+
+    return decimate(
+        np.asarray(data, dtype=np.float64), q, ftype="fir", axis=0, zero_phase=True
+    ).astype(np.float32)
 
 
 # File extensions each layout format can describe. Used when picking a preset
@@ -86,6 +125,7 @@ FORMAT_EXTENSIONS: Dict[str, tuple] = {
     "npy": (".npy",),
     "otb": (".otb", ".otb+"),
     "otb4": (".otb4",),
+    "rhs": (".rhs",),
 }
 
 
@@ -144,14 +184,35 @@ def can_read_field(
 def load_metadata(
     file_path: Union[str, Path], layout: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Load acquisition metadata when the selected format provides it."""
+    """Load acquisition metadata when the selected format provides it.
+
+    When the layout decimates, the reported sampling frequency and sample
+    count describe the data as ``load_field`` delivers it; the file's own
+    values are kept under ``native_*`` keys.
+    """
     file_path = Path(file_path)
     fmt = layout["format"]
     if fmt == "otb4":
         from scd_app.io.otb4_loader import read_otb4_metadata
 
-        return read_otb4_metadata(file_path)
-    return {"format": fmt}
+        meta = read_otb4_metadata(file_path)
+    elif fmt == "rhs":
+        from scd_app.io.rhs_loader import read_rhs_metadata
+
+        meta = read_rhs_metadata(file_path)
+    else:
+        return {"format": fmt}
+
+    q = decimation_factor(layout)
+    if q > 1 and "sampling_frequency" in meta:
+        meta["native_sampling_frequency"] = meta["sampling_frequency"]
+        meta["sampling_frequency"] = meta["sampling_frequency"] / q
+        if "n_samples" in meta:
+            meta["native_n_samples"] = meta["n_samples"]
+            # scipy.signal.decimate yields ceil(n / q) samples.
+            meta["n_samples"] = -(-int(meta["n_samples"]) // q)
+        meta["decimate"] = q
+    return meta
 
 
 def _read_array(
@@ -178,6 +239,10 @@ def _read_array(
         from scd_app.io.otb4_loader import read_otb4
 
         return read_otb4(file_path, field_name)
+    elif fmt == "rhs":
+        from scd_app.io.rhs_loader import read_rhs
+
+        return read_rhs(file_path, field_name)
     else:
         raise ValueError(f"Unsupported format: '{fmt}'")
 

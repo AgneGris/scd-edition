@@ -557,6 +557,33 @@ GRID_POSITIONS_8x4 = {
 # the simulation HDF5 files, so port-local indices are already grid keys.
 GRID_POSITIONS_SIM10x32 = {i: (i // 32, i % 32) for i in range(320)}
 
+# ULTRAHD 4X4: 16-channel ultra-high-density array, 4 rows x 4 cols, 250 um
+# pitch. Channel numbering (ch1..ch16 in file order) wraps around the array
+# rather than running row-major:
+#
+#     ch1   ch2   ch15  ch16
+#     ch3   ch4   ch13  ch14
+#     ch5   ch6   ch11  ch12
+#     ch7   ch8   ch9   ch10
+GRID_POSITIONS_ULTRAHD4x4 = {
+    1: (0, 0),
+    2: (0, 1),
+    15: (0, 2),
+    16: (0, 3),
+    3: (1, 0),
+    4: (1, 1),
+    13: (1, 2),
+    14: (1, 3),
+    5: (2, 0),
+    6: (2, 1),
+    11: (2, 2),
+    12: (2, 3),
+    7: (3, 0),
+    8: (3, 1),
+    9: (3, 2),
+    10: (3, 3),
+}
+
 
 ELECTRODE_GRIDS = {
     "GR04MM1305": {
@@ -655,6 +682,13 @@ ELECTRODE_GRIDS = {
         "n_channels": 320,
         "muap_mapping": {i: i for i in range(320)},
         "positions": GRID_POSITIONS_SIM10x32,
+    },
+    "ULTRAHD 4X4": {
+        "grid_shape": (4, 4),
+        "ied_mm": 0.25,
+        "n_channels": 16,
+        "muap_mapping": {i: i + 1 for i in range(16)},
+        "positions": GRID_POSITIONS_ULTRAHD4x4,
     },
 }
 
@@ -1447,9 +1481,10 @@ class EditionTab(QWidget):
                     ch.setdefault(k, v)
             # Old files stored mvc in Volts (OTB display units); signal is in mV.
             # Any legitimate force MVC will be ≥ 1 mV, so mvc < 1.0 means it's in V.
+            # Formats whose aux streams are genuinely in Volts are exempt.
             mvc = ch.get("mvc")
             if (
-                acquisition_format != "otb4"
+                acquisition_format not in ("otb4", "rhs")
                 and mvc is not None
                 and 0 < float(mvc) < 1.0
             ):

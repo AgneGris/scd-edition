@@ -1,0 +1,31 @@
+# Intan RHS2000 Recording Layout (.rhs)
+# Amplifier channels, board ADC inputs and the sampling rate are read from the
+# file header; only channels enabled at recording time are exposed, in the
+# order they appear in the header (port A, B, C, D; ascending native number).
+#
+# Units: EMG in mV (0.195 uV/bit), board ADC "aux" in V (312.5 uV/bit).
+#
+# Data are delivered at the native sampling rate unless a decimation factor is
+# set ("Decimate by" next to the sampling rate in the Configuration tab, or a
+# top-level "decimate: q" here to seed that box). Intan amplifiers are often
+# run at 20-30 kHz with a 500 Hz-1 kHz upper bandwidth, in which case
+# decimating to a few kHz keeps extension factors meaningful in milliseconds
+# and cuts runtime proportionally. See resources/sessions/ultrahd_16ch_array.json
+# for a worked example (20 kHz / 5 = 4 kHz).
+
+name: ".rhs"
+format: rhs
+
+fields:
+  emg:
+    path: emg
+    channels: null              # null = all enabled amplifier channels
+    expected_channels: null
+    orientation: samples_first  # reader already returns (samples, channels)
+  aux:
+    path: aux
+    channels: null
+    expected_channels: null
+    orientation: samples_first
+  timestamps:
+    path: timestamps

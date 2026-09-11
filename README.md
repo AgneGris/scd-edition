@@ -126,6 +126,7 @@ Click **Select Input File** and choose your EMG recording. Supported formats:
 |-----------|--------|
 | `.otb+`   | OTBiolab+ (Quattrocento amplifier) |
 | `.otb4`   | OTBiolab 4 (Novecento+ amplifier) |
+| `.rhs`    | Intan RHS2000 (Stim/Recording Controller) |
 | `.mat`    | MATLAB |
 | `.h5`     | HDF5 |
 | `.npy`    | NumPy array |
@@ -135,7 +136,9 @@ You can also queue **multiple files** for batch processing using **Add Files**. 
 
 #### 2. Set the sampling rate
 
-Enter the sampling rate of your recording in Hz (e.g. `2048` for a Quattrocento at 2 kHz).
+Enter the sampling rate of your recording in Hz (e.g. `2048` for a Quattrocento at 2 kHz). For formats that carry it in the file (`.otb4`, `.rhs`) it is filled in automatically.
+
+**Decimate by** (next to the sampling rate) reduces the rate the decomposition works at by an integer factor, for any file format. The loader low-pass filters (zero-phase FIR) before subsampling, so nothing aliases, and the delivered rate is shown beside the box. Use it for recordings sampled far above the amplifier bandwidth — e.g. a 20 kHz Intan file band-limited at 500 Hz decimated by 5 to 4 kHz — so that extension factors and MUAP windows stay meaningful in milliseconds and runtime drops accordingly. Loader presets can seed the box (`decimate:` in the loader YAML); the value is saved with the configuration. The factor must divide the sampling rate exactly.
 
 #### 3. Add electrode grids
 
@@ -377,6 +380,7 @@ Saved Edition files can be reloaded in any order and remain fully editable.
 |--------|-------|
 | `.otb+` | OTBiolab+ archive (Quattrocento). EMG channels and auxiliary `.sip` channels (force, angle) are both supported. |
 | `.otb4` | OTBiolab 4 archive (Novecento+). EMG grids, external/AUX channels, sampling rate, and acquisition metadata are discovered from the embedded track metadata. |
+| `.rhs` | Intan RHS2000 recording. Enabled amplifier channels (mV), board ADC inputs (V, as `aux`) and the sampling rate are read from the file header. Intan recordings are usually heavily oversampled relative to the amplifier bandwidth; use **Decimate by** (e.g. 5 for 20 kHz → 4 kHz with a 500 Hz band limit). |
 | `.mat` | MATLAB v5 and v7.3 (HDF5-based). The field containing the EMG matrix is configurable via `src/scd_app/resources/loaders_configs/loader_mat.yaml`. |
 | `.h5` | HDF5. Field path configurable via `src/scd_app/resources/loaders_configs/loader_h5.yaml`. |
 | `.npy` | NumPy array, shape `(channels, samples)` or `(samples, channels)` — the longer axis is assumed to be time. |
@@ -419,6 +423,9 @@ MVC in mV = OTBiolab+ displayed value × 1000
 Example: if OTBiolab+ shows `MVC = 0.049 V` for Middle Extension → enter `49` in the config.
 
 You can find the displayed MVC value by opening the `.otb+` file in OTBiolab+ and reading the scale shown next to the force channel.
+
+**For Intan recordings (.rhs):** board ADC inputs are converted to Volts
+(312.5 µV/bit); enter MVC in Volts.
 
 **For Novecento+ recordings (.otb4):** external/AUX channels are converted
 using their per-track ADC metadata and retain the unit declared in the file

@@ -48,6 +48,12 @@ All decomposition defaults match the GUI's automatic-mode defaults.
 import argparse
 import json
 import sys
+
+# Progress messages use arrows/dashes; a cp1252 console (Windows default) would
+# otherwise raise UnicodeEncodeError mid-run, before results are saved.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(errors="replace")
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -200,6 +206,7 @@ def _setup_from_channel_config(json_path: Path, param_overrides: dict) -> tuple:
         ".otb+": "loader_otb+.yaml",
         ".h5": "loader_h5.yaml",
         ".mat": "loader_mat.yaml",
+        ".rhs": "loader_rhs.yaml",
     }
     loader_key = data.get("loader", ".otb+")
     loader_file = loader_map.get(loader_key, "loader_otb+.yaml")
@@ -216,6 +223,14 @@ def _setup_from_channel_config(json_path: Path, param_overrides: dict) -> tuple:
             )
         )
     layout = load_layout(loader_path)
+
+    # The GUI stores the file's native rate plus an optional decimation factor;
+    # the loader applies the factor on read, so downstream sees rate / factor.
+    if "decimate" in data:
+        layout["decimate"] = int(data["decimate"])
+    from scd_app.io.data_loader import decimation_factor
+
+    sampling_rate = sampling_rate // decimation_factor(layout)
 
     return grid_configs, layout, sampling_rate
 
@@ -805,6 +820,7 @@ def main():
         "mat": ".mat",
         "npy": ".npy",
         "otb": ".otb+",
+        "rhs": ".rhs",
     }
     default_ext = _fmt_ext.get(layout.get("format", ""), ".h5")
     search_ext = args.ext if args.ext else default_ext

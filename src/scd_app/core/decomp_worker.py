@@ -502,6 +502,7 @@ class DecompositionWorker(QThread):
         ".otb": "otb",
         ".otb+": "otb",
         ".otb4": "otb4",
+        ".rhs": "rhs",
     }
 
     def _load_data_field_channel(
