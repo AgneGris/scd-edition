@@ -93,3 +93,47 @@ scd_app = [
     "gui/style/fonts/*.ttf",
     "resources/loaders_configs/*.yaml",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.8",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+extend-exclude = ["pytest_*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PERF", "RUF"]
+ignore = [
+    "E501",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "RUF012",
+    # int(round(x)) guards against numpy 1.x returning a numpy scalar from
+    # round(); the results index arrays, so the explicit cast stays.
+    "RUF046",
+    # Per-item try/except inside a loop is deliberate: one bad preset or
+    # parameter field must not abort the whole batch.
+    "PERF203",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Console encoding must be reconfigured before the remaining imports run.
+"scripts/*.py" = ["E402"]
+
+# PySide6, matplotlib and pyqtgraph ship stubs narrower than their runtime
+# behaviour, and Qt widget state is guarded by invariants the checker cannot
+# trace across methods. These rules report almost only that, so they are off.
+[tool.pyright]
+include = ["src", "scripts"]
+exclude = ["**/__pycache__", ".venv", "pytest_*"]
+pythonVersion = "3.10"
+reportArgumentType = "none"
+reportAttributeAccessIssue = "none"
+reportCallIssue = "none"
+reportOptionalMemberAccess = "none"
+reportOptionalSubscript = "none"
+reportPossiblyUnboundVariable = "none"

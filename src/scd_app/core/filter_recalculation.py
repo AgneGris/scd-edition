@@ -28,7 +28,7 @@ Coordinate spaces:
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Any
 
 import numpy as np
 import torch
@@ -46,19 +46,19 @@ logger = logging.getLogger(__name__)
 
 def _get_scd_modules():
     try:
-        from scd.processing.preprocess import (
-            whiten,
-            autocorrelation_whiten,
-            extend,
-            time_differentiate,
-            notch_filter,
-            low_pass_filter,
-            high_pass_filter,
-        )
         from scd.models.timestamping import (
-            spike_triggered_average,
             peel_off_source,
             source_to_timestamps,
+            spike_triggered_average,
+        )
+        from scd.processing.preprocess import (
+            autocorrelation_whiten,
+            extend,
+            high_pass_filter,
+            low_pass_filter,
+            notch_filter,
+            time_differentiate,
+            whiten,
         )
 
         return {
@@ -122,7 +122,7 @@ def _replace_bad_channels(
     return raw_port
 
 
-def _get_plateau_bounds(decomp_data: dict, full_samples: int) -> Tuple[int, int]:
+def _get_plateau_bounds(decomp_data: dict, full_samples: int) -> tuple[int, int]:
     """Extract plateau start/end from decomp_data."""
     sel_pts = decomp_data.get("plateau_coords", decomp_data.get("selected_points"))
     start, end = 0, full_samples
@@ -137,10 +137,11 @@ def _get_plateau_bounds(decomp_data: dict, full_samples: int) -> Tuple[int, int]
     return start, end
 
 
-def _normalise_filters(port_filters_raw, n_units: int) -> List[Optional[np.ndarray]]:
+def _normalise_filters(port_filters_raw, n_units: int) -> list[np.ndarray | None]:
     """Normalise saved filters into a list of numpy arrays."""
     if port_filters_raw is None:
         return [None] * n_units
+    result: list[np.ndarray | None]
     if isinstance(port_filters_raw, list):
         result = [_to_numpy(f) if f is not None else None for f in port_filters_raw]
     elif isinstance(port_filters_raw, np.ndarray) and port_filters_raw.ndim >= 2:
@@ -154,8 +155,8 @@ def _normalise_filters(port_filters_raw, n_units: int) -> List[Optional[np.ndarr
 
 def _partition_peel_sequence(
     peel_sequence: list,
-    units_per_port: List[int],
-) -> List[list]:
+    units_per_port: list[int],
+) -> list[list]:
     """Split global peel_off_sequence into per-port sub-sequences."""
     boundaries = []
     offset = 0
@@ -163,7 +164,7 @@ def _partition_peel_sequence(
         boundaries.append((offset, offset + n))
         offset += n
 
-    port_seqs: List[list] = [[] for _ in units_per_port]
+    port_seqs: list[list] = [[] for _ in units_per_port]
     current_port = 0
     for entry in peel_sequence:
         uid = entry.get("accepted_unit_idx")
@@ -183,9 +184,9 @@ def _partition_peel_sequence(
 
 def preprocess_emg(
     raw_emg: torch.Tensor,  # (samples, active_channels)
-    config: Dict[str, Any],
+    config: dict[str, Any],
     device: torch.device,
-    w_mat: Optional[np.ndarray] = None,
+    w_mat: np.ndarray | None = None,
 ) -> torch.Tensor:
     """Preprocess raw EMG exactly as SCD does. Returns (samples, ext_ch)."""
     fn = _get_scd_modules()
@@ -222,7 +223,7 @@ def _apply_filter_torch(
     emg: torch.Tensor,
     filt: np.ndarray,
     device: torch.device,
-    norm_slice: Optional[slice] = None,
+    norm_slice: slice | None = None,
 ) -> torch.Tensor:
     """Apply filter and z-score normalize source."""
     filt_t = torch.from_numpy(filt.astype(np.float32)).to(device)
@@ -294,7 +295,7 @@ def snap_to_local_peak(
     if np.unique(snapped).size != snapped.size:
         # Revert only the colliding entries; if that still leaves duplicates,
         # keep the original timestamps so no spike is ever lost.
-        seen: Dict[int, int] = {}
+        seen: dict[int, int] = {}
         for i, v in enumerate(snapped):
             key = int(v)
             if key in seen:
@@ -333,8 +334,8 @@ def _peel_with_original(
 def _process_saved_peel_entry(
     emg_running: torch.Tensor,
     entry: dict,
-    filt: Optional[np.ndarray],
-    port_filters: List[Optional[np.ndarray]],
+    filt: np.ndarray | None,
+    port_filters: list[np.ndarray | None],
     local_idx: int,
     start_sample: int,
     end_sample: int,
@@ -345,7 +346,7 @@ def _process_saved_peel_entry(
     recalculate_filters: bool,
     redetect_timestamps: bool,
     square_source: bool,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
     """Handle one accepted peel entry when use_saved_peel_timestamps=True.
 
     Returns (source_np, ts_display, new_filt_np).
@@ -405,7 +406,7 @@ def _process_recalc_entry(
     device: torch.device,
     fn: dict,
     square_source: bool,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Handle one accepted peel entry in recalculate mode.
 
     Returns (source_np, ts_abs).
@@ -423,19 +424,19 @@ def _process_recalc_entry(
 def _replay_peel_off_for_port(
     emg_full: torch.Tensor,  # (full_samples, ext_ch) — will be cloned
     port_peel_seq: list,  # this port's peel_off_sequence entries
-    port_filters: List[Optional[np.ndarray]],  # current filters for this port
+    port_filters: list[np.ndarray | None],  # current filters for this port
     global_offset: int,  # sum of units in earlier ports
     start_sample: int,
     end_sample: int,
     window_size: int,
     min_peak_sep: int,
     device: torch.device,
-    stop_before_local_idx: Optional[int] = None,  # None = process all
+    stop_before_local_idx: int | None = None,  # None = process all
     square_source: bool = True,
     use_saved_peel_timestamps: bool = False,
     recalculate_filters: bool = False,
     redetect_timestamps: bool = True,
-) -> Tuple[torch.Tensor, Dict[int, Tuple[np.ndarray, np.ndarray]]]:
+) -> tuple[torch.Tensor, dict[int, tuple[np.ndarray, np.ndarray]]]:
     """Replay peel-off for one port, optionally stopping before a given unit.
 
     Args:
@@ -450,7 +451,7 @@ def _replay_peel_off_for_port(
     """
     fn = _get_scd_modules()
     emg_running = emg_full.clone()
-    results_dict: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+    results_dict: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
     for entry in port_peel_seq:
         uid = entry.get("accepted_unit_idx")
@@ -509,11 +510,9 @@ def _replay_peel_off_for_port(
 
 def compute_all_full_sources(
     decomp_data: dict,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     redetect_timestamps: bool = True,
-) -> Tuple[
-    Dict[int, List[Tuple[Optional[np.ndarray], Optional[np.ndarray]]]], int, int, str
-]:
+) -> tuple[dict[int, list[tuple[np.ndarray | None, np.ndarray | None]]], int, int, str]:
     """Compute full-length sources and timestamps for all MUs.
 
     redetect_timestamps: when True (default) re-detect spike times from the
@@ -572,7 +571,7 @@ def compute_all_full_sources(
     if not _is_per_port_peel:
         _port_peel_seqs_old = _partition_peel_sequence(peel_seq_raw, units_per_port)
 
-    port_results: Dict[int, list] = {}
+    port_results: dict[int, list] = {}
     ch_offset = 0
 
     for port_idx, port_name in enumerate(ports):
@@ -673,9 +672,9 @@ def recalculate_unit_filter(
     global_unit_idx: int,
     start_sample: int,
     end_sample: int,
-    current_port_filters: List[Optional[np.ndarray]],
-    device: Optional[torch.device] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    current_port_filters: list[np.ndarray | None],
+    device: torch.device | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Recalculate filter + source for one MU after edits.
 
     Returns (filter, full-length source, timestamps).  The timestamps are the
@@ -784,7 +783,7 @@ def recalculate_unit_filter(
     )
 
 
-def supports_filter_recalculation(decomp_data: dict) -> Tuple[bool, str]:
+def supports_filter_recalculation(decomp_data: dict) -> tuple[bool, str]:
     missing = [
         k
         for k in ("preprocessing_config", "peel_off_sequence", "data")
@@ -801,7 +800,7 @@ def supports_filter_recalculation(decomp_data: dict) -> Tuple[bool, str]:
     return True, ""
 
 
-def supports_full_source_computation(decomp_data: dict) -> Tuple[bool, str]:
+def supports_full_source_computation(decomp_data: dict) -> tuple[bool, str]:
     missing = [
         k
         for k in ("preprocessing_config", "peel_off_sequence", "data", "mu_filters")

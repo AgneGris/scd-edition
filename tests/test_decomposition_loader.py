@@ -7,7 +7,7 @@ import torch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from scd_app.io.decomposition_loader import (  # noqa: E402
+from scd_app.io.decomposition_loader import (
     GUI_FORMAT,
     UPSTREAM_SCD_FORMAT,
     UnsupportedDecompositionFormat,

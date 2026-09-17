@@ -42,6 +42,7 @@ tests/
 tests/*
 !tests/test_smoke.py
 !tests/test_decomposition_loader.py
+!tests/test_mu_properties.py
 export/
 docs/
 bats/

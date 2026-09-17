@@ -3,7 +3,7 @@ mu_properties_panel.py — Rich motor unit properties display widget.
 
 Replaces the thin QualityBar with a structured panel that shows:
   • Firing properties  (DR, CoV, n_spikes, min_ISI)
-  • Quality metrics    (SIL, PNR)
+  • Quality metrics    (SIL, MUAP template stability)
   • MUAP features      (PTP, peak frequency, waveform length …)
   • Reliability flag
   • Duplicate candidates
@@ -12,25 +12,23 @@ Replaces the thin QualityBar with a structured panel that shows:
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QWidget,
-    QHBoxLayout,
     QVBoxLayout,
-    QGroupBox,
+    QWidget,
 )
-
-# Re-use the app's colour / size tokens
-from scd_app.gui.style.styling import COLORS, FONT_SIZES, FONT_FAMILY
 
 from scd_app.core.mu_properties import MUProperties
 
+# Re-use the app's colour / size tokens
+from scd_app.gui.style.styling import COLORS, FONT_FAMILY, FONT_SIZES
 
 # ── colour helpers ─────────────────────────────────────────────────────────────
 
@@ -68,7 +66,7 @@ class _ClickableLabel(QLabel):
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def mouseReleaseEvent(self, event):  # noqa: N802 — Qt naming
+    def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         elif event.button() == Qt.MouseButton.RightButton:
@@ -110,7 +108,7 @@ class _MetricRow(QWidget):
         lay.addWidget(self._lbl)
         lay.addWidget(self._val, stretch=1)
 
-    def set_value(self, text: str, color: Optional[str] = None):
+    def set_value(self, text: str, color: str | None = None):
         self._val.setText(text)
         c = color or _C_FG
         style = self._VALUE_STYLE + f" color: {c};"
@@ -130,7 +128,7 @@ class _Section(QGroupBox):
             f"""
             QGroupBox {{
                 color: {_C_INFO};
-                font-size: {FONT_SIZES.get('small', '9pt')};
+                font-size: {FONT_SIZES.get("small", "9pt")};
                 font-family: {FONT_FAMILY};
                 font-weight: bold;
                 border: 1px solid {_C_BORD};
@@ -230,12 +228,16 @@ class MUPropertiesPanel(QFrame):
         # — Quality —
         sec_quality = _Section("Quality")
         self._r_sil = _MetricRow("SIL")
-        self._r_pnr = _MetricRow("PNR")
+        self._r_muap_stability = _MetricRow("MUAP stability")
+        self._r_muap_stability.setToolTip(
+            "Correlation (0–1) between interleaved split-half MUAP templates. "
+            "This is a descriptive consistency measure, not an acceptance threshold."
+        )
         self._r_spike_centroid = _MetricRow("Spike centroid")
         self._r_noise_centroid = _MetricRow("Noise centroid")
         for r in (
             self._r_sil,
-            self._r_pnr,
+            self._r_muap_stability,
             self._r_spike_centroid,
             self._r_noise_centroid,
         ):
@@ -286,9 +288,9 @@ class MUPropertiesPanel(QFrame):
         self._r_sil.set_value(
             _fmt(props.sil, 3), _color_for_flag(flags["sil"], na=math.isnan(props.sil))
         )
-        self._r_pnr.set_value(
-            _fmt(props.pnr_db, 1, "dB"),
-            _color_for_flag(flags["pnr"], na=math.isnan(props.pnr_db)),
+        self._r_muap_stability.set_value(
+            _fmt(props.muap_template_stability, 3),
+            _C_DIM if math.isnan(props.muap_template_stability) else _C_FG,
         )
         self._r_spike_centroid.set_value(_fmt(props.spike_centroid, 3))
         self._r_noise_centroid.set_value(_fmt(props.noise_centroid, 3))
@@ -382,7 +384,7 @@ class MUPropertiesPanel(QFrame):
             self._r_cov,
             self._r_min_isi,
             self._r_sil,
-            self._r_pnr,
+            self._r_muap_stability,
             self._r_spike_centroid,
             self._r_noise_centroid,
             self._r_ptp,
@@ -409,8 +411,6 @@ class QualityBar(MUPropertiesPanel):
 
     def set_metrics(self, sil: float, cov: float, fr: float, n_spikes: int):
         """Legacy API — builds a minimal MUProperties and forwards it."""
-        from core.mu_properties import MUProperties
-
         p = MUProperties(
             n_spikes=n_spikes,
             sil=sil,

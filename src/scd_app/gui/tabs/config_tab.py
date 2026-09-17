@@ -2,55 +2,53 @@
 Configuration Tab - EMG data loading and electrode configuration.
 """
 
+import contextlib
 import copy
 import json
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import numpy as np
-from scd_app.io.data_loader import (
-    load_layout,
-    load_field,
-    load_metadata,
-    can_read_field,
-    format_matches_extension,
-)
-
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
-    QComboBox,
-    QCheckBox,
-    QSpinBox,
-    QScrollArea,
-    QFrame,
     QMessageBox,
-    QFileDialog,
-    QGroupBox,
+    QPushButton,
+    QScrollArea,
     QSizePolicy,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIntValidator
 
 from scd_app.core.config import (
     ConfigManager,
-    ElectrodeConfig,
-    PortConfig,
-    FilterConfig,
     DecompositionConfig,
+    ElectrodeConfig,
+    FilterConfig,
+    PortConfig,
 )
-
 from scd_app.gui.style.styling import (
     COLORS,
-    FONT_SIZES,
     FONT_FAMILY,
-    get_label_style,
+    FONT_SIZES,
     get_button_style,
+    get_label_style,
+)
+from scd_app.io.data_loader import (
+    can_read_field,
+    format_matches_extension,
+    load_field,
+    load_layout,
+    load_metadata,
 )
 
 
@@ -66,8 +64,8 @@ class ChannelAllocationBar(QFrame):
         self.setStyleSheet(
             f"""
             ChannelAllocationBar {{
-                background-color: {COLORS['background_input']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["background_input"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
             }}
         """
@@ -77,7 +75,7 @@ class ChannelAllocationBar(QFrame):
         self.max_channels = n
         self.update()
 
-    def set_allocations(self, allocations: List[Tuple[int, int, str, str]]):
+    def set_allocations(self, allocations: list[tuple[int, int, str, str]]):
         self.allocations = allocations
         self.update()
 
@@ -87,8 +85,8 @@ class ChannelAllocationBar(QFrame):
         if self.max_channels == 0:
             return
 
-        from PySide6.QtGui import QPainter, QColor, QPen, QFont
         from PySide6.QtCore import QRect
+        from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -279,7 +277,7 @@ class GridCard(QFrame):
                 background-color: {self.color}30;
                 color: {self.color};
                 border-radius: 3px;
-                font-size: {FONT_SIZES['small']};
+                font-size: {FONT_SIZES["small"]};
                 font-weight: bold;
                 padding: 1px 4px;
             }}
@@ -335,13 +333,13 @@ class GridCard(QFrame):
             f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_muted']};
+                color: {COLORS["text_muted"]};
                 border-radius: 10px;
                 font-weight: bold; font-size: 18pt;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['error']}40;
-                color: {COLORS['error_bright']};
+                background-color: {COLORS["error"]}40;
+                color: {COLORS["error_bright"]};
             }}
         """
         )
@@ -353,16 +351,16 @@ class GridCard(QFrame):
         self.setStyleSheet(
             f"""
             GridCard {{
-                background-color: {COLORS['background_light']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["background_light"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
             }}
             QLabel {{
-                color: {COLORS['foreground']};
+                color: {COLORS["foreground"]};
                 font-family: '{FONT_FAMILY}';
             }}
             QPushButton {{
-                color: {COLORS['foreground']};
+                color: {COLORS["foreground"]};
             }}
         """
         )
@@ -406,7 +404,7 @@ class GridCard(QFrame):
             "color": self.color,
         }
 
-    def get_geometry(self) -> Tuple[int, int, float, int]:
+    def get_geometry(self) -> tuple[int, int, float, int]:
         electrode_type = self.type_combo.currentText()
         config_name = self.config_combo.currentText()
         if electrode_type in self.ELECTRODE_CONFIGS:
@@ -421,7 +419,7 @@ class GridCard(QFrame):
         _, _, _, n_ch = self.get_geometry()
         return n_ch if n_ch > 0 else self.end_spin.value() - self.start_spin.value()
 
-    def get_channel_range(self) -> Tuple[int, int]:
+    def get_channel_range(self) -> tuple[int, int]:
         return self.start_spin.value(), self.end_spin.value()
 
     def set_start_channel(self, start: int):
@@ -502,7 +500,7 @@ class AuxChannelCard(QFrame):
                 background-color: {self.AUX_COLOR}30;
                 color: {self.AUX_COLOR};
                 border-radius: 3px;
-                font-size: {FONT_SIZES['small']};
+                font-size: {FONT_SIZES["small"]};
                 font-weight: bold;
                 padding: 1px 4px;
             }}
@@ -615,13 +613,13 @@ class AuxChannelCard(QFrame):
             f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_muted']};
+                color: {COLORS["text_muted"]};
                 border-radius: 10px;
                 font-weight: bold; font-size: 14pt;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['error']}40;
-                color: {COLORS['error_bright']};
+                background-color: {COLORS["error"]}40;
+                color: {COLORS["error_bright"]};
             }}
         """
         )
@@ -631,12 +629,12 @@ class AuxChannelCard(QFrame):
         self.setStyleSheet(
             f"""
             AuxChannelCard {{
-                background-color: {COLORS['background_light']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["background_light"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
             }}
             QLabel {{
-                color: {COLORS['foreground']};
+                color: {COLORS["foreground"]};
                 font-family: '{FONT_FAMILY}';
             }}
         """
@@ -709,7 +707,7 @@ class AuxChannelCard(QFrame):
     def get_field_path(self) -> str:
         return self.field_edit.text().strip()
 
-    def get_channel_range(self) -> Tuple[int, int]:
+    def get_channel_range(self) -> tuple[int, int]:
         return self.start_spin.value(), self.end_spin.value()
 
     def get_data(self) -> dict:
@@ -727,10 +725,8 @@ class AuxChannelCard(QFrame):
             d["field_path"] = field_path
         mvc_text = self.mvc_edit.text().strip()
         if mvc_text:
-            try:
+            with contextlib.suppress(ValueError):
                 d["mvc"] = float(mvc_text)
-            except ValueError:
-                pass
         return d
 
     def set_values(
@@ -741,7 +737,7 @@ class AuxChannelCard(QFrame):
         start: int = 0,
         end: int = 0,
         unit: str = "",
-        mvc: Optional[float] = None,
+        mvc: float | None = None,
         field_path: str = "",
     ):
         self.name_edit.setText(name)
@@ -774,8 +770,8 @@ class ConfigTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.config_manager = ConfigManager()
-        self.emg_path: Optional[Path] = None
-        self.emg_paths: List[Path] = []  # all selected files for batch
+        self.emg_path: Path | None = None
+        self.emg_paths: list[Path] = []  # all selected files for batch
         self.max_channels: int = 256
         # False whenever max_channels is a placeholder rather than a count read
         # from the file — a wrong loader must not masquerade as a small file.
@@ -783,8 +779,8 @@ class ConfigTab(QWidget):
         self.file_metadata: dict = {}
         self._metadata_key = None
         self._metadata_error = None
-        self.grid_cards: List[GridCard] = []
-        self.aux_cards: List[AuxChannelCard] = []
+        self.grid_cards: list[GridCard] = []
+        self.aux_cards: list[AuxChannelCard] = []
 
         self._setup_ui()
         self._show_initial_state()
@@ -989,15 +985,15 @@ class ConfigTab(QWidget):
             f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_muted']};
-                border: 1px solid {COLORS['border']};
+                color: {COLORS["text_muted"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 4px;
                 padding: 8px 12px;
-                font-size: {FONT_SIZES['normal']};
+                font-size: {FONT_SIZES["normal"]};
             }}
             QPushButton:hover {{
-                background-color: {COLORS['background_hover']};
-                color: {COLORS['foreground']};
+                background-color: {COLORS["background_hover"]};
+                color: {COLORS["foreground"]};
             }}
         """
         )
@@ -1012,15 +1008,15 @@ class ConfigTab(QWidget):
         self.skip_quaternions_cb.setStyleSheet(
             f"""
             QCheckBox {{
-                color: {COLORS['foreground']};
-                font-size: {FONT_SIZES['small']};
-                background-color: {COLORS['background_input']};
-                border: 2px solid {COLORS['border']};
+                color: {COLORS["foreground"]};
+                font-size: {FONT_SIZES["small"]};
+                background-color: {COLORS["background_input"]};
+                border: 2px solid {COLORS["border"]};
                 border-radius: 4px;
                 padding: 4px 8px;
             }}
             QCheckBox:hover {{
-                background-color: {COLORS['background_hover']};
+                background-color: {COLORS["background_hover"]};
             }}
             """
         )
@@ -1046,12 +1042,12 @@ class ConfigTab(QWidget):
             f"""
             QScrollArea {{ background: transparent; border: none; }}
             QScrollBar:vertical {{
-                background: {COLORS['background_input']};
+                background: {COLORS["background_input"]};
                 width: 8px;
                 border-radius: 4px;
             }}
             QScrollBar::handle:vertical {{
-                background: {COLORS['text_muted']};
+                background: {COLORS["text_muted"]};
                 border-radius: 4px;
                 min-height: 30px;
             }}
@@ -1091,15 +1087,15 @@ class ConfigTab(QWidget):
             f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_muted']};
-                border: 1px solid {COLORS['border']};
+                color: {COLORS["text_muted"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 4px;
                 padding: 8px 16px;
-                font-size: {FONT_SIZES['normal']};
+                font-size: {FONT_SIZES["normal"]};
             }}
             QPushButton:hover {{
-                background-color: {COLORS['background_hover']};
-                color: {COLORS['foreground']};
+                background-color: {COLORS["background_hover"]};
+                color: {COLORS["foreground"]};
             }}
         """
         )
@@ -1110,15 +1106,15 @@ class ConfigTab(QWidget):
             f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_muted']};
-                border: 1px solid {COLORS['border']};
+                color: {COLORS["text_muted"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 4px;
                 padding: 8px 16px;
-                font-size: {FONT_SIZES['normal']};
+                font-size: {FONT_SIZES["normal"]};
             }}
             QPushButton:hover {{
-                background-color: {COLORS['background_hover']};
-                color: {COLORS['foreground']};
+                background-color: {COLORS["background_hover"]};
+                color: {COLORS["foreground"]};
             }}
         """
         )
@@ -1135,15 +1131,15 @@ class ConfigTab(QWidget):
             f"""
             QPushButton {{
                 background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['success']}, stop:1 #38A169);
+                    stop:0 {COLORS["success"]}, stop:1 #38A169);
                 color: white; border-radius: 6px; font-weight: bold;
-                font-size: {FONT_SIZES['medium']}; padding: 10px 24px;
+                font-size: {FONT_SIZES["medium"]}; padding: 10px 24px;
             }}
             QPushButton:hover {{ background-color: #48BB78; }}
             QPushButton:pressed {{ background-color: #2F855A; }}
             QPushButton:disabled {{
-                background-color: {COLORS['background_input']};
-                color: {COLORS['text_muted']};
+                background-color: {COLORS["background_input"]};
+                color: {COLORS["text_muted"]};
             }}
         """
         )
@@ -1157,10 +1153,10 @@ class ConfigTab(QWidget):
         return f"""
             QGroupBox {{
                 font-family: '{FONT_FAMILY}';
-                font-size: {FONT_SIZES['large']};
+                font-size: {FONT_SIZES["large"]};
                 font-weight: bold;
-                color: {COLORS['info']};
-                border: 2px solid {COLORS['border']};
+                color: {COLORS["info"]};
+                border: 2px solid {COLORS["border"]};
                 border-radius: 8px;
                 margin-top: 12px;
                 padding-top: 12px;
@@ -1258,7 +1254,7 @@ class ConfigTab(QWidget):
             self._update_file_info()
 
     @staticmethod
-    def _layout_decimate(layout: Optional[dict]) -> int:
+    def _layout_decimate(layout: dict | None) -> int:
         """Decimation factor a loader preset declares (1 when absent/invalid)."""
         try:
             return max(1, int((layout or {}).get("decimate") or 1))
@@ -1278,13 +1274,13 @@ class ConfigTab(QWidget):
             self._update_file_info()
         self._update_summary()
 
-    def _native_fs(self) -> Optional[int]:
+    def _native_fs(self) -> int | None:
         try:
             return int(self.fsamp_edit.text())
         except ValueError:
             return None
 
-    def _effective_fs(self) -> Optional[float]:
+    def _effective_fs(self) -> float | None:
         """Sampling rate the decomposition sees: native rate / decimation."""
         fs = self._native_fs()
         if fs is None:
@@ -1303,10 +1299,10 @@ class ConfigTab(QWidget):
         if self.emg_path:
             self._update_file_info()
 
-    def _get_current_layout(self) -> Optional[dict]:
+    def _get_current_layout(self) -> dict | None:
         return self._loader_layouts.get(self.loader_combo.currentText())
 
-    def _get_layout_with_overrides(self) -> Optional[dict]:
+    def _get_layout_with_overrides(self) -> dict | None:
         """Return a deep-copy of the current layout with the user's path/orientation applied."""
         layout = self._get_current_layout()
         if layout is None:
@@ -1421,7 +1417,8 @@ class ConfigTab(QWidget):
         try:
             self.file_metadata = load_metadata(self.emg_path, layout)
             fs = self.file_metadata.get(
-                "native_sampling_frequency", self.file_metadata.get("sampling_frequency")
+                "native_sampling_frequency",
+                self.file_metadata.get("sampling_frequency"),
             )
             if fs is not None:
                 self.fsamp_edit.setText(str(int(fs)))
@@ -1555,7 +1552,7 @@ class ConfigTab(QWidget):
                 f"background-color: {card.color}; border-radius: 2px;"
             )
 
-    def _add_aux_channel(self, index: int = None):
+    def _add_aux_channel(self, index: int | None = None):
         if index is None:
             index = len(self.aux_cards) + 1
 
@@ -1595,7 +1592,7 @@ class ConfigTab(QWidget):
             self.aux_cards.clear()
             self._update_summary()
 
-    def _validate_configuration(self) -> Tuple[bool, List[str]]:
+    def _validate_configuration(self) -> tuple[bool, list[str]]:
         warnings = []
 
         if not self.grid_cards:
@@ -1826,18 +1823,14 @@ class ConfigTab(QWidget):
         # disconnected during set_values to prevent them overwriting the saved start/end.
         for g in cfg.get("grids", []):
             card = self._add_grid_raw()
-            try:
+            with contextlib.suppress(TypeError):
                 card.type_combo.currentTextChanged.disconnect(
                     self._recalculate_all_channel_ranges
                 )
-            except TypeError:
-                pass
-            try:
+            with contextlib.suppress(TypeError):
                 card.config_combo.currentTextChanged.disconnect(
                     self._recalculate_all_channel_ranges
                 )
-            except TypeError:
-                pass
             card.blockSignals(True)
             card.set_values(
                 name=g.get("name", ""),
@@ -1892,7 +1885,7 @@ class ConfigTab(QWidget):
             self, "Load Channel Configuration", start_dir, "JSON Files (*.json)"
         )
         if path:
-            with open(path, "r") as f:
+            with open(path) as f:
                 cfg = json.load(f)
             self._config_from_dict(cfg)
 

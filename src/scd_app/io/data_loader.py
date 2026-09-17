@@ -4,15 +4,16 @@ Reads any EMG file given a YAML layout descriptor.
 """
 
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
-import yaml
+from typing import Any
+
 import numpy as np
 import torch
+import yaml
 
 
-def load_layout(yaml_path: Union[str, Path]) -> Dict[str, Any]:
+def load_layout(yaml_path: str | Path) -> dict[str, Any]:
     """Load a YAML layout descriptor."""
-    with open(yaml_path, "r") as f:
+    with open(yaml_path) as f:
         layout = yaml.safe_load(f)
 
     if "name" not in layout or "format" not in layout or "fields" not in layout:
@@ -25,7 +26,7 @@ def load_layout(yaml_path: Union[str, Path]) -> Dict[str, Any]:
 
 def load_field(
     file_path: Path,
-    layout: Dict[str, Any],
+    layout: dict[str, Any],
     field: str,
 ) -> torch.Tensor:
     """
@@ -85,15 +86,15 @@ def load_field(
     return torch.from_numpy(np.ascontiguousarray(raw)).to(dtype=torch.float32)
 
 
-def decimation_factor(layout: Dict[str, Any]) -> int:
+def decimation_factor(layout: dict[str, Any]) -> int:
     """Integer decimation factor declared by a layout (1 when absent)."""
     q = layout.get("decimate")
     if q is None:
         return 1
     try:
         q = int(q)
-    except (TypeError, ValueError):
-        raise ValueError(f"Layout 'decimate' must be an integer, got {q!r}")
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"Layout 'decimate' must be an integer, got {q!r}") from err
     if q < 1:
         raise ValueError(f"Layout 'decimate' must be >= 1, got {q}")
     return q
@@ -119,7 +120,7 @@ def _decimate(data: np.ndarray, q: int, subsample_only: bool = False) -> np.ndar
 # for a file: an HDF5-backed format opens a .hdf5 file whatever its fields are
 # called, so the format has to be ruled in by extension before its dataset
 # paths are probed.
-FORMAT_EXTENSIONS: Dict[str, tuple] = {
+FORMAT_EXTENSIONS: dict[str, tuple] = {
     "h5": (".h5", ".hdf5"),
     "mat": (".mat",),
     "npy": (".npy",),
@@ -137,10 +138,10 @@ def format_matches_extension(fmt: str, ext: str) -> bool:
 
 
 def can_read_field(
-    file_path: Union[str, Path],
-    layout: Dict[str, Any],
+    file_path: str | Path,
+    layout: dict[str, Any],
     field: str = "emg",
-) -> Optional[bool]:
+) -> bool | None:
     """
     Check whether a layout's field resolves in a file, without reading the data.
 
@@ -165,7 +166,7 @@ def can_read_field(
     if fmt not in ("h5", "mat"):
         return None
 
-    keys = [field_spec.get("path")] + list(field_spec.get("fallback_keys", []))
+    keys = [field_spec.get("path"), *list(field_spec.get("fallback_keys", []))]
     keys = [k for k in keys if k]
     if not keys:
         return False
@@ -181,9 +182,7 @@ def can_read_field(
         return None if fmt == "mat" else False
 
 
-def load_metadata(
-    file_path: Union[str, Path], layout: Dict[str, Any]
-) -> Dict[str, Any]:
+def load_metadata(file_path: str | Path, layout: dict[str, Any]) -> dict[str, Any]:
     """Load acquisition metadata when the selected format provides it.
 
     When the layout decimates, the reported sampling frequency and sample
@@ -218,9 +217,9 @@ def load_metadata(
 def _read_array(
     file_path: Path,
     fmt: str,
-    field_spec: Dict,
-    field_name: str = None,
-    layout: Dict = None,
+    field_spec: dict,
+    field_name: str | None = None,
+    layout: dict | None = None,
 ) -> np.ndarray:
     """Read a raw numpy array from file using the field spec."""
 
@@ -247,7 +246,7 @@ def _read_array(
         raise ValueError(f"Unsupported format: '{fmt}'")
 
 
-def _read_h5(file_path: Path, dataset_path: str, fallbacks: List[str]) -> np.ndarray:
+def _read_h5(file_path: Path, dataset_path: str, fallbacks: list[str]) -> np.ndarray:
     """Read from HDF5 file."""
     import h5py
 
@@ -269,7 +268,7 @@ def _read_h5(file_path: Path, dataset_path: str, fallbacks: List[str]) -> np.nda
         )
 
 
-def _read_mat(file_path: Path, var_name: str, fallbacks: List[str]) -> np.ndarray:
+def _read_mat(file_path: Path, var_name: str, fallbacks: list[str]) -> np.ndarray:
     """Read from .mat file (v5/v7 via scipy, v7.3 via h5py).
 
     var_name supports dot notation for MATLAB struct fields, e.g. "signal.data"
@@ -324,10 +323,9 @@ def _read_mat(file_path: Path, var_name: str, fallbacks: List[str]) -> np.ndarra
         if result is not None:
             return result
 
-    available = [k for k in mat.keys() if not k.startswith("__")]
+    available = [k for k in mat if not k.startswith("__")]
     raise KeyError(
-        f"Variable '{var_name}' not found in {file_path.name}. "
-        f"Available: {available}"
+        f"Variable '{var_name}' not found in {file_path.name}. Available: {available}"
     )
 
 

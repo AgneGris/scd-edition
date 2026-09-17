@@ -12,7 +12,6 @@ import numpy as np
 
 from scd_app.core.utils import to_numpy
 
-
 GUI_FORMAT = "scd-edition"
 UPSTREAM_SCD_FORMAT = "swarm-contrastive-decomposition"
 _GUI_REQUIRED_KEYS = {"ports", "discharge_times", "pulse_trains"}

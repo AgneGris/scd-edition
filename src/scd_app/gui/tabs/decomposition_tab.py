@@ -2,62 +2,62 @@
 Decomposition Tab - Manages EMG signal decomposition.
 """
 
-from pathlib import Path
-from typing import Optional, Dict, Set
+import contextlib
 import re
+from pathlib import Path
+
 import numpy as np
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGridLayout,
-    QPushButton,
-    QLabel,
-    QLineEdit,
-    QComboBox,
-    QCheckBox,
-    QStackedWidget,
-    QSizePolicy,
-    QFrame,
-    QMessageBox,
-    QDialog,
-    QSplitter,
-    QSpinBox,
-    QDoubleSpinBox,
-    QApplication,
-    QScrollArea,
-)
-from PySide6.QtCore import Qt, QTimer, Signal, QEventLoop
+import torch
 
 # Visualization
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from matplotlib.widgets import Button
 from matplotlib.ticker import FuncFormatter
+from matplotlib.widgets import Button
+from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
+from scd_app.core.config import SessionConfig
+from scd_app.core.decomp_worker import DecompositionWorker
 from scd_app.gui.style.styling import (
     COLORS,
     FONT_SIZES,
     get_section_header_style,
 )
 
-from scd_app.core.config import SessionConfig
-import torch
-from scd_app.core.decomp_worker import DecompositionWorker
-
 # ── Filename → active-aux helpers ────────────────────────────────────────────
-_FINGER_ABBREV: Dict[str, str] = {
+_FINGER_ABBREV: dict[str, str] = {
     "T": "Thumb",
     "I": "Index",
     "M": "Middle",
     "R": "Ring",
     "L": "Little",
 }
-_MOTION_ABBREV: Dict[str, str] = {"ext": "Ext", "flex": "Flex"}
+_MOTION_ABBREV: dict[str, str] = {"ext": "Ext", "flex": "Flex"}
 _TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
 
 
-def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
+def _parse_task_targets(file_stem: str) -> set[str] | None:
     """Return expected active unit strings (e.g. {'Index Ext'}) from the filename."""
     m = _TASK_PATTERN.search(file_stem)
     if not m:
@@ -93,9 +93,9 @@ class DecompositionTab(QWidget):
         super().__init__(parent)
 
         # State
-        self.config: Optional[SessionConfig] = None
-        self.emg_path: Optional[Path] = None
-        self.grid_configs: Dict = {}
+        self.config: SessionConfig | None = None
+        self.emg_path: Path | None = None
+        self.grid_configs: dict = {}
         self.worker = None
 
         # EMG data
@@ -208,9 +208,9 @@ class DecompositionTab(QWidget):
         layout.setSpacing(4)
 
         # === Global parameters (all grids) ===
-        layout.addWidget(
-            QLabel("GLOBAL PARAMETERS", styleSheet=get_section_header_style("info"))
-        )
+        global_header = QLabel("GLOBAL PARAMETERS")
+        global_header.setStyleSheet(get_section_header_style("info"))
+        layout.addWidget(global_header)
 
         global_grid = QGridLayout()
         global_grid.setSpacing(2)
@@ -245,7 +245,7 @@ class DecompositionTab(QWidget):
         global_grid.addWidget(self._exponent_label, row, 0)
         global_grid.addWidget(exponent_spin, row, 1)
         self.global_widgets["fixed_exponent"] = exponent_spin
-        row += 1  # noqa: F841 (row not used after this)
+        row += 1
 
         def _on_swarm_changed(text):
             visible = text == "False"
@@ -264,9 +264,9 @@ class DecompositionTab(QWidget):
         layout.addWidget(sep)
 
         # === Batch options ===
-        layout.addWidget(
-            QLabel("BATCH OPTIONS", styleSheet=get_section_header_style("info"))
-        )
+        batch_header = QLabel("BATCH OPTIONS")
+        batch_header.setStyleSheet(get_section_header_style("info"))
+        layout.addWidget(batch_header)
 
         batch_grid = QGridLayout()
         batch_grid.setSpacing(2)
@@ -304,9 +304,9 @@ class DecompositionTab(QWidget):
         layout.addWidget(sep2)
 
         # === Per-grid parameters ===
-        layout.addWidget(
-            QLabel("PER-GRID PARAMETERS", styleSheet=get_section_header_style("info"))
-        )
+        pergrid_header = QLabel("PER-GRID PARAMETERS")
+        pergrid_header.setStyleSheet(get_section_header_style("info"))
+        layout.addWidget(pergrid_header)
 
         sel_layout = QHBoxLayout()
         sel_layout.addWidget(QLabel("Select Grid:"))
@@ -339,15 +339,15 @@ class DecompositionTab(QWidget):
             f"""
             QPushButton {{
                 background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['success']}, stop:1 #2F855A);
+                    stop:0 {COLORS["success"]}, stop:1 #2F855A);
                 color: white; border-radius: 6px; font-weight: bold;
-                font-size: {FONT_SIZES['medium']};
+                font-size: {FONT_SIZES["medium"]};
             }}
             QPushButton:hover {{ background-color: #48BB78; }}
             QPushButton:pressed {{ background-color: #276749; }}
             QPushButton:disabled {{
-                background-color: {COLORS['background_input']};
-                color: {COLORS['text_muted']};
+                background-color: {COLORS["background_input"]};
+                color: {COLORS["text_muted"]};
             }}
         """
         )
@@ -398,8 +398,7 @@ class DecompositionTab(QWidget):
         self.file_path_label = QLabel("No file loaded")
         self.file_path_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.file_path_label.setStyleSheet(
-            f"color: {COLORS['text_dim']}; font-size: 10pt; "
-            f"padding: 5px; margin: 5px;"
+            f"color: {COLORS['text_dim']}; font-size: 10pt; padding: 5px; margin: 5px;"
         )
 
         self.grid_indicator_label = QLabel("")
@@ -497,6 +496,7 @@ class DecompositionTab(QWidget):
     def _load_emg_data(self):
         """Load EMG data using the layout from config."""
         import copy
+
         from scd_app.io.data_loader import load_field
 
         try:
@@ -518,9 +518,7 @@ class DecompositionTab(QWidget):
             print(f"Loaded EMG data: {self.emg_data.shape}")
 
         except Exception as e:
-            QMessageBox.critical(
-                self, "Load Error", f"Failed to load EMG data:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "Load Error", f"Failed to load EMG data:\n{e!s}")
             print(f"Error loading EMG data: {e}")
 
     def _load_grid_configs(self):
@@ -734,7 +732,7 @@ class DecompositionTab(QWidget):
         """Apply bandpass and notch filters to a (samples, channels) float array.
         Returns filtered array of the same shape. Falls back to raw on error."""
         try:
-            from scipy.signal import butter, sosfiltfilt, iirnotch, tf2sos
+            from scipy.signal import butter, iirnotch, sosfiltfilt, tf2sos
 
             nyq = fs / 2.0
             highpass = float(params.get("highpass_hz", 10))
@@ -794,7 +792,7 @@ class DecompositionTab(QWidget):
 
         # Init rejection masks
         self.rejected_channels = []
-        for port_idx, (port_name, config) in enumerate(grid_list):
+        for port_idx, (_port_name, config) in enumerate(grid_list):
             n_channels = len(config["channels"])
             if port_idx < len(self.rejected_channels):
                 pass  # keep existing
@@ -1455,10 +1453,9 @@ class DecompositionTab(QWidget):
             # Disconnect and remove all navigation buttons
             for btn in nav.get("buttons", []):
                 btn.disconnect_events()
-                try:
+                # The axes may already have been removed.
+                with contextlib.suppress(Exception):
                     btn.ax.remove()
-                except Exception:
-                    pass  # Ignore if already removed
             nav["buttons"] = []
 
         event_loop = QEventLoop()
@@ -2209,10 +2206,8 @@ class DecompositionTab(QWidget):
 
         def _on_stopped(_info):
             """Worker finished the current grid and stopped naturally."""
-            try:
+            with contextlib.suppress(Exception):
                 self.worker.source_found.disconnect(_on_source)
-            except Exception:
-                pass
             dlg.accept()
 
         def _on_cancel_now():
@@ -2240,7 +2235,7 @@ class DecompositionTab(QWidget):
             partial = self.worker._partial_results
             n_complete = len(partial[0]["ports"]) if partial else 0
 
-            if n_complete > 0:
+            if partial and n_complete > 0:
                 try:
                     results, _ = partial
                     self.worker._save_results(results)

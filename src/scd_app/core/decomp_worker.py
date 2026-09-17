@@ -2,15 +2,13 @@
 Decomposition Worker - Manages EMG signal decomposition (via SCD).
 """
 
-from pathlib import Path
-from typing import Optional, List, Tuple
 import copy
-import numpy as np
 import pickle
+from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
-
+import numpy as np
 import torch
+from PySide6.QtCore import QThread, Signal
 from scd.config.structures import Config
 from scd.models.scd import SwarmContrastiveDecomposition
 from scd.processing.preprocess import replace_bad_channels_with_noise
@@ -32,13 +30,13 @@ class DecompositionWorker(QThread):
         self,
         emg_data: torch.Tensor,
         grid_configs: dict,
-        rejected_channels: List[np.ndarray],
+        rejected_channels: list[np.ndarray],
         plateau_coords: np.ndarray,
         sampling_rate: int,
         save_path: Path,
-        aux_configs: Optional[List[dict]] = None,
-        emg_file_path: Optional[Path] = None,
-        data_layout: Optional[dict] = None,
+        aux_configs: list[dict] | None = None,
+        emg_file_path: Path | None = None,
+        data_layout: dict | None = None,
     ):
         super().__init__()
         self.emg_data = emg_data
@@ -208,7 +206,7 @@ class DecompositionWorker(QThread):
             traceback.print_exc()
             self.error.emit(str(e))
 
-    def _create_notch_params(self, params: dict) -> Optional[Tuple[int, float, bool]]:
+    def _create_notch_params(self, params: dict) -> tuple[int, float, bool] | None:
         """Create notch_params tuple from params dict."""
         notch_freq = self._parse_notch(params["notch_filter"])
         if notch_freq is None:
@@ -243,7 +241,7 @@ class DecompositionWorker(QThread):
             remove_bad_fr=False,
         )
 
-    def _parse_notch(self, notch_str: str) -> Optional[int]:
+    def _parse_notch(self, notch_str: str) -> int | None:
         """Parse notch filter string to frequency."""
         if notch_str == "50":
             return 50
@@ -380,7 +378,7 @@ class DecompositionWorker(QThread):
                     )
                     continue
                 sig = full_np[s:e, :].squeeze()  # (samples,) for single-ch aux
-                entry = {k: v for k, v in a.items()}  # flat copy of full aux config
+                entry = dict(a.items())  # flat copy of full aux config
                 entry["data"] = sig
                 aux_channels_saved.append(entry)
             print(f"  [aux] Saved {len(aux_channels_saved)} aux channel(s).")
@@ -437,9 +435,7 @@ class DecompositionWorker(QThread):
             pickle.dump(save_dict, f)
             print(f"File saved successfully: {self.save_path}")
 
-    def _load_aux_file_channel(
-        self, file_path: Path, aux_config: dict
-    ) -> Optional[dict]:
+    def _load_aux_file_channel(self, file_path: Path, aux_config: dict) -> dict | None:
         """Load one channel from the format's canonical auxiliary field."""
         from scd_app.io.data_loader import load_field
 
@@ -488,7 +484,7 @@ class DecompositionWorker(QThread):
             return None
 
         sig = aux_np[:, s:e].squeeze()
-        entry = {k: v for k, v in aux_config.items()}  # flat copy
+        entry = dict(aux_config.items())  # flat copy
         entry["data"] = sig
         return entry
 
@@ -507,7 +503,7 @@ class DecompositionWorker(QThread):
 
     def _load_data_field_channel(
         self, file_path: Path, aux_config: dict
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Load one aux channel from a named field inside the data file.
 
         Unlike the "signal" source this does not slice the EMG array, so it can
@@ -567,7 +563,7 @@ class DecompositionWorker(QThread):
             print(f"  [aux] Skipping '{name}': field '{field_path}' is empty")
             return None
 
-        entry = {k: v for k, v in aux_config.items()}  # flat copy
+        entry = dict(aux_config.items())  # flat copy
         entry["data"] = sig
         print(f"  [aux] '{name}': read {field_path} -> {sig.shape[0]} samples")
         return entry

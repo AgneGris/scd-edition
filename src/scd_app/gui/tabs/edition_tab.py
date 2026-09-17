@@ -7,75 +7,73 @@ is shown as a shaded band on the source plot.
 """
 
 import logging
-from typing import Optional, List, Dict, Tuple
-from pathlib import Path
 import pickle
 import traceback
+from pathlib import Path
 
 import numpy as np
-from scipy import signal as sp_signal
-
-from PySide6.QtCore import Qt, Signal, QEvent, QTimer
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QSplitter,
-    QToolBar,
-    QComboBox,
-    QLabel,
-    QPushButton,
-    QFileDialog,
-    QMessageBox,
-    QStatusBar,
-    QApplication,
-    QPlainTextEdit,
-    QDialog,
-    QDialogButtonBox,
-    QSizePolicy,
-)
+import pyqtgraph as pg
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
-    QKeySequence,
-    QFont,
-    QPixmap,
-    QIcon,
-    QPainter,
     QColor,
+    QFont,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
     QShortcut,
 )
-import pyqtgraph as pg
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
+from scipy import signal as sp_signal
 
-from scd_app.gui.style.styling import (
-    COLORS,
-    FONT_SIZES,
-    FONT_FAMILY,
-    get_section_header_style,
+from scd_app.core.auto_editor import MIN_SPIKES, auto_edit
+from scd_app.core.constants import ROA_THRESHOLD
+from scd_app.core.filter_recalculation import (
+    compute_all_full_sources,
+    recalculate_unit_filter,
+    supports_filter_recalculation,
+    supports_full_source_computation,
 )
 from scd_app.core.mu_model import EditMode, MotorUnit, UndoAction
 from scd_app.core.mu_properties import (
     MUProperties,
+    build_spike_train_matrix,
     compute_port_properties,
     recompute_unit_properties,
-    build_spike_train_matrix,
 )
 from scd_app.core.utils import to_numpy
-from scd_app.core.constants import ROA_THRESHOLD
-from scd_app.io.decomposition_loader import load_decomposition_file
+from scd_app.gui.style.styling import (
+    COLORS,
+    FONT_FAMILY,
+    FONT_SIZES,
+    get_section_header_style,
+)
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
+from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
 from scd_app.gui.widgets.source_plot_widget import (
+    FiringRatePlotWidget,
     SelectionArm,
     SourcePlotWidget,
-    FiringRatePlotWidget,
 )
-from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
-from scd_app.core.filter_recalculation import (
-    recalculate_unit_filter,
-    supports_filter_recalculation,
-    supports_full_source_computation,
-    compute_all_full_sources,
-)
-from scd_app.core.auto_editor import auto_edit, MIN_SPIKES
+from scd_app.io.decomposition_loader import load_decomposition_file
 
 logger = logging.getLogger(__name__)
 
@@ -693,7 +691,7 @@ ELECTRODE_GRIDS = {
 }
 
 
-def get_grid_config(electrode_type: Optional[str]) -> Optional[Dict]:
+def get_grid_config(electrode_type: str | None) -> dict | None:
     if electrode_type is None:
         return None
     key = electrode_type.upper()
@@ -716,35 +714,33 @@ class EditionTab(QWidget):
         super().__init__(parent)
 
         self._fsamp = fsamp
-        self._ports: Dict[str, List[MotorUnit]] = {}
-        self._emg_data: Dict[str, np.ndarray] = {}
-        self._grid_info: Dict[str, Optional[Dict]] = {}
-        self._raw_port_channels: Dict[str, np.ndarray] = {}
-        self._rejected_ch_positions: Dict[str, set] = {}
+        self._ports: dict[str, list[MotorUnit]] = {}
+        self._emg_data: dict[str, np.ndarray] = {}
+        self._grid_info: dict[str, dict | None] = {}
+        self._raw_port_channels: dict[str, np.ndarray] = {}
+        self._rejected_ch_positions: dict[str, set] = {}
 
-        self._current_port: Optional[str] = None
+        self._current_port: str | None = None
         self._current_mu_idx: int = -1
         self._edit_mode = EditMode.VIEW
         self._sel_arm = SelectionArm.NONE
-        self._loaded_path: Optional[Path] = None
-        self._output_path: Optional[Path] = None
+        self._loaded_path: Path | None = None
+        self._output_path: Path | None = None
         self._quit_after_save: bool = False
-        self._config_aux_channels: list = (
-            []
-        )  # from the last applied config, used to fill missing MVC on load
+        self._config_aux_channels: list = []  # from the last applied config, used to fill missing MVC on load
 
         self._start_sample: int = 0
         self._end_sample: int = 0
         self._full_source_mode: bool = False
         self._redetect_timestamps: bool = True
 
-        self._undo_stack: Dict[tuple, List[UndoAction]] = {}
-        self._redo_stack: Dict[tuple, List[UndoAction]] = {}
+        self._undo_stack: dict[tuple, list[UndoAction]] = {}
+        self._redo_stack: dict[tuple, list[UndoAction]] = {}
         self._edit_history: list = []  # accumulated across sessions; saved in pickle
-        self._original_decomp_data: Optional[dict] = None
+        self._original_decomp_data: dict | None = None
         self._filter_recalc_available: bool = False
-        self._muap_popout: Optional[MuapPopoutDialog] = None
-        self._last_action_msg: Optional[str] = None
+        self._muap_popout: MuapPopoutDialog | None = None
+        self._last_action_msg: str | None = None
 
         # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
         self._props_timer = QTimer(self)
@@ -754,9 +750,9 @@ class EditionTab(QWidget):
         self._pending_source_changed: bool = False
 
         # MUAP grid reuse: keep cell PlotDataItems alive across MU switches
-        self._muap_cell_plots: Dict[Tuple[int, int], object] = {}
-        self._muap_waveform_items: Dict[Tuple[int, int], object] = {}
-        self._muap_grid_key: Optional[Tuple] = None
+        self._muap_cell_plots: dict[tuple[int, int], object] = {}
+        self._muap_waveform_items: dict[tuple[int, int], object] = {}
+        self._muap_grid_key: tuple | None = None
         self._muap_title_label = None
 
         self._build_ui()
@@ -890,30 +886,30 @@ class EditionTab(QWidget):
         tb.setStyleSheet(
             f"""
             QToolBar {{
-                background-color: {COLORS.get('background_light', '#2a2a3c')};
-                border-bottom: 1px solid {COLORS['border']};
+                background-color: {COLORS.get("background_light", "#2a2a3c")};
+                border-bottom: 1px solid {COLORS["border"]};
                 spacing: 4px;
                 padding: 2px;
             }}
             QToolBar QLabel {{
-                color: {COLORS['foreground']};
-                font-size: {FONT_SIZES.get('small', '9pt')};
+                color: {COLORS["foreground"]};
+                font-size: {FONT_SIZES.get("small", "9pt")};
             }}
             QToolButton {{
-                color: {COLORS['foreground']};
+                color: {COLORS["foreground"]};
                 background: transparent;
                 border: 1px solid transparent;
                 border-radius: 4px;
                 padding: 4px 8px;
-                font-size: {FONT_SIZES.get('small', '9pt')};
+                font-size: {FONT_SIZES.get("small", "9pt")};
             }}
             QToolButton:hover {{
-                background-color: {COLORS.get('background_input', '#33334d')};
-                border-color: {COLORS['border']};
+                background-color: {COLORS.get("background_input", "#33334d")};
+                border-color: {COLORS["border"]};
             }}
             QToolButton:checked {{
-                background-color: {COLORS.get('info', '#89b4fa')}30;
-                border-color: {COLORS.get('info', '#89b4fa')};
+                background-color: {COLORS.get("info", "#89b4fa")}30;
+                border-color: {COLORS.get("info", "#89b4fa")};
             }}
         """
         )
@@ -1045,9 +1041,9 @@ class EditionTab(QWidget):
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(8)
 
-        lay.addWidget(
-            QLabel("PORT SELECTION", styleSheet=get_section_header_style("info"))
-        )
+        port_header = QLabel("PORT SELECTION")
+        port_header.setStyleSheet(get_section_header_style("info"))
+        lay.addWidget(port_header)
         port_row = QHBoxLayout()
         port_lbl = QLabel("Port:")
         port_lbl.setStyleSheet(
@@ -1060,7 +1056,9 @@ class EditionTab(QWidget):
         port_row.addWidget(self.port_combo, stretch=1)
         lay.addLayout(port_row)
 
-        lay.addWidget(QLabel("MOTOR UNIT", styleSheet=get_section_header_style("info")))
+        mu_header = QLabel("MOTOR UNIT")
+        mu_header.setStyleSheet(get_section_header_style("info"))
+        lay.addWidget(mu_header)
         mu_row = QHBoxLayout()
         mu_lbl = QLabel("Unit:")
         mu_lbl.setStyleSheet(
@@ -1091,19 +1089,17 @@ class EditionTab(QWidget):
             }}
             QPushButton:hover {{
                 background-color: {_bg_hover};
-                border-color: {COLORS.get('info', '#4a9eff')};
+                border-color: {COLORS.get("info", "#4a9eff")};
             }}
             QPushButton:disabled {{
-                color: {COLORS.get('text_dim', '#6c7086')};
+                color: {COLORS.get("text_dim", "#6c7086")};
                 border-color: {_border};
             }}"""
 
         # ── Session-level actions ────────────────────────────────────────
-        lay.addWidget(
-            QLabel(
-                "SESSION", styleSheet=get_section_header_style("warning", margin_top=0)
-            )
-        )
+        session_header = QLabel("SESSION")
+        session_header.setStyleSheet(get_section_header_style("warning", margin_top=0))
+        lay.addWidget(session_header)
 
         self.btn_flag_within_dups = QPushButton("⧉ Within-Port Duplicates")
         self.btn_flag_within_dups.setStyleSheet(base_btn_style)
@@ -1528,7 +1524,7 @@ class EditionTab(QWidget):
 
         skip_recalc = bool(decomp_data.get("skip_filter_recalc", False))
         can_full, reason = supports_full_source_computation(decomp_data)
-        full_port_results: Dict[int, list] = {}
+        full_port_results: dict[int, list] = {}
         start_sample = 0
         end_sample = emg_full.shape[1] if emg_full is not None else 0
 
@@ -1815,7 +1811,7 @@ class EditionTab(QWidget):
                 grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
                 fsamp=self._fsamp,
             )
-            for mu, p in zip(motor_units, props_list):
+            for mu, p in zip(motor_units, props_list, strict=True):
                 mu.props = p
 
         self._ports[port_name] = motor_units
@@ -1834,7 +1830,8 @@ class EditionTab(QWidget):
         # Restore per-unit notes (absent in older files → default empty string)
         port_notes = decomp_data.get("mu_notes", [])
         if port_idx < len(port_notes):
-            for mu, note in zip(motor_units, port_notes[port_idx]):
+            # Saved notes may not cover every unit in older files; truncate.
+            for mu, note in zip(motor_units, port_notes[port_idx], strict=False):
                 mu.notes = note if isinstance(note, str) else ""
 
         self._grid_info[port_name] = grid_cfg
@@ -2129,7 +2126,7 @@ class EditionTab(QWidget):
 
     def _find_nearest_peak(
         self, source, click_sample: int, view_start: int, view_end: int
-    ) -> Optional[int]:
+    ) -> int | None:
         if view_start >= view_end:
             return None
         view_width = view_end - view_start
@@ -2366,7 +2363,7 @@ class EditionTab(QWidget):
             QMessageBox.critical(self, "Recalculation Error", str(e))
             self._update_status("Filter recalculation failed")
 
-    def _global_unit_idx(self, port_name: str, mu_idx: int) -> Optional[int]:
+    def _global_unit_idx(self, port_name: str, mu_idx: int) -> int | None:
         offset = 0
         for pname, mus in self._ports.items():
             if pname == port_name:
@@ -2378,10 +2375,10 @@ class EditionTab(QWidget):
     # Motor-unit accessors
     # ------------------------------------------------------------------
 
-    def _current_mu(self) -> Optional[MotorUnit]:
+    def _current_mu(self) -> MotorUnit | None:
         return self._get_mu(self._current_port, self._current_mu_idx)
 
-    def _get_mu(self, port, idx) -> Optional[MotorUnit]:
+    def _get_mu(self, port, idx) -> MotorUnit | None:
         if port is None or idx < 0:
             return None
         mus = self._ports.get(port, [])
@@ -2705,7 +2702,7 @@ class EditionTab(QWidget):
 
         Units with SIL >= 0.9 are considered borderline and left for manual
         review (they pass the primary quality criterion even if secondary
-        metrics such as COV or PNR are still failing).
+        metrics such as CoV or discharge rate are still failing).
 
         Units whose properties have not yet been computed are skipped.
         """
@@ -2713,7 +2710,7 @@ class EditionTab(QWidget):
         borderline_count = 0
         no_props_count = 0
 
-        for port_name, mus in self._ports.items():
+        for mus in self._ports.values():
             for mu in mus:
                 if mu.flagged_duplicate:
                     continue  # already flagged — leave it
@@ -2748,8 +2745,12 @@ class EditionTab(QWidget):
         if mu.props is None:
             return (-float("inf"), -float("inf"), 0, -mu.id)
         sil = mu.props.sil if not np.isnan(mu.props.sil) else -float("inf")
-        pnr = mu.props.pnr_db if not np.isnan(mu.props.pnr_db) else -float("inf")
-        return (sil, pnr, mu.props.n_spikes, -mu.id)
+        stability = (
+            mu.props.muap_template_stability
+            if not np.isnan(mu.props.muap_template_stability)
+            else -float("inf")
+        )
+        return (sil, stability, mu.props.n_spikes, -mu.id)
 
     def _clear_duplicate_roles(self, kind: str):
         """Clear `kind` duplicate roles/partners; un-flag MUs not also deleted by the other kind."""
@@ -2927,7 +2928,7 @@ class EditionTab(QWidget):
                             )
 
         # Assign cross-port roles: lower quality than any partner → delete
-        for port_name, mus in self._ports.items():
+        for mus in self._ports.values():
             for mu in mus:
                 if not mu.cross_duplicate_partners:
                     continue
@@ -3217,7 +3218,7 @@ class EditionTab(QWidget):
         self._plot_muap()
         self._update_quality_panel(mu)
 
-    def _update_quality_panel(self, mu: Optional[MotorUnit]):
+    def _update_quality_panel(self, mu: MotorUnit | None):
         if mu is None:
             self.quality_bar.clear_properties()
             self.btn_notes.setEnabled(False)
@@ -3273,7 +3274,7 @@ class EditionTab(QWidget):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             mu.notes = editor.toPlainText()
 
-    def _update_status(self, msg: Optional[str] = None):
+    def _update_status(self, msg: str | None = None):
         if msg:
             self._last_action_msg = msg
             self.status_bar.showMessage(msg)
@@ -3350,7 +3351,10 @@ class EditionTab(QWidget):
                 )
 
     def _render_muap_grid(
-        self, muap_grid: np.ndarray, grid_cfg: dict, rejected_positions: set = None
+        self,
+        muap_grid: np.ndarray,
+        grid_cfg: dict,
+        rejected_positions: set | None = None,
     ):
         """Render MUAPs in physical grid layout (portrait, rows × cols).
 

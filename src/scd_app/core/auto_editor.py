@@ -30,7 +30,6 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import numpy as np
 
@@ -86,7 +85,7 @@ def _local_mean_heights(heights: np.ndarray, k: int, window: int = 2) -> float:
     return float(np.mean(neighbours)) if neighbours else float(heights[k])
 
 
-def _local_mean_fr(fr_hz: np.ndarray, k: int, window: int = 5) -> Tuple[float, float]:
+def _local_mean_fr(fr_hz: np.ndarray, k: int, window: int = 5) -> tuple[float, float]:
     """Mean and std of up to 2*window firing rates surrounding index k.
 
     `fr_hz[k]` is the firing rate between spike k and spike k+1, so
@@ -272,10 +271,9 @@ def _apply_rule3(ts: np.ndarray, source: np.ndarray, fs: float) -> np.ndarray:
 
         accepted = False
         # Subrule 3-1
-        if peak_ipt > ha_plus and fr_cand < MAX_FR_HZ:
-            accepted = True
-        # Subrule 3-2
-        elif 2.0 <= fr_cand <= F_hat and peak_ipt > ha_minus:
+        if (peak_ipt > ha_plus and fr_cand < MAX_FR_HZ) or (
+            2.0 <= fr_cand <= F_hat and peak_ipt > ha_minus
+        ):
             accepted = True
 
         if accepted:
@@ -357,10 +355,7 @@ def _apply_rule4(ts: np.ndarray, source: np.ndarray, fs: float) -> np.ndarray:
             peak_ipt > 0.5 * ha_plus
             and fr_L < fm + 2.0 * fs_std
             and fr_R < fm + 2.0 * fs_std
-        ):
-            accepted = True
-        # Subrule 4-2 — ratio test: both FRs within 30% of each other
-        elif (
+        ) or (
             peak_ipt > 0.5 * ha_minus and min(fr_L, fr_R) / max(fr_L, fr_R, 1e-9) >= 0.7
         ):
             accepted = True

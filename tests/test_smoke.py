@@ -5,9 +5,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def test_main_window_constructs_headlessly():
+    from PySide6.QtWidgets import QApplication
+
     import scd_app
     from scd_app.gui.main_window import MainWindow
-    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
     window = MainWindow()

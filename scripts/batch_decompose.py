@@ -56,23 +56,20 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(errors="replace")
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 import torch
-
 from scd.processing.preprocess import (
     estimate_baseline_noise,
     replace_bad_channels_with_noise,
 )
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _parse_bad_channels(specs: List[str], grid_configs: dict) -> List[np.ndarray]:
+def _parse_bad_channels(specs: list[str], grid_configs: dict) -> list[np.ndarray]:
     """Convert  ["Grid_1:63", "Grid_2:62,63"]  to per-grid rejection masks."""
-    bad: Dict[str, List[int]] = {}
+    bad: dict[str, list[int]] = {}
     for spec in specs or []:
         name, _, idx_str = spec.partition(":")
         name = name.strip()
@@ -117,8 +114,8 @@ def _load_per_file_rejections(
 
     fname = file_path.name
     entry = data.get(fname, {})
-    masks: List[np.ndarray] = []
-    all_time_masks: List[List] = []
+    masks: list[np.ndarray] = []
+    all_time_masks: list[list] = []
 
     for port_name, config in grid_configs.items():
         n = len(config["channels"])
@@ -170,7 +167,7 @@ def _setup_from_channel_config(json_path: Path, param_overrides: dict) -> tuple:
 
     sampling_rate = data.get("sampling_rate", 10240)
 
-    grid_configs: Dict[str, dict] = {}
+    grid_configs: dict[str, dict] = {}
     for g in data.get("grids", []):
         channels = list(range(g["start_chan"], g["end_chan"]))
         n = len(channels)
@@ -235,7 +232,7 @@ def _setup_from_channel_config(json_path: Path, param_overrides: dict) -> tuple:
     return grid_configs, layout, sampling_rate
 
 
-def _parse_param_overrides(pairs: List[str]) -> dict:
+def _parse_param_overrides(pairs: list[str]) -> dict:
     """Convert ["sil_threshold=0.9", "peel_off=True"] to a dict."""
     overrides = {}
     for pair in pairs or []:
@@ -259,7 +256,7 @@ def _parse_param_overrides(pairs: List[str]) -> dict:
 
 def _build_grid_configs(session_config, param_overrides: dict) -> dict:
     """Build grid_configs dict from a SessionConfig (same logic as the GUI)."""
-    grid_configs: Dict[str, dict] = {}
+    grid_configs: dict[str, dict] = {}
     for port in session_config.ports:
         if not port.enabled:
             continue
@@ -297,18 +294,14 @@ def _build_grid_configs(session_config, param_overrides: dict) -> dict:
 
 
 def decompose_files(
-    file_paths: List[Path],
+    file_paths: list[Path],
     layout: dict,
     grid_configs: dict,
-    bad_channel_masks: List[np.ndarray],
+    bad_channel_masks: list[np.ndarray],
     sampling_rate: int,
     output_dir: Path,
-    plateau_s: Optional[
-        tuple
-    ] = None,  # (start_s, end_s) in seconds, or None = full file
-    time_masks_per_grid: Optional[
-        List
-    ] = None,  # per-grid list of [start_s, end_s] pairs
+    plateau_s: tuple | None = None,  # (start_s, end_s) in seconds, or None = full file
+    time_masks_per_grid: list | None = None,  # per-grid list of [start_s, end_s] pairs
     verbose: bool = True,
 ):
     """
@@ -366,15 +359,15 @@ def decompose_files(
 
 
 def decompose_concatenated(
-    file_paths: List[Path],
+    file_paths: list[Path],
     layout: dict,
     grid_configs: dict,
-    bad_channel_masks_per_file: List[List[np.ndarray]],
+    bad_channel_masks_per_file: list[list[np.ndarray]],
     sampling_rate: int,
     output_dir: Path,
-    plateau_s: Optional[tuple] = None,
-    time_masks_per_grid_per_file: Optional[List[List[List]]] = None,
-    output_stem: Optional[str] = None,
+    plateau_s: tuple | None = None,
+    time_masks_per_grid_per_file: list[list[list]] | None = None,
+    output_stem: str | None = None,
 ):
     """
     Load all files, concatenate along the time axis, then decompose as one signal.
@@ -422,7 +415,7 @@ def decompose_concatenated(
 
     # ── combine channel masks (OR across files) ────────────────────────────────
     n_grids = len(grid_configs)
-    combined_masks: List[np.ndarray] = []
+    combined_masks: list[np.ndarray] = []
     for grid_idx in range(n_grids):
         masks_for_grid = [
             per_file[grid_idx]
@@ -439,7 +432,7 @@ def decompose_concatenated(
         combined_masks.append(combined)
 
     # ── offset time masks ──────────────────────────────────────────────────────
-    merged_time_masks: List[List] = [[] for _ in range(n_grids)]
+    merged_time_masks: list[list] = [[] for _ in range(n_grids)]
     if time_masks_per_grid_per_file:
         for file_i, file_masks in enumerate(time_masks_per_grid_per_file):
             offset_s = sample_offsets[file_i] / sampling_rate
@@ -748,8 +741,7 @@ def main():
         type=float,
         metavar=("START_S", "END_S"),
         default=None,
-        help="Time window in seconds, e.g.  --plateau 10.0 40.0  "
-        "Default: full file.",
+        help="Time window in seconds, e.g.  --plateau 10.0 40.0  Default: full file.",
     )
     ap.add_argument(
         "--ext",
@@ -809,7 +801,7 @@ def main():
     if param_overrides:
         print(f"Param overrides: {param_overrides}")
     if any(m.any() for m in bad_masks):
-        for (pname, _), mask in zip(grid_configs.items(), bad_masks):
+        for (pname, _), mask in zip(grid_configs.items(), bad_masks, strict=True):
             if mask.any():
                 print(f"Bad channels  : {pname} → {list(np.where(mask)[0])}")
 
@@ -847,10 +839,8 @@ def main():
         print(f"  {p}")
 
     # ── output dir ────────────────────────────────────────────────────────────
-    if args.output:
-        output_dir = Path(args.output)
-    else:
-        output_dir = None  # resolved per-file below
+    # None is resolved per-file below
+    output_dir = Path(args.output) if args.output else None
 
     # ── run ───────────────────────────────────────────────────────────────────
     plateau_s = tuple(args.plateau) if args.plateau else None
@@ -865,8 +855,8 @@ def main():
 
     if args.concat:
         # ── concatenate all files and decompose as one ─────────────────────
-        masks_per_file: List[List[np.ndarray]] = []
-        time_masks_per_file: List[List[List]] = []
+        masks_per_file: list[list[np.ndarray]] = []
+        time_masks_per_file: list[list[list]] = []
         for file_path in file_paths:
             if rejections_path:
                 m, tm = _load_per_file_rejections(

@@ -3,16 +3,16 @@ Data handler for SCD-Edition.
 Manages EMG data, decomposition results, and motor unit editing.
 """
 
+import pickle
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-from collections import deque
-import pickle
+from typing import Any
 
+import h5py
 import numpy as np
 from scipy import signal
 from scipy.io import loadmat, savemat
-import h5py
 
 from scd_app.core.mu_model import MotorUnit, UndoAction
 
@@ -22,10 +22,10 @@ class PortData:
     """Data for a single port."""
 
     name: str
-    emg_raw: Optional[np.ndarray] = None  # [channels x samples]
-    emg_filtered: Optional[np.ndarray] = None  # [channels x samples]
-    emg_whitened: Optional[np.ndarray] = None  # [extended_channels x samples]
-    motor_units: List[MotorUnit] = field(default_factory=list)
+    emg_raw: np.ndarray | None = None  # [channels x samples]
+    emg_filtered: np.ndarray | None = None  # [channels x samples]
+    emg_whitened: np.ndarray | None = None  # [extended_channels x samples]
+    motor_units: list[MotorUnit] = field(default_factory=list)
 
     @property
     def n_units(self) -> int:
@@ -49,7 +49,7 @@ class DataHandler:
         self.max_undo = max_undo
 
         # Data storage
-        self.ports: Dict[str, PortData] = {}
+        self.ports: dict[str, PortData] = {}
         self.session_name: str = ""
 
         # Edit history
@@ -58,11 +58,11 @@ class DataHandler:
 
         # State tracking
         self.modified: bool = False
-        self._last_save_path: Optional[Path] = None
+        self._last_save_path: Path | None = None
 
     # === File Loading ===
 
-    def load_emg(self, path: Path, port_name: str, channels: List[int]) -> np.ndarray:
+    def load_emg(self, path: Path, port_name: str, channels: list[int]) -> np.ndarray:
         """
         Load EMG data for a specific port.
 
@@ -111,7 +111,7 @@ class DataHandler:
 
         return emg_port
 
-    def load_decomposition(self, path: Path, port_name: str) -> List[MotorUnit]:
+    def load_decomposition(self, path: Path, port_name: str) -> list[MotorUnit]:
         """
         Load decomposition results for a port.
 
@@ -164,10 +164,10 @@ class DataHandler:
                     if key in f:
                         return np.array(f[key])
                 # Take first numeric array
-                for key in f.keys():
+                for key in f:
                     if isinstance(f[key], h5py.Dataset):
                         return np.array(f[key])
-            raise ValueError("Could not find EMG data in .mat file")
+            raise ValueError("Could not find EMG data in .mat file") from None
 
         # scipy.io.loadmat result
         for key in ["emg", "EMG", "data", "signal", "signals"]:
@@ -176,9 +176,13 @@ class DataHandler:
 
         # Find first numeric array
         for key, val in data.items():
-            if not key.startswith("_") and isinstance(val, np.ndarray):
-                if val.ndim == 2 and min(val.shape) > 1:
-                    return val
+            if (
+                not key.startswith("_")
+                and isinstance(val, np.ndarray)
+                and val.ndim == 2
+                and min(val.shape) > 1
+            ):
+                return val
 
         raise ValueError("Could not find EMG data in .mat file")
 
@@ -189,7 +193,7 @@ class DataHandler:
                 if key in f:
                     return np.array(f[key])
             # Take first dataset
-            for key in f.keys():
+            for key in f:
                 if isinstance(f[key], h5py.Dataset):
                     return np.array(f[key])
         raise ValueError("Could not find EMG data in HDF5 file")
@@ -198,7 +202,7 @@ class DataHandler:
         """Load EMG from binary file."""
         return np.fromfile(path, dtype=dtype)
 
-    def _load_decomp_pkl(self, path: Path) -> Dict[str, Any]:
+    def _load_decomp_pkl(self, path: Path) -> dict[str, Any]:
         """Load SCD decomposition output."""
         with open(path, "rb") as f:
             data = pickle.load(f)
@@ -221,7 +225,7 @@ class DataHandler:
 
         return {"timestamps": timestamps, "sources": sources, "filters": filters}
 
-    def _load_decomp_mat(self, path: Path) -> Dict[str, Any]:
+    def _load_decomp_mat(self, path: Path) -> dict[str, Any]:
         """Load decomposition from .mat file."""
         try:
             data = loadmat(str(path))
@@ -330,13 +334,13 @@ class DataHandler:
                 return mu
         raise KeyError(f"Motor unit {mu_id} not found in port '{port_name}'")
 
-    def get_all_motor_units(self) -> List[Tuple[str, MotorUnit]]:
+    def get_all_motor_units(self) -> list[tuple[str, MotorUnit]]:
         """Get all motor units across all ports."""
-        result = []
-        for port_name, port in self.ports.items():
-            for mu in port.motor_units:
-                result.append((port_name, mu))
-        return result
+        return [
+            (port_name, mu)
+            for port_name, port in self.ports.items()
+            for mu in port.motor_units
+        ]
 
     # === Editing with Undo/Redo ===
 
@@ -424,10 +428,11 @@ class DataHandler:
 
         # Filter peaks already close to existing spikes
         tolerance = int(0.005 * self.fsamp)
-        new_peaks = []
-        for p in peaks_abs:
-            if len(mu.timestamps) == 0 or np.all(np.abs(mu.timestamps - p) > tolerance):
-                new_peaks.append(p)
+        new_peaks = [
+            p
+            for p in peaks_abs
+            if len(mu.timestamps) == 0 or np.all(np.abs(mu.timestamps - p) > tolerance)
+        ]
 
         if len(new_peaks) == 0:
             return
@@ -462,11 +467,10 @@ class DataHandler:
         keep_mask = np.ones(len(mu.timestamps), dtype=bool)
 
         for i, ts in enumerate(mu.timestamps):
-            if sample_start <= ts < sample_end:
-                if 0 <= ts < len(mu.source):
-                    amplitude = mu.source[ts]
-                    if y_min <= amplitude <= y_max:
-                        keep_mask[i] = False
+            if sample_start <= ts < sample_end and 0 <= ts < len(mu.source):
+                amplitude = mu.source[ts]
+                if y_min <= amplitude <= y_max:
+                    keep_mask[i] = False
 
         if np.all(keep_mask):
             return  # Nothing to delete

@@ -12,11 +12,10 @@ Contains:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Set
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtWidgets import QRubberBand
 
 from scd_app.core.mu_model import EditMode
@@ -43,18 +42,18 @@ def _nice_tick_step(max_val: float) -> float:
 
 
 # ── Filename → active-aux helpers ────────────────────────────────────────────
-_FINGER_ABBREV: Dict[str, str] = {
+_FINGER_ABBREV: dict[str, str] = {
     "T": "Thumb",
     "I": "Index",
     "M": "Middle",
     "R": "Ring",
     "L": "Little",
 }
-_MOTION_ABBREV: Dict[str, str] = {"ext": "Ext", "flex": "Flex"}
+_MOTION_ABBREV: dict[str, str] = {"ext": "Ext", "flex": "Flex"}
 _TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
 
 
-def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
+def _parse_task_targets(file_stem: str) -> set[str] | None:
     """Return expected active unit strings from the filename, or None."""
     m = _TASK_PATTERN.search(file_stem)
     if not m:
@@ -70,7 +69,7 @@ def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
     return targets or None
 
 
-def _default_aux_states(channels: list, file_stem: str) -> List[bool]:
+def _default_aux_states(channels: list, file_stem: str) -> list[bool]:
     """Return initial on/off states for aux channels based on the filename."""
     targets = _parse_task_targets(file_stem)
     if not targets:
@@ -127,7 +126,7 @@ class _AuxLegend(pg.LegendItem):
         self.updateSize()
 
     def populate(
-        self, channels: list, curves: list, initial_states: Optional[List[bool]] = None
+        self, channels: list, curves: list, initial_states: list[bool] | None = None
     ):
         self.clear()
         self._curves = list(curves)
@@ -138,7 +137,7 @@ class _AuxLegend(pg.LegendItem):
             if initial_states is not None
             else [True] * len(channels)
         )
-        for i, (ch, _curve) in enumerate(zip(channels, curves)):
+        for i, (ch, _curve) in enumerate(zip(channels, curves, strict=True)):
             meta = ch.get("meta", {})
             name = meta.get("name") or ch.get("name") or f"AUX {i + 1}"
             unit = meta.get("unit") or ch.get("unit") or ""
@@ -214,8 +213,8 @@ class SourcePlotWidget(pg.PlotWidget):
             0  # sample index where mu.source starts in the recording
         )
 
-        self._source: Optional[np.ndarray] = None
-        self._timestamps: Optional[np.ndarray] = None
+        self._source: np.ndarray | None = None
+        self._timestamps: np.ndarray | None = None
 
         self._signal_curve = self.plot([], pen=pg.mkPen("#2b6cb0", width=1))
         self._signal_curve.setDownsampling(auto=True, method="peak")
@@ -228,7 +227,7 @@ class SourcePlotWidget(pg.PlotWidget):
             hoverable=True,
         )
         self.addItem(self._spike_scatter)
-        self._plateau_region: Optional[pg.LinearRegionItem] = None
+        self._plateau_region: pg.LinearRegionItem | None = None
 
         self._aux_curves: list = []
         self._aux_raw: list = []
@@ -236,8 +235,8 @@ class SourcePlotWidget(pg.PlotWidget):
         self._legend = _AuxLegend()
         self._legend.setParentItem(self.plotItem.vb)
 
-        self._rb_widget: Optional[QRubberBand] = None
-        self._rb_origin: Optional[QPoint] = None
+        self._rb_widget: QRubberBand | None = None
+        self._rb_origin: QPoint | None = None
 
     # ------------------------------------------------------------------
     # Public setters
@@ -343,7 +342,7 @@ class SourcePlotWidget(pg.PlotWidget):
         has_mvc = False
         force_peak_pct = 0.0
         normalised: list = []
-        for raw, mvc in zip(self._aux_raw, self._aux_mvc):
+        for raw, mvc in zip(self._aux_raw, self._aux_mvc, strict=True):
             baseline = float(np.percentile(raw, 2))
             sig = raw - baseline
             if mvc is not None:
@@ -362,7 +361,7 @@ class SourcePlotWidget(pg.PlotWidget):
         scale_factor = 100.0 / display_max_pct
 
         # Pass 2: scale to source coordinates and update curves.
-        for sig_norm, curve in zip(normalised, self._aux_curves):
+        for sig_norm, curve in zip(normalised, self._aux_curves, strict=True):
             sig_scaled = sig_norm * scale_factor * src_range + src_min
             p_start = min(self._force_offset, len(sig_scaled))
             p_end = (

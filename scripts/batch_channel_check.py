@@ -31,9 +31,9 @@ import sys
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(errors="replace")
+import contextlib
 import time
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 
@@ -109,24 +109,25 @@ def _select_aux_for_task(aux_cfgs: list, direction, fingers: list) -> list:
 
 
 def _run_channel_check_gui(
-    file_paths: List[Path],
+    file_paths: list[Path],
     layout: dict,
     grid_configs: dict,
     output_path: Path,
     existing_rejections: dict,
     sampling_rate: int = 10240,
-    aux_configs: list = None,
+    aux_configs: list | None = None,
 ) -> dict:
     """
     Show the channel rejection GUI for each file in sequence.
     Saves progress to *output_path* after every file.
     Returns the complete {filename: {grid: mask}} dict.
     """
-    from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
-    from PySide6.QtCore import QEventLoop, QTimer
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     from matplotlib.widgets import Button, SpanSelector
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+
     from scd_app.io.data_loader import load_field
 
     app = QApplication.instance() or QApplication(sys.argv)
@@ -178,8 +179,8 @@ def _run_channel_check_gui(
         grid_list = list(grid_configs.items())
 
         # Initialise masks from existing JSON or zeros (supports old/new format)
-        masks: List[np.ndarray] = []
-        time_masks_list: List[List] = []
+        masks: list[np.ndarray] = []
+        time_masks_list: list[list] = []
         saved_file = rejections.get(fname, {})
         for port_name, cfg in grid_list:
             n = len(cfg["channels"])
@@ -622,7 +623,7 @@ def _run_channel_check_gui(
                 on_span_select,
                 "horizontal",
                 useblit=False,
-                props=dict(alpha=0.20, facecolor=COLORS["error"]),
+                props={"alpha": 0.20, "facecolor": COLORS["error"]},
                 button=1,
             )
             span_sel.set_active(is_mask_mode)
@@ -651,10 +652,8 @@ def _run_channel_check_gui(
                 _win.canvas.mpl_disconnect(cid)
             for btn in _nav.get("buttons", []):
                 btn.disconnect_events()
-                try:
+                with contextlib.suppress(Exception):
                     btn.ax.remove()
-                except Exception:
-                    pass
             _nav["buttons"] = []
             span = _nav.get("span_selector")
             if span is not None:
@@ -709,7 +708,7 @@ def _setup_from_channel_config(json_path: Path):
 
     sampling_rate = data.get("sampling_rate", 10240)
 
-    grid_configs: Dict[str, dict] = {}
+    grid_configs: dict[str, dict] = {}
     for g in data.get("grids", []):
         channels = list(range(g["start_chan"], g["end_chan"]))
         grid_configs[g["name"]] = {
@@ -816,7 +815,7 @@ def main():
     ap.add_argument(
         "--ext",
         default=None,
-        help="File extension when --files is a directory " "(e.g. .h5, .mat, .otb+).",
+        help="File extension when --files is a directory (e.g. .h5, .mat, .otb+).",
     )
     args = ap.parse_args()
 
@@ -861,7 +860,7 @@ def main():
         sampling_rate = config.sampling_frequency
         aux_configs = []
         print(f"Session : {config.name}  |  Fs: {sampling_rate} Hz")
-        grid_configs: Dict[str, dict] = {}
+        grid_configs: dict[str, dict] = {}
         for port in config.ports:
             if not port.enabled:
                 continue
@@ -884,7 +883,7 @@ def main():
     default_ext = _fmt_ext.get(layout.get("format", ""), ".h5")
     search_ext = args.ext if args.ext else default_ext
 
-    file_paths: List[Path] = []
+    file_paths: list[Path] = []
     for pat in args.files:
         p = Path(pat)
         if p.is_dir():

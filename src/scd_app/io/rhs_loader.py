@@ -16,10 +16,10 @@ DC-amplifier and stimulation streams are skipped over but never decoded.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-import struct
-from typing import BinaryIO, Dict, List
+from typing import BinaryIO
 
 import numpy as np
 
@@ -64,15 +64,15 @@ class _Header:
     lower_bandwidth_hz: float
     upper_bandwidth_hz: float
     notch_hz: float | None
-    notes: List[str]
+    notes: list[str]
     dc_amplifier_saved: bool
     reference_channel: str
     header_bytes: int
-    amplifier: List[_Channel] = field(default_factory=list)
-    board_adc: List[_Channel] = field(default_factory=list)
-    board_dac: List[_Channel] = field(default_factory=list)
-    digital_in: List[_Channel] = field(default_factory=list)
-    digital_out: List[_Channel] = field(default_factory=list)
+    amplifier: list[_Channel] = field(default_factory=list)
+    board_adc: list[_Channel] = field(default_factory=list)
+    board_dac: list[_Channel] = field(default_factory=list)
+    digital_in: list[_Channel] = field(default_factory=list)
+    digital_out: list[_Channel] = field(default_factory=list)
 
     @property
     def block_dtype(self) -> np.dtype:
@@ -114,7 +114,9 @@ def read_rhs(file_path: Path, field_name: str) -> np.ndarray:
             stream, offset, scale = "amp", 32768.0, AMPLIFIER_UV_PER_STEP / 1000.0
         elif field_name in ("aux", "force"):
             if not header.board_adc:
-                raise KeyError(f"No board ADC (aux) channels enabled in {file_path.name}")
+                raise KeyError(
+                    f"No board ADC (aux) channels enabled in {file_path.name}"
+                )
             stream, offset, scale = "adc", 32768.0, BOARD_ADC_V_PER_STEP
         else:
             raise KeyError(
@@ -122,9 +124,7 @@ def read_rhs(file_path: Path, field_name: str) -> np.ndarray:
                 "Supported: emg, aux, force, timestamps"
             )
 
-        blocks = np.fromfile(
-            fid, dtype=header.block_dtype, count=n_blocks, offset=0
-        )
+        blocks = np.fromfile(fid, dtype=header.block_dtype, count=n_blocks, offset=0)
 
     raw = blocks[stream]  # (n_blocks, n_channels, 128)
     n_channels = raw.shape[1]
@@ -133,7 +133,7 @@ def read_rhs(file_path: Path, field_name: str) -> np.ndarray:
     return (data.astype(np.float32) - np.float32(offset)) * np.float32(scale)
 
 
-def read_rhs_metadata(file_path: Path) -> Dict:
+def read_rhs_metadata(file_path: Path) -> dict:
     """Return JSON-serializable acquisition and channel metadata."""
     file_path = Path(file_path)
     with open(file_path, "rb") as fid:
@@ -186,7 +186,10 @@ def read_rhs_metadata(file_path: Path) -> Dict:
             }
             for i, ch in enumerate(header.board_adc)
         ],
-        "amplifier_bandwidth_hz": [header.lower_bandwidth_hz, header.upper_bandwidth_hz],
+        "amplifier_bandwidth_hz": [
+            header.lower_bandwidth_hz,
+            header.upper_bandwidth_hz,
+        ],
         "dsp_offset_removal_hz": header.dsp_cutoff_hz if header.dsp_enabled else None,
         "notch_display_hz": header.notch_hz,
         "dc_amplifier_saved": header.dc_amplifier_saved,
@@ -324,8 +327,8 @@ def _count_blocks(file_path: Path, header: _Header) -> int:
     return int(n_blocks)
 
 
-def _ordered_unique(values) -> List[str]:
-    seen: Dict[str, None] = {}
+def _ordered_unique(values) -> list[str]:
+    seen: dict[str, None] = {}
     for value in values:
         seen.setdefault(value, None)
     return list(seen)

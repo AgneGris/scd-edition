@@ -4,28 +4,25 @@ Main application window for SCD-edition.
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import torch
-
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
-    QTabWidget,
-    QWidget,
-    QVBoxLayout,
-    QStatusBar,
     QMessageBox,
+    QStatusBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtGui import QAction, QKeySequence
 
+from scd_app.core.config import ConfigManager, SessionConfig
+from scd_app.gui.style.styling import set_style_sheet
 from scd_app.gui.tabs.config_tab import ConfigTab
 from scd_app.gui.tabs.decomposition_tab import DecompositionTab
 from scd_app.gui.tabs.edition_tab import EditionTab
 from scd_app.gui.tabs.visualisation_tab import VisualisationTab
-
-from scd_app.core.config import ConfigManager, SessionConfig
-from scd_app.gui.style.styling import set_style_sheet
 
 
 class MainWindow(QMainWindow):
@@ -47,7 +44,7 @@ class MainWindow(QMainWindow):
 
         # Core objects
         self.config_manager = ConfigManager()
-        self.config: Optional[SessionConfig] = None
+        self.config: SessionConfig | None = None
 
         self._setup_ui()
         self._setup_menu()
@@ -106,8 +103,8 @@ class MainWindow(QMainWindow):
         for i, name in enumerate(
             ["Configuration", "Decomposition", "Edition", "Visualisation"]
         ):
-            action = QAction(f"&{i+1}. {name}", self)
-            action.setShortcut(QKeySequence(f"Ctrl+{i+1}"))
+            action = QAction(f"&{i + 1}. {name}", self)
+            action.setShortcut(QKeySequence(f"Ctrl+{i + 1}"))
             action.triggered.connect(
                 lambda checked, idx=i: self.tabs.setCurrentIndex(idx)
             )
@@ -250,7 +247,7 @@ def main():
     # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
     args, qt_argv = parser.parse_known_args()
 
-    app = QApplication([sys.argv[0]] + qt_argv)
+    app = QApplication([sys.argv[0], *qt_argv])
     app.setApplicationName("SCD-Edition")
 
     if torch.cuda.is_available():

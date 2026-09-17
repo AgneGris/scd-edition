@@ -3,11 +3,12 @@ Configuration management for SCD-Edition.
 Handles session settings, electrode presets, and serialization.
 """
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
+
 import yaml
-import json
 
 
 @dataclass
@@ -16,7 +17,7 @@ class ElectrodeConfig:
 
     name: str
     type: str  # "surface_grid", "thin_film", "intramuscular"
-    channels: List[int]  # Channel indices (0-based)
+    channels: list[int]  # Channel indices (0-based)
     rows: int = 1
     cols: int = 1
     spacing_mm: float = 4.0
@@ -37,14 +38,14 @@ class FilterConfig:
     highpass_hz: float = 10.0
     lowpass_hz: float = 4400.0
     order: int = 4
-    notch_hz: Optional[float] = None
+    notch_hz: float | None = None
 
 
 @dataclass
 class DecompositionConfig:
     """Decomposition algorithm parameters."""
 
-    extension_factor: Optional[int] = None
+    extension_factor: int | None = None
     acceptance_sil: float = 0.85
     max_iterations: int = 200
     use_cv_fitness: bool = True
@@ -70,16 +71,16 @@ class SessionConfig:
 
     name: str
     sampling_frequency: int = 2048
-    ports: List[PortConfig] = field(default_factory=list)
+    ports: list[PortConfig] = field(default_factory=list)
     input_dir: str = "data/input"
-    emg_paths: List[str] = field(default_factory=list)
+    emg_paths: list[str] = field(default_factory=list)
     output_dir: str = "data/output"
 
     # Auxiliary channels (force, EMG reference, etc.) from the channel config JSON
-    aux_channels: List[Dict[str, Any]] = field(default_factory=list)
+    aux_channels: list[dict[str, Any]] = field(default_factory=list)
 
     # Data layout (YAML loader dict, possibly with user overrides for path/orientation)
-    data_layout: Optional[Dict[str, Any]] = None
+    data_layout: dict[str, Any] | None = None
 
     # Edition settings
     auto_save: bool = True
@@ -89,7 +90,7 @@ class SessionConfig:
     roa_threshold: float = 0.3
     subset_threshold: float = 0.8
 
-    def get_enabled_ports(self) -> List[PortConfig]:
+    def get_enabled_ports(self) -> list[PortConfig]:
         return [p for p in self.ports if p.enabled]
 
 
@@ -124,7 +125,7 @@ class ConfigManager:
         "Thin Film 8x8": {"type": "thin_film", "rows": 8, "cols": 8, "spacing_mm": 2.0},
     }
 
-    def __init__(self, config_dir: Path = None):
+    def __init__(self, config_dir: Path | None = None):
         self.config_dir = Path(config_dir) if config_dir else Path("config")
 
     def create_default_session(self, name: str = "New Session") -> SessionConfig:
@@ -170,7 +171,7 @@ class ConfigManager:
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
 
-        with open(path, "r") as f:
+        with open(path) as f:
             if path.suffix.lower() in [".json"]:
                 data = json.load(f)
             else:
@@ -184,10 +185,8 @@ class ConfigManager:
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
-    def _parse_session(self, data: Dict[str, Any]) -> SessionConfig:
-        ports = []
-        for port_data in data.get("ports", []):
-            ports.append(self._parse_port(port_data))
+    def _parse_session(self, data: dict[str, Any]) -> SessionConfig:
+        ports = [self._parse_port(port_data) for port_data in data.get("ports", [])]
 
         return SessionConfig(
             name=data.get("name", "unnamed"),
@@ -200,7 +199,7 @@ class ConfigManager:
             undo_levels=data.get("undo_levels", 50),
         )
 
-    def _parse_port(self, data: Dict[str, Any]) -> PortConfig:
+    def _parse_port(self, data: dict[str, Any]) -> PortConfig:
         el_data = data["electrode"]
         electrode = ElectrodeConfig(
             name=el_data.get("name", "unnamed"),
@@ -218,7 +217,7 @@ class ConfigManager:
             enabled=data.get("enabled", True),
         )
 
-    def _serialize_session(self, config: SessionConfig) -> Dict[str, Any]:
+    def _serialize_session(self, config: SessionConfig) -> dict[str, Any]:
         return {
             "name": config.name,
             "sampling_frequency": config.sampling_frequency,
@@ -229,7 +228,7 @@ class ConfigManager:
             "ports": [self._serialize_port(p) for p in config.ports],
         }
 
-    def _serialize_port(self, port: PortConfig) -> Dict[str, Any]:
+    def _serialize_port(self, port: PortConfig) -> dict[str, Any]:
         return {
             "name": port.name,
             "enabled": port.enabled,

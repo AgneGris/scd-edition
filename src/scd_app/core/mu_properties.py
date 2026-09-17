@@ -29,7 +29,6 @@ from __future__ import annotations
 import logging
 import traceback
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -40,7 +39,6 @@ from scd_app.core.constants import (
     MIN_N_SPIKES,
     MIN_PEAK_SEP,
     MUAP_WIN_MS,
-    PNR_THRESHOLD_DB,
     RELIABILITY_CRITERIA,
     ROA_THRESHOLD,
     SIL_THRESHOLD,
@@ -107,7 +105,7 @@ class MUProperties:
 
     # ── quality metrics ───────────────────────────────────────────────────
     sil: float = float("nan")  # silhouette measure  [0-1]
-    pnr_db: float = float("nan")  # pulse-to-noise ratio  (dB)
+    muap_template_stability: float = float("nan")  # split-half correlation [0-1]
     spike_centroid: float = float("nan")  # mean source² at spike peaks
     noise_centroid: float = float("nan")  # mean source² at non-spike peaks
 
@@ -120,27 +118,24 @@ class MUProperties:
     muap_mean_freq_hz: float = float("nan")  # mean spectral freq
 
     # ── reliability ────────────────────────────────────────────────────────
-    #  `is_reliable` is *derived*: it is True when every quality criterion in
-    #  `quality_flags` passes — i.e. exactly when every metric in the
-    #  properties panel is green.  Setting `reliability_override` to True or
-    #  False pins the verdict manually; None returns it to automatic.
-    reliability_override: Optional[bool] = None
+    #  `is_reliable` is *derived*: it is True when every automatic criterion in
+    #  `quality_flags` passes. Descriptive metrics such as MUAP stability do
+    #  not participate. Setting `reliability_override` to True or False pins
+    #  the verdict manually; None returns it to automatic.
+    reliability_override: bool | None = None
 
     # ── full MUAP array in grid layout  (rows × cols × win_samples) ───────
     #    stored here so the GUI can render it without re-computation
-    muap_grid: Optional[np.ndarray] = field(default=None, repr=False)
+    muap_grid: np.ndarray | None = field(default=None, repr=False)
 
     # ── RoA duplicate candidates  {other_mu_idx: roa_score} ────────────────
-    duplicate_candidates: Dict[int, float] = field(default_factory=dict)
+    duplicate_candidates: dict[int, float] = field(default_factory=dict)
 
     @property
-    def quality_flags(self) -> Dict[str, bool]:
+    def quality_flags(self) -> dict[str, bool]:
         """Return a dict of pass/fail flags for each quality criterion."""
         return {
             "sil": self.sil >= SIL_THRESHOLD if not np.isnan(self.sil) else False,
-            "pnr": (
-                self.pnr_db >= PNR_THRESHOLD_DB if not np.isnan(self.pnr_db) else False
-            ),
             "cov": (
                 self.cov_pct <= COV_THRESHOLD_PCT
                 if not np.isnan(self.cov_pct)
@@ -159,8 +154,7 @@ class MUProperties:
         """Automatic verdict: True when every quality criterion passes.
 
         This is deliberately the same rule that drives the green/red colouring
-        of the individual metrics, so a unit showing all-green metrics can
-        never be reported as unreliable.
+        of the automatic criteria. Descriptive metrics remain neutral.
         """
         return all(self.quality_flags.values())
 
@@ -177,7 +171,7 @@ class MUProperties:
         return self.reliability_override is not None
 
     @property
-    def failed_criteria(self) -> List[str]:
+    def failed_criteria(self) -> list[str]:
         """Human-readable descriptions of the criteria this unit fails."""
         return [
             RELIABILITY_CRITERIA[key]
@@ -207,7 +201,7 @@ def timestamps_to_spike_train(
 
 
 def build_spike_train_matrix(
-    all_timestamps: List[np.ndarray],
+    all_timestamps: list[np.ndarray],
     n_samples: int,
 ) -> np.ndarray:
     """Stack several timestamp arrays into a (n_samples, n_units) bool matrix."""
@@ -220,7 +214,7 @@ def build_spike_train_matrix(
 
 
 def sources_to_ipts_matrix(
-    sources: List[np.ndarray],
+    sources: list[np.ndarray],
     n_samples: int,
 ) -> np.ndarray:
     """Stack per-unit source signals into a (n_samples, n_units) float matrix.
@@ -239,8 +233,8 @@ def sources_to_ipts_matrix(
 
 def flat_channels_to_grid(
     emg_flat: np.ndarray,
-    grid_positions: Dict[int, Tuple[int, int]],
-    grid_shape: Tuple[int, int],
+    grid_positions: dict[int, tuple[int, int]],
+    grid_shape: tuple[int, int],
 ) -> np.ndarray:
     """Re-arrange a (n_channels, n_samples) flat EMG into (rows, cols, n_samples).
 
@@ -324,6 +318,98 @@ def _nanval(arr: np.ndarray, idx: int) -> float:
         return float("nan")
 
 
+def _compute_muap_template_stability(
+    emg_port: np.ndarray,
+    timestamps: np.ndarray,
+    fsamp: float,
+    win_ms: int = MUAP_WIN_MS,
+    min_spikes_per_half: int = 5,
+) -> float:
+    """Return interleaved split-half MUAP template similarity in ``[0, 1]``.
+
+    Valid discharges are ordered in time and assigned alternately to two
+    groups. A spike-triggered average is calculated from the original EMG for
+    each group. The score is the cosine similarity of the two multichannel
+    templates after removing each channel's temporal mean; negative
+    correlations are clipped to zero.
+
+    Alternating events gives both templates coverage of the recording rather
+    than turning slow physiological drift into an artificial group effect.
+    Events whose full analysis window lies outside the EMG are excluded. The
+    score is unavailable unless both groups contain ``min_spikes_per_half``
+    valid events.
+    """
+    try:
+        emg = np.asarray(emg_port, dtype=np.float64)
+        ts_raw = np.asarray(timestamps).reshape(-1)
+    except (TypeError, ValueError):
+        return float("nan")
+    if (
+        emg.ndim != 2
+        or emg.shape[0] == 0
+        or emg.shape[1] == 0
+        or not np.isfinite(fsamp)
+        or fsamp <= 0
+    ):
+        return float("nan")
+
+    try:
+        ts = ts_raw[np.isfinite(ts_raw)].astype(np.int64, copy=False)
+    except TypeError:
+        return float("nan")
+    half_window = max(1, int(round(float(win_ms) / 2.0 / 1000.0 * float(fsamp))))
+    ts = np.unique(ts)
+    ts = ts[(ts >= half_window) & (ts + half_window <= emg.shape[1])]
+    if ts.size < 2 * min_spikes_per_half:
+        return float("nan")
+
+    group_a = ts[::2]
+    group_b = ts[1::2]
+    if min(group_a.size, group_b.size) < min_spikes_per_half:
+        return float("nan")
+
+    def _template(group: np.ndarray) -> np.ndarray:
+        windows = np.stack(
+            [emg[:, t - half_window : t + half_window] for t in group],
+            axis=0,
+        )
+        finite_counts = np.sum(np.isfinite(windows), axis=0)
+        return np.divide(
+            np.nansum(windows, axis=0),
+            finite_counts,
+            out=np.full(windows.shape[1:], np.nan),
+            where=finite_counts > 0,
+        )
+
+    template_a = _template(group_a)
+    template_b = _template(group_b)
+
+    def _demean_channels(template: np.ndarray) -> np.ndarray:
+        finite_counts = np.sum(np.isfinite(template), axis=1, keepdims=True)
+        channel_means = np.divide(
+            np.nansum(template, axis=1, keepdims=True),
+            finite_counts,
+            out=np.full((template.shape[0], 1), np.nan),
+            where=finite_counts > 0,
+        )
+        return template - channel_means
+
+    template_a = _demean_channels(template_a)
+    template_b = _demean_channels(template_b)
+
+    valid = np.isfinite(template_a) & np.isfinite(template_b)
+    if not np.any(valid):
+        return float("nan")
+    vector_a = template_a[valid]
+    vector_b = template_b[valid]
+    norm = float(np.linalg.norm(vector_a) * np.linalg.norm(vector_b))
+    if not np.isfinite(norm) or norm == 0.0:
+        return float("nan")
+
+    similarity = float(np.dot(vector_a, vector_b) / norm)
+    return float(np.clip(similarity, 0.0, 1.0))
+
+
 def _finite_mean(arr: np.ndarray) -> float:
     """Mean over the finite entries of `arr`, or NaN when there are none.
 
@@ -346,8 +432,9 @@ def compute_unit_properties(
     ipts_col: np.ndarray,  # (n_samples,) float — column for this unit
     time_axis: np.ndarray,  # (n_samples,) float  seconds
     fsamp: float,
-    muap_grid: Optional[np.ndarray],  # (rows, cols, win_samples) or None
+    muap_grid: np.ndarray | None,  # (rows, cols, win_samples) or None
     fsamp_int: int,
+    muap_template_stability: float = float("nan"),
     win_ms: int = MUAP_WIN_MS,
 ) -> MUProperties:
     """Compute all properties for a single motor unit.
@@ -360,9 +447,11 @@ def compute_unit_properties(
         ipts_col:        Source/pulse train for this unit  (n_samples,)
         time_axis:       Time in seconds  (n_samples,)
         muap_grid:       Pre-computed MUAP, or None  (rows, cols, win_samples)
+        muap_template_stability: Split-half template correlation, or NaN
     """
     props = MUProperties()
     props.n_spikes = int(np.sum(spike_train_col))
+    props.muap_template_stability = float(muap_template_stability)
 
     if props.n_spikes == 0:
         props.muap_grid = None
@@ -403,12 +492,6 @@ def compute_unit_properties(
         props.sil = _nanval(sil, 0)
     except Exception as e:
         logger.debug("silhouette_measure failed: %s", e)
-
-    try:
-        pnr = tb_props.get_pulse_to_noise_ratio(st1, ipts1)
-        props.pnr_db = _nanval(pnr, 0)
-    except Exception as e:
-        logger.debug("pulse_to_noise_ratio failed: %s", e)
 
     props.spike_centroid, props.noise_centroid = _compute_centroids(source, timestamps)
 
@@ -460,15 +543,15 @@ def compute_unit_properties(
 
 
 def compute_port_properties(
-    all_timestamps: List[np.ndarray],
-    all_sources: List[np.ndarray],
-    emg_port: Optional[np.ndarray],  # (n_channels, n_samples)
-    grid_positions: Optional[Dict[int, Tuple[int, int]]],
-    grid_shape: Optional[Tuple[int, int]],
+    all_timestamps: list[np.ndarray],
+    all_sources: list[np.ndarray],
+    emg_port: np.ndarray | None,  # (n_channels, n_samples)
+    grid_positions: dict[int, tuple[int, int]] | None,
+    grid_shape: tuple[int, int] | None,
     fsamp: float,
     win_ms: int = MUAP_WIN_MS,
     roa_threshold: float = ROA_THRESHOLD,
-) -> List[MUProperties]:
+) -> list[MUProperties]:
     """Compute all properties for every motor unit in a port.
 
     Args:
@@ -502,13 +585,20 @@ def compute_port_properties(
     ipts_mat = sources_to_ipts_matrix(all_sources, n_samples)
     time_axis = timestamps_to_time_axis(n_samples, fsamp)
 
-    muap_grids: List[Optional[np.ndarray]] = [None] * n_units
+    muap_grids: list[np.ndarray | None] = [None] * n_units
+    muap_stabilities = [float("nan")] * n_units
 
     if emg_port is None:
         logger.info("MUAP computation skipped — no EMG data for this port")
-    elif not _TOOLBOX_AVAILABLE:
-        logger.warning("motor_unit_toolbox not available — MUAP computation skipped")
     else:
+        for i, timestamps in enumerate(all_timestamps):
+            muap_stabilities[i] = _compute_muap_template_stability(
+                emg_port, timestamps, fsamp, win_ms
+            )
+
+    if emg_port is not None and not _TOOLBOX_AVAILABLE:
+        logger.warning("motor_unit_toolbox not available — MUAP computation skipped")
+    elif emg_port is not None:
         try:
             if grid_positions is not None and grid_shape is not None:
                 emg_grid = flat_channels_to_grid(emg_port, grid_positions, grid_shape)
@@ -532,7 +622,7 @@ def compute_port_properties(
         except Exception as exc:
             logger.error("MUAP computation failed: %s\n%s", exc, traceback.format_exc())
 
-    results: List[MUProperties] = []
+    results: list[MUProperties] = []
     for i in range(n_units):
         p = compute_unit_properties(
             timestamps=all_timestamps[i],
@@ -543,6 +633,7 @@ def compute_port_properties(
             fsamp=fsamp,
             muap_grid=muap_grids[i],
             fsamp_int=fsamp_int,
+            muap_template_stability=muap_stabilities[i],
             win_ms=win_ms,
         )
         results.append(p)
@@ -573,9 +664,9 @@ def recompute_unit_properties(
     mu_props: MUProperties,
     new_timestamps: np.ndarray,
     source: np.ndarray,
-    emg_port: Optional[np.ndarray],
-    grid_positions: Optional[Dict[int, Tuple[int, int]]],
-    grid_shape: Optional[Tuple[int, int]],
+    emg_port: np.ndarray | None,
+    grid_positions: dict[int, tuple[int, int]] | None,
+    grid_shape: tuple[int, int] | None,
     fsamp: float,
     win_ms: int = MUAP_WIN_MS,
 ) -> MUProperties:
@@ -595,6 +686,11 @@ def recompute_unit_properties(
     ipts_col = np.asarray(source, dtype=np.float64).flatten()[:n_samples]
 
     muap_grid = None if len(new_timestamps) == 0 else mu_props.muap_grid
+    muap_template_stability = float("nan")
+    if len(new_timestamps) > 0 and emg_port is not None:
+        muap_template_stability = _compute_muap_template_stability(
+            emg_port, new_timestamps, fsamp, win_ms
+        )
     if len(new_timestamps) > 0 and emg_port is not None and _TOOLBOX_AVAILABLE:
         try:
             if grid_positions is not None and grid_shape is not None:
@@ -619,5 +715,6 @@ def recompute_unit_properties(
         fsamp=fsamp,
         muap_grid=muap_grid,
         fsamp_int=fsamp_int,
+        muap_template_stability=muap_template_stability,
         win_ms=win_ms,
     )

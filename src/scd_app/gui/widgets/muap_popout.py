@@ -4,8 +4,6 @@ muap_popout.py — Floating MUAP shapes window.
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
-
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
@@ -91,7 +89,7 @@ class MuapPopoutDialog(QDialog):
         _rej_bg = (50, 30, 30)
         _empty_bg = (28, 28, 28)
         gl = self._plot.ci.layout
-        cell_plots: Dict[Tuple[int, int], object] = {}
+        cell_plots: dict[tuple[int, int], object] = {}
 
         for r in range(rows):
             for c in range(cols):

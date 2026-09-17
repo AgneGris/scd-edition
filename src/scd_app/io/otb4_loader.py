@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import tarfile
-from typing import Dict, Iterable, List, Tuple
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -101,7 +101,7 @@ def read_otb4(file_path: Path, field: str) -> np.ndarray:
         )
 
 
-def read_otb4_metadata(file_path: Path) -> Dict:
+def read_otb4_metadata(file_path: Path) -> dict:
     """Return JSON-serializable acquisition and channel metadata."""
     file_path = Path(file_path)
     with tarfile.open(str(file_path), "r:*") as archive:
@@ -138,9 +138,9 @@ def read_otb4_metadata(file_path: Path) -> Dict:
 
 def _parse_archive_metadata(
     archive: tarfile.TarFile,
-    members: Dict[str, tarfile.TarInfo],
+    members: dict[str, tarfile.TarInfo],
     file_path: Path,
-) -> Tuple[Dict, List[_Track]]:
+) -> tuple[dict, list[_Track]]:
     device_member = _find_member(members, "DeviceParameters.xml", file_path)
     tracks_member = _find_tracks_member(members, file_path)
     device_root = _read_xml(archive, device_member, file_path)
@@ -217,8 +217,8 @@ def _parse_track(node: ET.Element, file_path: Path) -> _Track:
 
 
 def _validate_track_groups(
-    emg_tracks: List[_Track],
-    aux_tracks: List[_Track],
+    emg_tracks: list[_Track],
+    aux_tracks: list[_Track],
     device_sampling_frequency: int,
     file_path: Path,
 ) -> None:
@@ -257,7 +257,7 @@ def _validate_track_groups(
 
 
 def _validate_sample_alignment(
-    members: Dict[str, tarfile.TarInfo], tracks: List[_Track], file_path: Path
+    members: dict[str, tarfile.TarInfo], tracks: list[_Track], file_path: Path
 ) -> None:
     counts = {
         (track.title, track.subtitle, track.stream): _track_sample_count(
@@ -278,12 +278,12 @@ def _validate_sample_alignment(
 
 def _read_track_group(
     archive: tarfile.TarFile,
-    members: Dict[str, tarfile.TarInfo],
+    members: dict[str, tarfile.TarInfo],
     tracks: Iterable[_Track],
     file_path: Path,
 ) -> np.ndarray:
-    arrays: List[np.ndarray] = []
-    stream_cache: Dict[str, np.ndarray] = {}
+    arrays: list[np.ndarray] = []
+    stream_cache: dict[str, np.ndarray] = {}
     expected_samples: int | None = None
 
     for track in tracks:
@@ -319,7 +319,7 @@ def _read_track_group(
 
 
 def _track_sample_count(
-    members: Dict[str, tarfile.TarInfo], track: _Track, file_path: Path
+    members: dict[str, tarfile.TarInfo], track: _Track, file_path: Path
 ) -> int:
     member = _find_stream_member(members, track.stream, file_path)
     bytes_per_sample = track.sample_size * track.total_channels
@@ -353,9 +353,9 @@ def _integer_dtype(sample_size: int, track: _Track, file_path: Path) -> np.dtype
 
 def _describe_tracks(
     tracks: Iterable[_Track],
-    members: Dict[str, tarfile.TarInfo],
+    members: dict[str, tarfile.TarInfo],
     file_path: Path,
-) -> List[Dict]:
+) -> list[dict]:
     result = []
     output_start = 0
     for index, track in enumerate(tracks):
@@ -406,7 +406,7 @@ def _read_xml(
 
 
 def _find_member(
-    members: Dict[str, tarfile.TarInfo], basename: str, file_path: Path
+    members: dict[str, tarfile.TarInfo], basename: str, file_path: Path
 ) -> tarfile.TarInfo:
     match = next(
         (member for name, member in members.items() if Path(name).name == basename),
@@ -418,7 +418,7 @@ def _find_member(
 
 
 def _find_tracks_member(
-    members: Dict[str, tarfile.TarInfo], file_path: Path
+    members: dict[str, tarfile.TarInfo], file_path: Path
 ) -> tarfile.TarInfo:
     matches = sorted(
         (
@@ -434,7 +434,7 @@ def _find_tracks_member(
 
 
 def _find_stream_member(
-    members: Dict[str, tarfile.TarInfo], stream_name: str, file_path: Path
+    members: dict[str, tarfile.TarInfo], stream_name: str, file_path: Path
 ) -> tarfile.TarInfo:
     if stream_name in members:
         return members[stream_name]

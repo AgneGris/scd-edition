@@ -232,17 +232,29 @@ This is the main editing environment. It shows one motor unit at a time.
 - Use the **Unit** dropdown or the **Up/Down arrow keys** to switch between motor units within a port.
 - The **properties panel** on the right updates automatically:
   - **Spike count, mean discharge rate, CoV ISI, minimum ISI**
-  - **SIL and PNR** — quality scores.
-  - **Reliability badge** — a unit is automatically **RELIABLE** when *every*
-    quality criterion passes, i.e. when every metric in the panel is green:
-    SIL ≥ 0.9, PNR ≥ 30 dB, CoV ISI ≤ 40 %, discharge rate 3–40 Hz and
-    at least 10 spikes. Hover the badge to see which criteria a unit fails.
+  - **SIL and MUAP template stability** — complementary source-separation and
+    waveform-consistency measures.
+  - **Reliability badge** — a unit is automatically **RELIABLE** when every
+    automatic criterion passes:
+    SIL ≥ 0.9, CoV ISI ≤ 40 %, discharge rate 3–40 Hz and at least 10
+    spikes. Hover the badge to see which criteria a unit fails.
     Left-click the badge (or press `T`) to override the verdict by hand — an
     overridden badge is italic and marked *(manual)*, and the unit is shown as
     `✓*` / `✗*` in the unit dropdown. Right-click (or press `Shift+T`) to go
     back to the automatic verdict. Manual verdicts are saved with the session.
   - **MUAP amplitude, waveform length, peak and median frequency**
   - **Duplicate warning** — if the current unit is very similar to another unit in the same port
+
+MUAP template stability is the normalized correlation (0–1) between two
+spike-triggered average templates made from alternating discharges. It is
+calculated from the original multichannel EMG, so it is unavailable when raw
+EMG is not embedded in the file or when fewer than five valid discharges are
+available for either half. It is shown as a descriptive consistency measure,
+not used as an automatic acceptance threshold.
+
+PNR is intentionally not reported for SCD units. Although the conventional
+30 dB boundary is familiar in the field, it was validated for CKC sources and
+does not have the same interpretation for SCD's normalized source signals.
 
 #### Source signal plot
 
@@ -314,7 +326,9 @@ If force channels are configured, they appear as overlays on the time-domain plo
 
 **CST (Cumulative Spike Train)** — sum of all discharge rate traces. Approximates the neural drive to the muscle.
 
-**Quality** — SIL and PNR bar charts for all units, with dashed threshold lines at the reliability thresholds (SIL ≥ 0.9, PNR ≥ 30 dB).
+**Quality** — SIL and MUAP template-stability bar charts for all units. The SIL
+chart shows the automatic reliability threshold (SIL ≥ 0.9); template
+stability is descriptive and therefore has no threshold line.
 
 **DR vs Force** — scatter plot of each motor unit's recruitment force (%MVC at first spike) against its mean discharge rate during the plateau. A regression line is drawn when three or more units are present. This plot requires at least one active force channel.
 
@@ -392,15 +406,16 @@ Saved Edition files can be reloaded in any order and remain fully editable.
 
 ```python
 import pickle
+
 with open("my_decomp.pkl", "rb") as f:
     data = pickle.load(f)
 
 # Key fields:
-data["ports"]           # list of port names (one per electrode grid)
-data["discharge_times"] # list[list[np.ndarray]] — spike timestamps in samples
-data["sampling_rate"]   # int — sampling frequency in Hz
-data["data"]            # np.ndarray — raw EMG, shape (channels, samples)
-data["aux_channels"]    # list of dicts — force/aux data and metadata
+data["ports"]  # list of port names (one per electrode grid)
+data["discharge_times"]  # list[list[np.ndarray]] — spike timestamps in samples
+data["sampling_rate"]  # int — sampling frequency in Hz
+data["data"]  # np.ndarray — raw EMG, shape (channels, samples)
+data["aux_channels"]  # list of dicts — force/aux data and metadata
 ```
 
 ---
@@ -452,7 +467,8 @@ After running decomposition, switch to Tab 4 and open the **DR vs Force** sub-ta
 ## Under development
 
 - **Multi-file comparison** — loading two decompositions side by side for the same recording
-- **Automated quality control** — automatic flagging beyond the basic SIL/PNR thresholds
+- **Calibrated quality control** — SCD-specific acceptance thresholds validated
+  against independent reference decompositions
 
 ---
 

@@ -7,27 +7,25 @@ AUX force channels can be overlaid on any plot and toggled via floating legend (
 """
 
 import re
-from typing import Dict, List, Optional, Set
 
-import numpy as np
 import cmcrameri.cm as cmc
+import numpy as np
+import pyqtgraph as pg
+from motor_unit_toolbox.props import get_inst_discharge_rate
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QTabWidget,
-    QPushButton,
-    QLabel,
     QComboBox,
-    QScrollArea,
     QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-import pyqtgraph as pg
 
-from motor_unit_toolbox.props import get_inst_discharge_rate
-
-from scd_app.core.constants import PNR_THRESHOLD_DB, SIL_THRESHOLD
+from scd_app.core.constants import SIL_THRESHOLD
 from scd_app.core.mu_model import MotorUnit
 from scd_app.gui.style.styling import COLORS, FONT_SIZES
 
@@ -38,7 +36,7 @@ _MOTION_ABBREV = {"ext": "Ext", "flex": "Flex"}
 _TASK_PATTERN = re.compile(r"mvc-\d+(ext|flex)_fing-([TIMRL]+)", re.IGNORECASE)
 
 
-def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
+def _parse_task_targets(file_stem: str) -> set[str] | None:
     """Return expected active unit strings (e.g. {'Index Ext'}) from the filename,
     or None if the filename doesn't match the expected pattern."""
     m = _TASK_PATTERN.search(file_stem)
@@ -55,7 +53,7 @@ def _parse_task_targets(file_stem: str) -> Optional[Set[str]]:
     return targets or None
 
 
-def _default_aux_states(channels: list, file_stem: str) -> List[bool]:
+def _default_aux_states(channels: list, file_stem: str) -> list[bool]:
     """Return initial on/off states for aux channels based on the filename.
     Falls back to all-on when the filename cannot be parsed or nothing matches."""
     targets = _parse_task_targets(file_stem)
@@ -94,7 +92,7 @@ def _nice_tick_step(max_val: float) -> float:
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 
 
-def _batlow_palette(n: int) -> List[tuple]:
+def _batlow_palette(n: int) -> list[tuple]:
     """Generate n colours from Crameri's *batlow* scientific colormap.
 
     Samples are drawn from the middle 80 % of the map (0.1–0.9) to avoid the
@@ -151,12 +149,12 @@ class _VisAuxLegend(pg.LegendItem):
     any one plot keeps the others visually in sync after _on_toggle fires.
     """
 
-    def __init__(self, on_states: List[bool], on_toggle_callback):
+    def __init__(self, on_states: list[bool], on_toggle_callback):
         super().__init__(offset=(-10, 10))  # top-right
         self._on_states = on_states  # shared mutable reference
         self._on_toggle = on_toggle_callback
-        self._names: List[str] = []
-        self._colors_hex: List[str] = []
+        self._names: list[str] = []
+        self._colors_hex: list[str] = []
 
     def clear(self):
         for _sample, label in self.items:
@@ -220,7 +218,7 @@ class VisualisationTab(QWidget):
         self._edition_tab = edition_tab
 
         # Cached data snapshot (filled on tab activation)
-        self._ports: Dict[str, List[MotorUnit]] = {}
+        self._ports: dict[str, list[MotorUnit]] = {}
         self._aux_channels: list = []
         self._fsamp: float = 2048.0
         self._start_sample: int = 0
@@ -228,11 +226,11 @@ class VisualisationTab(QWidget):
         self._file_stem: str = ""
 
         # UI state
-        self._disabled_mus: Set[tuple] = set()
-        self._sidebar_rows: Dict[tuple, QPushButton] = {}
-        self._sidebar_port_rows: Dict[str, QPushButton] = {}
-        self._aux_on_states: List[bool] = []
-        self._aux_legends: List[_VisAuxLegend] = []
+        self._disabled_mus: set[tuple] = set()
+        self._sidebar_rows: dict[tuple, QPushButton] = {}
+        self._sidebar_port_rows: dict[str, QPushButton] = {}
+        self._aux_on_states: list[bool] = []
+        self._aux_legends: list[_VisAuxLegend] = []
 
         self._build_ui()
 
@@ -277,15 +275,17 @@ class VisualisationTab(QWidget):
         self._inner_tabs.addTab(self._idr_plot, "IDR")
         self._inner_tabs.addTab(self._cst_plot, "CST")
 
-        # Quality tab: SIL and PNR bar charts side by side
+        # Quality tab: source separation and EMG template consistency
         quality_widget = QWidget()
         quality_layout = QHBoxLayout(quality_widget)
         quality_layout.setContentsMargins(0, 0, 0, 0)
         quality_layout.setSpacing(4)
         self._sil_plot = self._make_plot_widget("SIL", "Motor Unit")
-        self._pnr_plot = self._make_plot_widget("PNR (dB)", "Motor Unit")
+        self._muap_stability_plot = self._make_plot_widget(
+            "MUAP stability (0–1)", "Motor Unit"
+        )
         quality_layout.addWidget(self._sil_plot)
-        quality_layout.addWidget(self._pnr_plot)
+        quality_layout.addWidget(self._muap_stability_plot)
         self._inner_tabs.addTab(quality_widget, "Quality")
 
         # Gain tab: instantaneous DR vs normalised force per MU
@@ -500,9 +500,9 @@ class VisualisationTab(QWidget):
                 self._sidebar_inner_layout.insertWidget(insert_pos, btn)
                 insert_pos += 1
 
-    def _update_sidebar_colours(self, sorted_active: List[tuple]):
+    def _update_sidebar_colours(self, sorted_active: list[tuple]):
         palette = _batlow_palette(len(sorted_active))
-        color_map: Dict[tuple, tuple] = {}
+        color_map: dict[tuple, tuple] = {}
         for rank, (port_name, mu) in enumerate(sorted_active):
             color_map[(port_name, mu.id)] = palette[rank]
 
@@ -576,7 +576,7 @@ class VisualisationTab(QWidget):
             print(
                 f"  {label:20s}  peak={peak:.5f} {physical_unit}  "
                 f"baseline≈{baseline:.5f} {physical_unit}  "
-                f"net={peak-baseline:.5f} {physical_unit}{mvc_str}"
+                f"net={peak - baseline:.5f} {physical_unit}{mvc_str}"
             )
         if units == {"mV"}:
             print(
@@ -588,7 +588,7 @@ class VisualisationTab(QWidget):
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
-    def _get_active_mus(self) -> List[tuple]:
+    def _get_active_mus(self) -> list[tuple]:
         return [
             (port_name, mu)
             for port_name, mus in self._ports.items()
@@ -596,7 +596,7 @@ class VisualisationTab(QWidget):
             if (port_name, mu.id) not in self._disabled_mus
         ]
 
-    def _sorted_mus(self, active: List[tuple]) -> List[tuple]:
+    def _sorted_mus(self, active: list[tuple]) -> list[tuple]:
         sort_name = self._sort_combo.currentText()
         key_fn = _SORT_FNS.get(sort_name, _sort_key_recruit)
         return sorted(active, key=lambda pair: key_fn(pair[1], self._fsamp))
@@ -624,7 +624,7 @@ class VisualisationTab(QWidget):
     # well below 500 Hz, so there is no benefit computing at the raw rate.
     _IDR_MAX_FS = 1000  # Hz
 
-    def _build_idr_matrix(self, sorted_mus: List[tuple]):
+    def _build_idr_matrix(self, sorted_mus: list[tuple]):
         if not sorted_mus:
             return None, None, self._IDR_MAX_FS
 
@@ -655,7 +655,7 @@ class VisualisationTab(QWidget):
         t_axis = np.arange(n_samples) / display_fs + ts_global_min / self._fsamp
         return spike_matrix, t_axis, display_fs
 
-    def _render_raster(self, sorted_mus: List[tuple]):
+    def _render_raster(self, sorted_mus: list[tuple]):
         pw = self._raster_plot
         pw.clear()
         pw.getAxis("left").setTicks([[]])
@@ -666,7 +666,7 @@ class VisualisationTab(QWidget):
         palette = _batlow_palette(len(sorted_mus))
         fsamp = self._fsamp
         ticks = []
-        for rank, (port_name, mu) in enumerate(sorted_mus):
+        for rank, (_port_name, mu) in enumerate(sorted_mus):
             if len(mu.timestamps) == 0:
                 ticks.append((rank, f"MU {mu.id}"))
                 continue
@@ -702,9 +702,9 @@ class VisualisationTab(QWidget):
 
     def _render_idr(
         self,
-        sorted_mus: List[tuple],
-        idr: Optional[np.ndarray],
-        t_axis: Optional[np.ndarray],
+        sorted_mus: list[tuple],
+        idr: np.ndarray | None,
+        t_axis: np.ndarray | None,
     ):
         pw = self._idr_plot
         pw.clear()
@@ -734,8 +734,8 @@ class VisualisationTab(QWidget):
 
     def _render_cst(
         self,
-        idr: Optional[np.ndarray],
-        t_axis: Optional[np.ndarray],
+        idr: np.ndarray | None,
+        t_axis: np.ndarray | None,
     ):
         pw = self._cst_plot
         pw.clear()
@@ -772,18 +772,21 @@ class VisualisationTab(QWidget):
         text.setPos(0.5, 0.5)
         pw.addItem(text)
 
-    def _render_quality(self, sorted_mus: List[tuple]):
-        """SIL and PNR bar charts with reliability threshold lines."""
+    def _render_quality(self, sorted_mus: list[tuple]):
+        """Render source separation and split-half MUAP consistency."""
         n = len(sorted_mus)
         palette = _batlow_palette(n)
         ticks = [(i, f"MU {mu.id}") for i, (_, mu) in enumerate(sorted_mus)]
         xs = np.arange(n, dtype=float)
 
-        # Threshold lines come from the shared reliability constants so the
-        # charts agree with the RELIABLE / UNRELIABLE badge in the Edition tab.
-        for pw, attr, threshold, y_top_min in (
-            (self._sil_plot, "sil", SIL_THRESHOLD, 1.05),
-            (self._pnr_plot, "pnr_db", PNR_THRESHOLD_DB, 40.0),
+        for pw, attr, threshold, unavailable_text in (
+            (self._sil_plot, "sil", SIL_THRESHOLD, "SIL unavailable"),
+            (
+                self._muap_stability_plot,
+                "muap_template_stability",
+                None,
+                "MUAP stability unavailable",
+            ),
         ):
             pw.clear()
             if n == 0:
@@ -791,41 +794,40 @@ class VisualisationTab(QWidget):
 
             vals = np.array(
                 [
-                    (
-                        getattr(mu.props, attr)
-                        if (
-                            mu.props is not None
-                            and not np.isnan(getattr(mu.props, attr))
-                        )
-                        else 0.0
-                    )
+                    (getattr(mu.props, attr) if mu.props is not None else float("nan"))
                     for _, mu in sorted_mus
-                ]
+                ],
+                dtype=float,
             )
-            brushes = [pg.mkBrush(r, g, b, 200) for r, g, b in palette]
-            pw.addItem(pg.BarGraphItem(x=xs, height=vals, width=0.7, brushes=brushes))
+            valid = np.isfinite(vals)
+            if not np.any(valid):
+                self._show_no_data(pw, unavailable_text)
+                continue
 
+            brushes = [pg.mkBrush(*palette[i], 200) for i in np.flatnonzero(valid)]
             pw.addItem(
-                pg.InfiniteLine(
-                    pos=threshold,
-                    angle=0,
-                    pen=pg.mkPen(
-                        color="#ff6b6b",
-                        width=1.5,
-                        style=Qt.PenStyle.DashLine,
-                    ),
+                pg.BarGraphItem(
+                    x=xs[valid], height=vals[valid], width=0.7, brushes=brushes
                 )
             )
+
+            if threshold is not None:
+                pw.addItem(
+                    pg.InfiniteLine(
+                        pos=threshold,
+                        angle=0,
+                        pen=pg.mkPen(
+                            color="#ff6b6b",
+                            width=1.5,
+                            style=Qt.PenStyle.DashLine,
+                        ),
+                    )
+                )
             pw.getAxis("bottom").setTicks([ticks])
             pw.setXRange(-0.5, n - 0.5, padding=0)
-            y_top = (
-                max(float(vals.max()) * 1.15, y_top_min)
-                if vals.max() > 0
-                else y_top_min
-            )
-            pw.setYRange(0, y_top)
+            pw.setYRange(0, 1.05)
 
-    def _render_gain(self, sorted_mus: List[tuple]):
+    def _render_gain(self, sorted_mus: list[tuple]):
         """Mean DR vs recruitment-threshold force — one point per MU."""
         pw = self._gain_plot
         pw.clear()
@@ -861,7 +863,7 @@ class VisualisationTab(QWidget):
         spots = []
         labels = []
 
-        for rank, (port_name, mu) in enumerate(sorted_mus):
+        for rank, (_port_name, mu) in enumerate(sorted_mus):
             ts = mu.timestamps.copy()
             if self._end_sample > self._start_sample:
                 ts = ts[(ts >= self._start_sample) & (ts < self._end_sample)]
