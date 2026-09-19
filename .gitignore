@@ -59,7 +59,7 @@ scd-edition-output/
 
 # Lab-specific HPC jobs and local dependency checkout
 jobs/
-motor_unit_toolbox/
+/motor_unit_toolbox/
 
 # Notebooks (local analysis, untracked)
 notebooks/
