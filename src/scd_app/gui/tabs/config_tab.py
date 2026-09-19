@@ -43,6 +43,8 @@ from scd_app.gui.style.styling import (
     get_button_style,
     get_label_style,
 )
+from scd_app.gui.widgets.import_data_dialog import ImportDataDialog
+from scd_app.io.data_inspector import inspect_recording
 from scd_app.io.data_loader import (
     can_read_field,
     format_matches_extension,
@@ -805,23 +807,73 @@ class ConfigTab(QWidget):
         layout = QVBoxLayout(group)
         layout.setSpacing(8)
 
+        # Choosing data is one workflow. Format/array controls below describe
+        # how the selected recording should be read; they are not alternative
+        # file-selection actions.
+        file_layout = QHBoxLayout()
+        file_label = QLabel("Recording:")
+        file_label.setStyleSheet(get_label_style(size="normal"))
+
+        self.path_edit = QLineEdit()
+        self.path_edit.setPlaceholderText("No recording selected")
+        self.path_edit.setReadOnly(True)
+
+        self.choose_recording_btn = QPushButton("Choose recording…")
+        self.choose_recording_btn.setFixedWidth(180)
+        self.choose_recording_btn.clicked.connect(self._browse_file)
+        self.choose_recording_btn.setStyleSheet(
+            get_button_style(bg_color="accent", padding=8)
+        )
+
+        self.choose_batch_btn = QPushButton("Choose batch…")
+        self.choose_batch_btn.setFixedWidth(150)
+        self.choose_batch_btn.setToolTip(
+            "Select multiple recordings that share one data format and channel layout."
+        )
+        self.choose_batch_btn.clicked.connect(self._browse_files_batch)
+        self.choose_batch_btn.setStyleSheet(
+            get_button_style(bg_color="accent", padding=8)
+        )
+
+        file_layout.addWidget(file_label)
+        file_layout.addWidget(self.path_edit, stretch=1)
+        file_layout.addWidget(self.choose_recording_btn)
+        file_layout.addWidget(self.choose_batch_btn)
+        layout.addLayout(file_layout)
+
+        self.file_info_label = QLabel()
+        self.file_info_label.setStyleSheet(
+            get_label_style(size="small", color="text_dim")
+        )
+        layout.addWidget(self.file_info_label)
+
         loader_layout = QHBoxLayout()
         loader_label = QLabel("Data Format:")
         loader_label.setStyleSheet(get_label_style(size="normal"))
         self.loader_combo = QComboBox()
         self._populate_loader_presets()
         self.loader_combo.currentTextChanged.connect(self._on_loader_changed)
+        self.inspect_arrays_btn = QPushButton("Inspect arrays…")
+        self.inspect_arrays_btn.setEnabled(False)
+        self.inspect_arrays_btn.setToolTip(
+            "Advanced: choose the EMG array inside the selected MATLAB, HDF5, "
+            "NumPy, CSV, or text recording."
+        )
+        self.inspect_arrays_btn.clicked.connect(self._inspect_selected_file)
+        self.inspect_arrays_btn.setStyleSheet(
+            get_button_style(bg_color="background_light", padding=8)
+        )
         loader_layout.addWidget(loader_label)
         loader_layout.addWidget(self.loader_combo, stretch=1)
-        loader_layout.addStretch()
+        loader_layout.addWidget(self.inspect_arrays_btn)
         layout.addLayout(loader_layout)
 
-        # Path / orientation overrides — shown only for HDF5 and mat formats
+        # Path / orientation overrides for generic array-based formats.
         self.emg_path_row = QWidget()
         path_row_layout = QHBoxLayout(self.emg_path_row)
         path_row_layout.setContentsMargins(0, 0, 0, 0)
         path_row_layout.setSpacing(8)
-        emg_path_label = QLabel("Variable path:")
+        emg_path_label = QLabel("Array path:")
         emg_path_label.setStyleSheet(get_label_style(size="normal"))
         self.emg_path_edit = QLineEdit()
         self.emg_path_edit.setPlaceholderText("e.g. signal/data")
@@ -893,38 +945,6 @@ class ConfigTab(QWidget):
         out_layout.addWidget(out_browse)
         layout.addLayout(out_layout)
 
-        self.file_info_label = QLabel()
-        self.file_info_label.setStyleSheet(
-            get_label_style(size="small", color="text_dim")
-        )
-        layout.addWidget(self.file_info_label)
-
-        file_layout = QHBoxLayout()
-
-        file_label = QLabel("Input File:")
-        file_label.setStyleSheet(get_label_style(size="normal"))
-
-        self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("Select EMG data file(s)...")
-        self.path_edit.setReadOnly(True)
-
-        browse_btn = QPushButton("File...")
-        browse_btn.setFixedWidth(200)
-        browse_btn.clicked.connect(self._browse_file)
-        browse_btn.setStyleSheet(get_button_style(bg_color="accent", padding=8))
-
-        browse_multi_btn = QPushButton("Batch...")
-        browse_multi_btn.setFixedWidth(200)
-        browse_multi_btn.clicked.connect(self._browse_files_batch)
-        browse_multi_btn.setStyleSheet(get_button_style(bg_color="accent", padding=8))
-
-        file_layout.addWidget(file_label)
-        file_layout.addWidget(self.path_edit, stretch=1)
-        file_layout.addWidget(browse_btn)
-        file_layout.addWidget(browse_multi_btn)
-
-        layout.addLayout(file_layout)
-
         return group
 
     def _browse_output_dir(self):
@@ -939,7 +959,8 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data Files",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4 *.rhs);;All Files (*.*)",
+            "EMG Files (*.mat *.npy *.csv *.txt *.h5 *.hdf5 *.otb+ *.otb4 *.rhs);;"
+            "All Files (*.*)",
         )
         if paths:
             self.emg_paths = [Path(p) for p in paths]
@@ -948,10 +969,14 @@ class ConfigTab(QWidget):
                 f"{len(paths)} files selected (first: {self.emg_path.name})"
             )
             self._auto_select_loader(self.emg_path)
-            self._refresh_file_metadata()
-
-            self._update_file_info()
-            self._update_summary()
+            self._update_inspect_action()
+            inspected = False
+            if self._selected_file_needs_inspection():
+                inspected = self._inspect_selected_file()
+            if not inspected:
+                self._refresh_file_metadata()
+                self._update_file_info()
+                self._update_summary()
 
             if not self.grid_cards:
                 self._add_grid()
@@ -1227,6 +1252,14 @@ class ConfigTab(QWidget):
                 self._select_loader(name)
                 return
 
+        # Some presets cover multiple extensions (.h5/.hdf5, .csv/.txt) and
+        # therefore cannot be named after every extension they accept.
+        for name in names:
+            layout = self._loader_layouts.get(name)
+            if layout and format_matches_extension(layout.get("format", ""), ext):
+                self._select_loader(name)
+                return
+
     def _select_loader(self, name: str):
         idx = self.loader_combo.findText(name)
         if idx >= 0:
@@ -1235,7 +1268,7 @@ class ConfigTab(QWidget):
     def _on_loader_changed(self):
         layout = self._get_current_layout()
         fmt = layout.get("format", "") if layout else ""
-        show = fmt in ("h5", "mat")
+        show = fmt in ("h5", "mat", "npy", "csv")
         self.emg_path_row.setVisible(show)
         self.skip_quaternions_cb.setEnabled(fmt not in ("otb4", "rhs"))
         if fmt in ("otb4", "rhs"):
@@ -1249,6 +1282,7 @@ class ConfigTab(QWidget):
             idx = self.emg_orientation_combo.findText(orient)
             self.emg_orientation_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._set_decimate(self._layout_decimate(layout))
+        self._update_inspect_action()
         if self.emg_path:
             self._refresh_file_metadata()
             self._update_file_info()
@@ -1297,6 +1331,7 @@ class ConfigTab(QWidget):
 
     def _on_emg_path_changed(self):
         if self.emg_path:
+            self._refresh_file_metadata()
             self._update_file_info()
 
     def _get_current_layout(self) -> dict | None:
@@ -1312,8 +1347,7 @@ class ConfigTab(QWidget):
         if path_override:
             layout["fields"]["emg"]["path"] = path_override
         orientation = self.emg_orientation_combo.currentText()
-        if orientation != "auto":
-            layout["fields"]["emg"]["orientation"] = orientation
+        layout["fields"]["emg"]["orientation"] = orientation
         layout["decimate"] = self.decimate_spin.value()
         return layout
 
@@ -1327,7 +1361,7 @@ class ConfigTab(QWidget):
             self,
             "Select EMG Data",
             str(Path.cwd()),
-            "EMG Files (*.mat *.npy *.csv *.h5 *.otb+ *.otb4 *.rhs);;"
+            "EMG Files (*.mat *.npy *.csv *.txt *.h5 *.hdf5 *.otb+ *.otb4 *.rhs);;"
             "OTB Files (*.otb+ *.otb4);;Intan Files (*.rhs);;All Files (*.*)",
         )
         if path:
@@ -1335,13 +1369,104 @@ class ConfigTab(QWidget):
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(path)
             self._auto_select_loader(self.emg_path)
-            self._refresh_file_metadata()
-
-            self._update_file_info()
-            self._update_summary()
+            self._update_inspect_action()
+            inspected = False
+            if self._selected_file_needs_inspection():
+                inspected = self._inspect_selected_file()
+            if not inspected:
+                self._refresh_file_metadata()
+                self._update_file_info()
+                self._update_summary()
 
             if not self.grid_cards:
                 self._add_grid()
+
+    @staticmethod
+    def _supports_array_inspection(path: Path | None) -> bool:
+        return path is not None and path.suffix.lower() in {
+            ".mat",
+            ".h5",
+            ".hdf5",
+            ".npy",
+            ".csv",
+            ".txt",
+        }
+
+    def _update_inspect_action(self):
+        self.inspect_arrays_btn.setEnabled(
+            self._supports_array_inspection(self.emg_path)
+        )
+
+    def _selected_file_needs_inspection(self) -> bool:
+        if not self._supports_array_inspection(self.emg_path):
+            return False
+        layout = self._get_layout_with_overrides()
+        return layout is None or not can_read_field(self.emg_path, layout, "emg")
+
+    def _inspect_selected_file(self) -> bool:
+        """Inspect the selected scientific file and apply its chosen EMG array."""
+        if self.emg_path is None:
+            return False
+        path = self.emg_path
+        try:
+            inspection = inspect_recording(path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Inspection failed", f"Could not inspect the recording:\n{exc}"
+            )
+            return False
+        if inspection.suggested_array is None:
+            QMessageBox.warning(
+                self,
+                "No EMG matrix found",
+                "The file does not contain a numeric two-dimensional array.",
+            )
+            return False
+
+        dialog = ImportDataDialog(
+            inspection,
+            parent=self,
+        )
+        if not dialog.exec():
+            return False
+        self._apply_import_selection(
+            Path(path),
+            field_path=dialog.selected_path,
+            orientation=dialog.selected_orientation,
+            sampling_rate=dialog.sampling_rate,
+            preserve_batch=len(self.emg_paths) > 1,
+        )
+        return True
+
+    def _apply_import_selection(
+        self,
+        file_path: Path,
+        *,
+        field_path: str,
+        orientation: str,
+        sampling_rate: int,
+        preserve_batch: bool = False,
+    ):
+        """Apply a validated inspector selection to the normal configuration UI."""
+        self.emg_path = Path(file_path)
+        if not preserve_batch:
+            self.emg_paths = [self.emg_path]
+            self.path_edit.setText(str(self.emg_path))
+        self._auto_select_loader(self.emg_path)
+        self._update_inspect_action()
+
+        layout = self._get_current_layout()
+        if layout and layout.get("format") in {"h5", "mat", "npy", "csv"}:
+            self.emg_path_edit.setText(field_path)
+            index = self.emg_orientation_combo.findText(orientation)
+            self.emg_orientation_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.fsamp_edit.setText(str(sampling_rate))
+        self._metadata_key = None
+        self._refresh_file_metadata()
+        self._update_file_info()
+        self._update_summary()
+        if not self.grid_cards:
+            self._add_grid()
 
     def _update_file_info(self):
         """
@@ -1358,10 +1483,17 @@ class ConfigTab(QWidget):
         try:
             if self._metadata_error:
                 raise ValueError(self._metadata_error)
-            if self.file_metadata.get("emg_channel_count") is not None:
+            if (
+                self.file_metadata.get("emg_channel_count") is not None
+                and self.file_metadata.get("n_samples") is not None
+            ):
                 n_samples = int(self.file_metadata["n_samples"])
                 n_channels = int(self.file_metadata["emg_channel_count"])
-                fs = int(self.file_metadata["sampling_frequency"])
+                fs = float(
+                    self.file_metadata.get("sampling_frequency")
+                    or self._effective_fs()
+                    or 2048
+                )
                 duration_sec = n_samples / fs
                 n_grids = len(self.file_metadata.get("grids", []))
                 n_aux = int(self.file_metadata.get("aux_channel_count", 0))
@@ -1370,7 +1502,7 @@ class ConfigTab(QWidget):
                     f"Loaded: {self.emg_path.name} | "
                     f"Shape: {n_samples} samples × {n_channels} channels | "
                     f"{n_grids} grid(s), {n_aux} aux | "
-                    f"Duration: {duration_sec:.1f}s @ {fs} Hz"
+                    f"Duration: {duration_sec:.1f}s @ {fs:g} Hz"
                 )
                 return
             layout_full = copy.deepcopy(layout)
@@ -1409,7 +1541,14 @@ class ConfigTab(QWidget):
         if layout is None or self.emg_path is None:
             self.file_metadata = {}
             return
-        key = (str(self.emg_path), layout.get("format"), layout.get("decimate"))
+        emg_spec = layout.get("fields", {}).get("emg", {})
+        key = (
+            str(self.emg_path),
+            layout.get("format"),
+            layout.get("decimate"),
+            emg_spec.get("path"),
+            emg_spec.get("orientation"),
+        )
         if key == self._metadata_key:
             return
         self._metadata_key = key
@@ -1784,7 +1923,7 @@ class ConfigTab(QWidget):
         if idx >= 0:
             self.loader_combo.setCurrentIndex(idx)
 
-        # Path / orientation overrides (for HDF5 / mat formats)
+        # Path / orientation overrides for generic array-based formats
         if "emg_path" in cfg:
             self.emg_path_edit.setText(cfg["emg_path"])
         if "emg_orientation" in cfg:
@@ -1810,6 +1949,7 @@ class ConfigTab(QWidget):
             self.emg_path = Path(file_path)
             self.emg_paths = [self.emg_path]
             self.path_edit.setText(file_path)
+            self._update_inspect_action()
             self._refresh_file_metadata()
             self._update_file_info()
 
@@ -1864,7 +2004,7 @@ class ConfigTab(QWidget):
                 field_path=a.get("field_path", ""),
             )
 
-        self.output_dir_edit.setText(self.output_dir_edit.text())
+        self.output_dir_edit.setText(cfg.get("output_dir", self.output_dir_edit.text()))
         self._update_summary()
 
     def _save_config(self):

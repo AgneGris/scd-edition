@@ -1,0 +1,22 @@
+# Portable SCD recording written by scd_app.io.portable_format.
+
+name: "Portable SCD (.h5)"
+format: h5
+required_attributes:
+  scd_recording_format: "1.0"
+
+fields:
+  emg:
+    path: "emg"
+    channels: null
+    orientation: samples_first
+  aux:
+    path: "aux"
+    channels: null
+    orientation: samples_first
+  force:
+    path: "aux"
+    channels: null
+    orientation: samples_first
+  timestamps:
+    path: "timestamps"

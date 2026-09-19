@@ -1,0 +1,66 @@
+cff-version: 1.2.0
+type: software
+message: "If you use SCD Edition, please cite this software and the relevant method papers."
+authors:
+  - family-names: "Grison"
+    given-names: "Agnese"
+    orcid: "https://orcid.org/0009-0001-5981-3589"
+    email: "agnese.grison@outlook.it"
+    affiliation: "Imperial College London"
+title: "SCD Edition"
+version: "0.1.0"
+date-released: "2026-09-19"
+license: BSD-3-Clause
+repository-code: "https://github.com/AgneGris/scd-edition"
+url: "https://github.com/AgneGris/scd-edition"
+keywords:
+  - electromyography
+  - motor units
+  - signal decomposition
+  - spike editing
+  - neurophysiology
+references:
+  - type: article
+    authors:
+      - family-names: "Grison"
+        given-names: "Agnese"
+      - family-names: "Clarke"
+        given-names: "Alexander Kenneth"
+      - family-names: "Muceli"
+        given-names: "Silvia"
+      - family-names: "Ibáñez"
+        given-names: "Jaime"
+      - family-names: "Kundu"
+        given-names: "Aritra"
+      - family-names: "Farina"
+        given-names: "Dario"
+    doi: "10.1109/TBME.2024.3446806"
+    journal: "IEEE Transactions on Biomedical Engineering"
+    title: "A Particle Swarm Optimised Independence Estimator for Blind Source Separation of Neurophysiological Time Series"
+    volume: "72"
+    issue: "1"
+    start: "227"
+    end: "237"
+    year: 2025
+  - type: article
+    authors:
+      - family-names: "Grison"
+        given-names: "Agnese"
+      - family-names: "Mendez Guerra"
+        given-names: "Irene"
+      - family-names: "Clarke"
+        given-names: "Alexander Kenneth"
+      - family-names: "Muceli"
+        given-names: "Silvia"
+      - family-names: "Ibáñez"
+        given-names: "Jaime"
+      - family-names: "Farina"
+        given-names: "Dario"
+    doi: "10.1113/JP287913"
+    journal: "The Journal of Physiology"
+    title: "Unlocking the full potential of high-density surface EMG: novel non-invasive high-yield motor unit decomposition"
+    volume: "603"
+    issue: "8"
+    start: "2281"
+    end: "2300"
+    year: 2025

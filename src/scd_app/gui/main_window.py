@@ -2,10 +2,12 @@
 Main application window for SCD-edition.
 """
 
+import os
 import sys
 from pathlib import Path
 
 import torch
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,6 +47,7 @@ class MainWindow(QMainWindow):
         # Core objects
         self.config_manager = ConfigManager()
         self.config: SessionConfig | None = None
+        self._close_pending = False
 
         self._setup_ui()
         self._setup_menu()
@@ -156,8 +159,13 @@ class MainWindow(QMainWindow):
         self.edition_tab.set_aux_configs(config.aux_channels)
 
         # Configure Decomposition Tab
-        if hasattr(self.decomp_tab, "setup_session"):
-            self.decomp_tab.setup_session(config, emg_paths)
+        if hasattr(
+            self.decomp_tab, "setup_session"
+        ) and not self.decomp_tab.setup_session(config, emg_paths):
+            self.config = None
+            self._set_tabs_enabled(False)
+            self.status_bar.showMessage("Configuration could not be loaded")
+            return
 
         # Enable tabs and switch to Decomposition
         self._set_tabs_enabled(True)
@@ -175,11 +183,15 @@ class MainWindow(QMainWindow):
     def _on_decomposition_complete(self, decomp_path: Path):
         """Handle decomposition completion and auto-load into Edition tab."""
         try:
-            self.edition_tab.load_from_path(decomp_path)
-            self.tabs.setCurrentWidget(self.edition_tab)
-            self.status_bar.showMessage(
-                "✓ Decomposition complete — loaded into Edition tab"
-            )
+            if self.edition_tab.load_from_path(decomp_path):
+                self.tabs.setCurrentWidget(self.edition_tab)
+                self.status_bar.showMessage(
+                    "✓ Decomposition complete — loaded into Edition tab"
+                )
+            else:
+                self.status_bar.showMessage(
+                    f"Decomposition saved to {decomp_path.name}, but was not loaded"
+                )
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -197,26 +209,46 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
-        # Check if edition tab has unsaved edits via undo stack
-        has_edits = any(self.edition_tab._undo_stack.values())
-        if has_edits:
+        if self._close_pending:
+            event.ignore()
+            return
+
+        if self.decomp_tab.has_running_worker():
             reply = QMessageBox.question(
                 self,
-                "Unsaved Changes",
-                "Save changes before closing?",
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
+                "Decomposition Running",
+                "Stop after the current grid, save completed results, and close?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
             )
-            if reply == QMessageBox.StandardButton.Save:
-                self.edition_tab._save_file()
-                event.accept()
-            elif reply == QMessageBox.StandardButton.Discard:
-                event.accept()
-            else:
+            if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
-        else:
-            event.accept()
+                return
+
+            worker = self.decomp_tab.worker
+            self._close_pending = True
+            worker.finished.connect(self._finish_pending_close)
+            self.decomp_tab.request_shutdown()
+            self.status_bar.showMessage(
+                "Finishing the current grid safely before closing…"
+            )
+            event.ignore()
+            return
+
+        if not self.edition_tab.confirm_save_changes("closing"):
+            event.ignore()
+            return
+
+        event.accept()
+
+    def _finish_pending_close(self):
+        self._close_pending = False
+        if self.decomp_tab.shutdown_save_failed:
+            self.status_bar.showMessage(
+                "Close canceled because completed decomposition results could not be saved"
+            )
+            return
+        QTimer.singleShot(0, self.close)
 
 
 def main():
@@ -226,11 +258,17 @@ def main():
         prog="scd-edition",
         description="SCD EMG Decomposition & Edition GUI",
     )
-    parser.add_argument(
+    startup = parser.add_mutually_exclusive_group()
+    startup.add_argument(
         "--open",
         dest="open_path",
         metavar="FILE",
         help="PKL decomposition file to load directly into the Edition tab on startup",
+    )
+    startup.add_argument(
+        "--example",
+        action="store_true",
+        help="open the bundled example recording with its configuration filled in",
     )
     parser.add_argument(
         "--output",
@@ -250,7 +288,25 @@ def main():
     app = QApplication([sys.argv[0], *qt_argv])
     app.setApplicationName("SCD-Edition")
 
-    if torch.cuda.is_available():
+    cuda_available = torch.cuda.is_available()
+    cuda_required = (
+        os.environ.get("SCD_REQUIRE_CUDA", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+        or (Path(sys.prefix) / ".scd-require-cuda").is_file()
+    )
+    if cuda_required and not cuda_available:
+        message = (
+            "CUDA is required for this SCD Edition environment, but PyTorch "
+            f"cannot use it (PyTorch {torch.__version__}, CUDA build "
+            f"{torch.version.cuda or 'none'}).\n\n"
+            "For this source checkout, run:\n"
+            "uv sync --python 3.13 --managed-python --extra cuda"
+        )
+        print(f"SCD Edition startup error: {message}", file=sys.stderr)
+        QMessageBox.critical(None, "CUDA Required", message)
+        return 1
+
+    if cuda_available:
         print(
             f"SCD Edition device: CUDA ({torch.cuda.get_device_name(0)}) "
             "because PyTorch detected a working CUDA device."
@@ -277,15 +333,19 @@ def main():
         from PySide6.QtCore import QTimer
 
         QTimer.singleShot(0, lambda: _open_on_startup(window, open_path))
+    elif args.example:
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(0, lambda: _configure_example_on_startup(window))
 
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
 
 
 def _open_on_startup(window: "MainWindow", path: Path):
     try:
-        window.edition_tab.load_from_path(path)
-        window.tabs.setCurrentWidget(window.edition_tab)
+        if window.edition_tab.load_from_path(path):
+            window.tabs.setCurrentWidget(window.edition_tab)
     except Exception as e:
         print(f"ERROR: Could not open file '{path}': {e}", file=sys.stderr)
         from PySide6.QtWidgets import QMessageBox
@@ -294,5 +354,28 @@ def _open_on_startup(window: "MainWindow", path: Path):
         sys.exit(1)
 
 
+def _configure_example_on_startup(window: "MainWindow"):
+    """Fill the Configuration tab with the packaged example recording."""
+    from scd_app.examples import bundled_example_config, bundled_example_path
+
+    try:
+        sample_path = bundled_example_path()
+        config = bundled_example_config()
+        config["file_path"] = str(sample_path)
+        config["output_dir"] = str(Path.cwd() / "scd-edition-output")
+        window.config_tab._config_from_dict(config)
+        window.tabs.setCurrentWidget(window.config_tab)
+        window.status_bar.showMessage(
+            "Bundled example ready — review the settings and click Apply Configuration"
+        )
+    except Exception as exc:
+        print(f"ERROR: Could not configure bundled example: {exc}", file=sys.stderr)
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(
+            window, "Example Error", f"Could not configure bundled example:\n{exc}"
+        )
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

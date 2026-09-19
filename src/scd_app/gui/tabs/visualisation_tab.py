@@ -11,7 +11,6 @@ import re
 import cmcrameri.cm as cmc
 import numpy as np
 import pyqtgraph as pg
-from motor_unit_toolbox.props import get_inst_discharge_rate
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from scd_app._vendor.motor_unit_toolbox.props import get_inst_discharge_rate
 from scd_app.core.constants import SIL_THRESHOLD
 from scd_app.core.mu_model import MotorUnit
 from scd_app.gui.style.styling import COLORS, FONT_SIZES
@@ -223,6 +223,7 @@ class VisualisationTab(QWidget):
         self._fsamp: float = 2048.0
         self._start_sample: int = 0
         self._end_sample: int = 0
+        self._timestamps_are_absolute: bool = False
         self._file_stem: str = ""
 
         # UI state
@@ -547,6 +548,7 @@ class VisualisationTab(QWidget):
         self._fsamp = d["fsamp"]
         self._start_sample = d["start_sample"]
         self._end_sample = d["end_sample"]
+        self._timestamps_are_absolute = d.get("timestamps_are_absolute", False)
         self._file_stem = d.get("file_stem", "")
         self._rebuild_sidebar_rows()
         self._rebuild_aux_controls()
@@ -624,11 +626,22 @@ class VisualisationTab(QWidget):
     # well below 500 Hz, so there is no benefit computing at the raw rate.
     _IDR_MAX_FS = 1000  # Hz
 
+    def _absolute_timestamps(self, mu: MotorUnit) -> np.ndarray:
+        """Return spike coordinates in the full-recording reference frame."""
+        timestamps = np.asarray(mu.timestamps)
+        if self._timestamps_are_absolute:
+            return timestamps
+        return timestamps + self._start_sample
+
     def _build_idr_matrix(self, sorted_mus: list[tuple]):
         if not sorted_mus:
             return None, None, self._IDR_MAX_FS
 
-        all_ts = [mu.timestamps for _, mu in sorted_mus if len(mu.timestamps) > 0]
+        all_ts = [
+            self._absolute_timestamps(mu)
+            for _, mu in sorted_mus
+            if len(mu.timestamps) > 0
+        ]
         if not all_ts:
             return None, None, self._IDR_MAX_FS
 
@@ -648,7 +661,8 @@ class VisualisationTab(QWidget):
         for col, (_, mu) in enumerate(sorted_mus):
             if len(mu.timestamps) == 0:
                 continue
-            ts_disp = np.round(mu.timestamps / ratio).astype(np.int64) - min_disp
+            timestamps = self._absolute_timestamps(mu)
+            ts_disp = np.round(timestamps / ratio).astype(np.int64) - min_disp
             valid = ts_disp[(ts_disp >= 0) & (ts_disp < n_samples)]
             spike_matrix[valid, col] = True
 
@@ -670,7 +684,7 @@ class VisualisationTab(QWidget):
             if len(mu.timestamps) == 0:
                 ticks.append((rank, f"MU {mu.id}"))
                 continue
-            t = mu.timestamps / fsamp
+            t = self._absolute_timestamps(mu) / fsamp
             y = np.full(len(t), rank, dtype=float)
             r, g, b = palette[rank]
             scatter = pg.ScatterPlotItem(
@@ -864,7 +878,7 @@ class VisualisationTab(QWidget):
         labels = []
 
         for rank, (_port_name, mu) in enumerate(sorted_mus):
-            ts = mu.timestamps.copy()
+            ts = self._absolute_timestamps(mu)
             if self._end_sample > self._start_sample:
                 ts = ts[(ts >= self._start_sample) & (ts < self._end_sample)]
             if len(ts) < 2:

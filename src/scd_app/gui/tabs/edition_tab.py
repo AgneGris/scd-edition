@@ -7,7 +7,6 @@ is shown as a shaded band on the source plot.
 """
 
 import logging
-import pickle
 import traceback
 from pathlib import Path
 
@@ -44,6 +43,7 @@ from PySide6.QtWidgets import (
 )
 from scipy import signal as sp_signal
 
+from scd_app._vendor.motor_unit_toolbox import spike_comp as _tb_spike_comp
 from scd_app.core.auto_editor import MIN_SPIKES, auto_edit
 from scd_app.core.constants import ROA_THRESHOLD
 from scd_app.core.filter_recalculation import (
@@ -73,16 +73,12 @@ from scd_app.gui.widgets.source_plot_widget import (
     SelectionArm,
     SourcePlotWidget,
 )
+from scd_app.io.atomic_pickle import atomic_pickle_dump
 from scd_app.io.decomposition_loader import load_decomposition_file
 
 logger = logging.getLogger(__name__)
 
-try:
-    from motor_unit_toolbox import spike_comp as _tb_spike_comp
-
-    _SPIKE_COMP_AVAILABLE = True
-except ImportError:
-    _SPIKE_COMP_AVAILABLE = False
+_SPIKE_COMP_AVAILABLE = True
 
 
 # ---------------------------------------------------------------------------
@@ -727,6 +723,7 @@ class EditionTab(QWidget):
         self._loaded_path: Path | None = None
         self._output_path: Path | None = None
         self._quit_after_save: bool = False
+        self._dirty: bool = False
         self._config_aux_channels: list = []  # from the last applied config, used to fill missing MVC on load
 
         self._start_sample: int = 0
@@ -748,6 +745,7 @@ class EditionTab(QWidget):
         self._props_timer.setInterval(120)
         self._props_timer.timeout.connect(self._flush_props_update)
         self._pending_source_changed: bool = False
+        self._pending_props_key: tuple[str, int] | None = None
 
         # MUAP grid reuse: keep cell PlotDataItems alive across MU switches
         self._muap_cell_plots: dict[tuple[int, int], object] = {}
@@ -1362,9 +1360,41 @@ class EditionTab(QWidget):
 
     def _update_file_label(self):
         if self._loaded_path:
-            self._file_label.setText(f"📄 Current File: {self._loaded_path.name}")
+            dirty_marker = " *" if self._dirty else ""
+            self._file_label.setText(
+                f"📄 Current File: {self._loaded_path.name}{dirty_marker}"
+            )
         else:
             self._file_label.setText("")
+
+    @property
+    def is_dirty(self) -> bool:
+        """Whether the current edition contains changes not written to disk."""
+        return self._dirty
+
+    def _set_dirty(self, dirty: bool) -> None:
+        if self._dirty == dirty:
+            return
+        self._dirty = dirty
+        self._update_file_label()
+
+    def confirm_save_changes(self, action: str = "continuing") -> bool:
+        """Offer to save dirty data, returning whether *action* may proceed."""
+        if not self._dirty:
+            return True
+
+        reply = QMessageBox.question(
+            self,
+            "Unsaved Changes",
+            f"Save changes before {action}?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if reply == QMessageBox.StandardButton.Save:
+            return self._save_file()
+        return reply == QMessageBox.StandardButton.Discard
 
     def get_visualisation_data(self) -> dict:
         """Return a snapshot of all data needed by the Visualisation tab."""
@@ -1375,26 +1405,29 @@ class EditionTab(QWidget):
             "fsamp": self._fsamp,
             "start_sample": self._start_sample,
             "end_sample": self._end_sample,
+            "timestamps_are_absolute": self._full_source_mode,
             "file_stem": self._loaded_path.stem if self._loaded_path else "",
         }
 
-    def load_from_path(self, path: Path):
+    def load_from_path(self, path: Path) -> bool:
         path = Path(path)
         if not path.exists():
             QMessageBox.critical(self, "Load Error", f"File not found:\n{path}")
-            return
+            return False
         try:
             data = load_decomposition_file(path)
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to read file:\n{e}")
-            return
+            return False
         if "ports" not in data or "discharge_times" not in data:
             QMessageBox.warning(
                 self,
                 "Format Error",
                 "File does not contain 'ports' and 'discharge_times'.",
             )
-            return
+            return False
+        if not self.confirm_save_changes("opening another file"):
+            return False
         if data.get("skip_filter_recalc"):
             reply = QMessageBox.question(
                 self,
@@ -1445,13 +1478,19 @@ class EditionTab(QWidget):
                 )
             else:
                 self._update_status(f"Loaded: {path.name}")
+            self._set_dirty(False)
             self._update_file_label()
             self.file_loaded.emit()
+            return True
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Load Error", f"Failed to parse:\n{e}")
+            return False
 
     def _load_decomposition_data(self, decomp_data: dict):
+        self._props_timer.stop()
+        self._pending_props_key = None
+        self._pending_source_changed = False
         self._disarm_selection()
         self._ports.clear()
         self._emg_data.clear()
@@ -1881,10 +1920,16 @@ class EditionTab(QWidget):
         """Close the application after every successful save while enabled."""
         self._quit_after_save = enabled
 
-    def _save_file(self):
+    def _save_file(self) -> bool:
         if not self._ports:
             self._update_status("Nothing to save")
-            return
+            return False
+
+        # Persist derived quality metrics for the latest spike edit even when
+        # the user saves inside the short UI debounce window.
+        if self._pending_props_key is not None:
+            self._props_timer.stop()
+            self._flush_props_update()
 
         if self._output_path:
             save_path = self._output_path
@@ -1898,18 +1943,20 @@ class EditionTab(QWidget):
                 self, "Save Decomposition", default, "Pickle (*.pkl)"
             )
             if not chosen:
-                return
+                return False
             save_path = Path(chosen)
 
         try:
-            with open(save_path, "wb") as f:
-                pickle.dump(self._build_save_dict(), f)
+            atomic_pickle_dump(self._build_save_dict(), save_path)
+            self._set_dirty(False)
             self._update_status(f"Saved: {save_path.name}")
             self._update_file_label()
             if self._quit_after_save:
                 QApplication.quit()
+            return True
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
+            return False
 
     def _build_save_dict(self) -> dict:
         import dataclasses
@@ -2440,6 +2487,7 @@ class EditionTab(QWidget):
         self._update_status(
             f"MU {mu.id} {'flagged' if mu.flagged_duplicate else 'unflagged'}"
         )
+        self._mark_modified()
 
     # ------------------------------------------------------------------
     # Reliability override
@@ -2476,6 +2524,7 @@ class EditionTab(QWidget):
         self._update_status(
             f"MU {mu.id} marked {'RELIABLE' if wanted else 'UNRELIABLE'} ({how})"
         )
+        self._mark_modified()
 
     def _reset_reliability(self):
         """Drop the current MU's manual override and follow the metrics again."""
@@ -2500,6 +2549,7 @@ class EditionTab(QWidget):
             f"MU {mu.id} reliability back to automatic: "
             f"{'RELIABLE' if mu.props.is_reliable else 'UNRELIABLE'}"
         )
+        self._mark_modified()
 
     def _delete_all_flagged(self):
         ports = list(self._ports.keys())
@@ -2582,6 +2632,7 @@ class EditionTab(QWidget):
             self._refresh_mu_combo()
             self._clear_plots()
         self._update_status(f"Deleted {total} flagged MU(s)")
+        self._mark_modified()
 
     def _remove_outliers(self):
         """Remove spikes causing outlier IFR in the current MU.
@@ -2734,6 +2785,8 @@ class EditionTab(QWidget):
         if no_props_count:
             parts.append(f"{no_props_count} skipped (no quality data)")
         self._update_status(" — ".join(parts))
+        if flagged_count:
+            self._mark_modified()
 
     # ------------------------------------------------------------------
     # Duplicate detection
@@ -2858,6 +2911,7 @@ class EditionTab(QWidget):
             failed_ports=failed_ports,
             skipped_reason="fewer than 2 MUs",
         )
+        self._mark_modified()
 
     def _flag_cross_duplicates(self):
         """Detect and flag lower-quality cross-port duplicate MUs for deletion."""
@@ -2976,6 +3030,7 @@ class EditionTab(QWidget):
             failed_ports=failed_ports,
             skipped_reason="",
         )
+        self._mark_modified()
 
     def _show_duplicate_report(
         self,
@@ -3173,6 +3228,11 @@ class EditionTab(QWidget):
         """Immediate cheap updates; expensive recompute+render deferred 120 ms."""
         mu = self._current_mu()
         if mu is not None:
+            key = (self._current_port or "", self._current_mu_idx)
+            if self._pending_props_key is not None and self._pending_props_key != key:
+                self._props_timer.stop()
+                self._flush_props_update()
+            self._pending_props_key = key
             if source_changed:
                 # Source signal changed (e.g. filter recalc) — redraw curve now
                 self.source_plot.set_data(mu.source, mu.timestamps)
@@ -3191,20 +3251,34 @@ class EditionTab(QWidget):
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
         self.mu_combo.blockSignals(False)
         self._update_status(msg)
-        self.data_modified.emit()
+        self._mark_modified()
 
         # Accumulate source_changed across rapid edits, then flush once
         self._pending_source_changed |= source_changed
         self._props_timer.start()
 
+    def _mark_modified(self) -> None:
+        """Record a persisted state change without forcing a plot recomputation."""
+        self._set_dirty(True)
+        self.data_modified.emit()
+
     def _flush_props_update(self):
         """Runs after editing pauses: recomputes MU properties and refreshes MUAP + quality."""
-        mu = self._current_mu()
-        if mu is None:
+        key = self._pending_props_key
+        self._pending_props_key = None
+        if key is None:
             self._pending_source_changed = False
             return
-        grid_cfg = self._grid_info.get(self._current_port)
-        emg_port = self._emg_data.get(self._current_port)
+
+        port_name, mu_idx = key
+        mus = self._ports.get(port_name, [])
+        if not (0 <= mu_idx < len(mus)):
+            self._pending_source_changed = False
+            return
+
+        mu = mus[mu_idx]
+        grid_cfg = self._grid_info.get(port_name)
+        emg_port = self._emg_data.get(port_name)
         mu.props = recompute_unit_properties(
             mu_props=mu.props or MUProperties(),
             new_timestamps=mu.timestamps,
@@ -3215,8 +3289,9 @@ class EditionTab(QWidget):
             fsamp=self._fsamp,
         )
         self._pending_source_changed = False
-        self._plot_muap()
-        self._update_quality_panel(mu)
+        if (self._current_port, self._current_mu_idx) == key:
+            self._plot_muap()
+            self._update_quality_panel(mu)
 
     def _update_quality_panel(self, mu: MotorUnit | None):
         if mu is None:
@@ -3272,7 +3347,16 @@ class EditionTab(QWidget):
         lay.addWidget(buttons)
 
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            mu.notes = editor.toPlainText()
+            new_notes = editor.toPlainText()
+            if new_notes != mu.notes:
+                mu.notes = new_notes
+                self._log_event(
+                    "notes",
+                    f"updated notes for MU {mu.id}",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                )
+                self._mark_modified()
 
     def _update_status(self, msg: str | None = None):
         if msg:

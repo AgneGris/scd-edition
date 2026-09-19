@@ -54,6 +54,23 @@ def test_config_cards_reemit_parameterless_change_signal():
     app.processEvents()
 
 
+def test_recording_controls_present_one_clear_selection_workflow():
+    from PySide6.QtWidgets import QApplication
+
+    from scd_app.gui.tabs.config_tab import ConfigTab
+
+    app = QApplication.instance() or QApplication([])
+    tab = ConfigTab()
+
+    assert tab.choose_recording_btn.text() == "Choose recording…"
+    assert tab.choose_batch_btn.text() == "Choose batch…"
+    assert tab.inspect_arrays_btn.text() == "Inspect arrays…"
+    assert not tab.inspect_arrays_btn.isEnabled()
+
+    tab.close()
+    app.processEvents()
+
+
 def test_copy_decomposition_configuration_confirms_updated_grids():
     from PySide6.QtWidgets import (
         QApplication,

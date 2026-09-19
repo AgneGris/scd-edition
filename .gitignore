@@ -2,6 +2,7 @@
 dist/
 build/
 *.egg-info/
+*.spec
 
 # Python
 __pycache__/
@@ -40,11 +41,8 @@ data/
 tests/
 !tests/
 tests/*
-!tests/test_smoke.py
-!tests/test_decomposition_loader.py
-!tests/test_mu_properties.py
+!tests/test_*.py
 export/
-docs/
 bats/
 scripts/add_force_to_decomp.py
 scripts/assign_edition.py
@@ -52,6 +50,12 @@ scripts/patch_mvc.py
 scripts/export_scd_to_demuse.py
 
 resources/loaders_configs/loader_dynamic.yaml
+
+# The redistributable example is intentionally packaged with the application.
+!src/scd_app/resources/examples/*.mat
+
+# Output created by `scd-edition --example`.
+scd-edition-output/
 
 # Lab-specific HPC jobs and local dependency checkout
 jobs/

@@ -1,0 +1,8 @@
+include CITATION.cff
+include CONTRIBUTING.md
+include CHANGELOG.md
+include SUPPORT.md
+include THIRD_PARTY_NOTICES.md
+recursive-include docs *.gif *.ipynb *.md
+recursive-include scripts *.py
+recursive-include src/scd_app/resources/examples *.json *.mat *.md

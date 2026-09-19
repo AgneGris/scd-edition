@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "loader": ".mat",
+  "sampling_rate": 10240,
+  "decimate": 1,
+  "file_path": null,
+  "output_dir": "scd-edition-output",
+  "skip_quaternions": false,
+  "emg_path": "emg",
+  "emg_orientation": "samples_first",
+  "grids": [
+    {
+      "name": "Example_Grid",
+      "muscle": "Example",
+      "type": "Surface",
+      "config": "Grid (GR10MM0808)",
+      "start_chan": 0,
+      "end_chan": 64,
+      "color": "#4a9eff"
+    }
+  ],
+  "aux_channels": []
+}

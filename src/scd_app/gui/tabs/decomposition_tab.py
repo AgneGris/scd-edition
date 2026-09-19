@@ -117,6 +117,9 @@ class DecompositionTab(QWidget):
         self.cid = None
         self._setup_cancelled = False
         self._discard_on_stop = False  # True = stop now (discard), False = save on stop
+        self._shutdown_requested = False
+        self._shutdown_save_failed = False
+        self._last_decomp_path: Path | None = None
 
         # Time window selection state
         self.sel_start: float = 0.0
@@ -129,8 +132,11 @@ class DecompositionTab(QWidget):
 
         self.init_ui()
 
-    def setup_session(self, config: SessionConfig, emg_paths: list):
+    def setup_session(self, config: SessionConfig, emg_paths: list) -> bool:
         """Called by MainWindow when Configuration is applied."""
+        if not emg_paths:
+            QMessageBox.critical(self, "Load Error", "No EMG files were selected.")
+            return False
         self.config = config
         self.emg_paths = [Path(p) if not isinstance(p, Path) else p for p in emg_paths]
         self.emg_path = self.emg_paths[0]
@@ -147,7 +153,8 @@ class DecompositionTab(QWidget):
             f"padding: 5px; margin: 5px; font-weight: bold;"
         )
 
-        self._load_emg_data()
+        if not self._load_emg_data():
+            return False
         self._load_grid_configs()
 
         # Show a ready prompt — channel rejection + RMS happen when user clicks Start
@@ -171,6 +178,7 @@ class DecompositionTab(QWidget):
         print(
             f"Decomposition Tab Ready: {len(self.grid_configs)} grids, {n_files} file(s)."
         )
+        return True
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -493,12 +501,13 @@ class DecompositionTab(QWidget):
         layout.addWidget(self.canvas, stretch=1)
         return container
 
-    def _load_emg_data(self):
+    def _load_emg_data(self) -> bool:
         """Load EMG data using the layout from config."""
         import copy
 
         from scd_app.io.data_loader import load_field
 
+        self.emg_data = None
         try:
             layout = getattr(self.config, "data_layout", None)
             if layout is None:
@@ -516,10 +525,12 @@ class DecompositionTab(QWidget):
             # load_field returns (samples, channels) as torch.Tensor
             self.emg_data = emg
             print(f"Loaded EMG data: {self.emg_data.shape}")
+            return True
 
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to load EMG data:\n{e!s}")
             print(f"Error loading EMG data: {e}")
+            return False
 
     def _load_grid_configs(self):
         """Populate grid configurations based on SessionConfig."""
@@ -1722,16 +1733,45 @@ class DecompositionTab(QWidget):
             return
 
         # ── Phase 1: initialise queue and prepare the first file ─────────
-        self._sync_params_from_ui()
-        self._set_params_enabled(False)
-        self.stop_btn.setVisible(False)
-        self._use_full_file = self.time_mode.currentText() == "Full file"
-        self._share_rejection = self.rejection_mode.currentText() == "First file only"
         self._output_dir = (
             Path(self.config.output_dir)
             if self.config.output_dir
             else self.emg_path.parent
         )
+        output_paths = [self._output_path_for(path) for path in self.emg_paths]
+        normalised_paths = [str(path.resolve()).casefold() for path in output_paths]
+        if len(set(normalised_paths)) != len(normalised_paths):
+            QMessageBox.critical(
+                self,
+                "Duplicate Output Names",
+                "Two selected recordings would produce the same output filename. "
+                "Rename one recording or process it separately.",
+            )
+            return
+
+        existing = [path for path in output_paths if path.exists()]
+        if existing:
+            shown = "\n".join(f"• {path.name}" for path in existing[:8])
+            if len(existing) > 8:
+                shown += f"\n• … and {len(existing) - 8} more"
+            reply = QMessageBox.question(
+                self,
+                "Overwrite Existing Results?",
+                "The following output file(s) already exist:\n\n"
+                f"{shown}\n\nOverwrite them with the new decomposition?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self._last_decomp_path = None
+        self._shutdown_requested = False
+        self._sync_params_from_ui()
+        self._set_params_enabled(False)
+        self.stop_btn.setVisible(False)
+        self._use_full_file = self.time_mode.currentText() == "Full file"
+        self._share_rejection = self.rejection_mode.currentText() == "First file only"
         self._file_queue = list(self.emg_paths)
         self._file_idx = 0
 
@@ -1746,6 +1786,9 @@ class DecompositionTab(QWidget):
             self._batch_setup_next_file()
         else:
             self._prepare_current_file()
+
+    def _output_path_for(self, file_path: Path) -> Path:
+        return self._output_dir / f"{Path(file_path).stem}_decomp_output.pkl"
 
     def _load_emg_full(self, file_path: Path):
         """Load a file's EMG with no channel filter applied.
@@ -1767,9 +1810,14 @@ class DecompositionTab(QWidget):
     def _prepare_current_file(self):
         """Load file, do channel rejection + RMS, then wait for time window (per file)."""
         if self._file_idx >= len(self._file_queue):
-            self.grid_indicator_label.setText("All files complete")
+            message = (
+                "All files complete"
+                if self._last_decomp_path is not None
+                else "No files were decomposed"
+            )
+            self.grid_indicator_label.setText(message)
             self._reset_ui_state()
-            if hasattr(self, "_last_decomp_path") and self._last_decomp_path:
+            if self._last_decomp_path is not None:
                 self.decomposition_complete.emit(self._last_decomp_path)
             return
 
@@ -1854,7 +1902,7 @@ class DecompositionTab(QWidget):
         ax.axis("off")
         self.canvas.draw()
 
-        save_path = self._output_dir / f"{file_path.stem}_decomp_output.pkl"
+        save_path = self._output_path_for(file_path)
 
         aux_configs = getattr(self.config, "aux_channels", [])
 
@@ -2003,9 +2051,14 @@ class DecompositionTab(QWidget):
     def _batch_decompose_next_file(self):
         """Start decomposition for the next pre-set-up file."""
         if self._file_idx >= len(self._file_setups):
-            self.grid_indicator_label.setText("All files complete")
+            message = (
+                "All files complete"
+                if self._last_decomp_path is not None
+                else "No files were decomposed"
+            )
+            self.grid_indicator_label.setText(message)
             self._reset_ui_state()
-            if hasattr(self, "_last_decomp_path") and self._last_decomp_path:
+            if self._last_decomp_path is not None:
                 self.decomposition_complete.emit(self._last_decomp_path)
             return
 
@@ -2046,7 +2099,12 @@ class DecompositionTab(QWidget):
         # would otherwise stay in RAM alongside the next file's.
         if self.worker is not None:
             self.worker.wait()
-            self.worker = None
+
+        if self._shutdown_requested:
+            self._reset_ui_state()
+            return
+
+        self.worker = None
 
         self._file_idx += 1
         if getattr(self, "_file_setups", None):
@@ -2061,6 +2119,21 @@ class DecompositionTab(QWidget):
         if message.startswith("Processing "):
             # Extract "Processing GridName (2/6)..."
             self.grid_indicator_label.setText(f"{message}")
+
+    def has_running_worker(self) -> bool:
+        return self.worker is not None and self.worker.isRunning()
+
+    @property
+    def shutdown_save_failed(self) -> bool:
+        return self._shutdown_save_failed
+
+    def request_shutdown(self) -> None:
+        """Ask the worker to stop at its next safe grid boundary."""
+        self._shutdown_requested = True
+        self._shutdown_save_failed = False
+        self._discard_on_stop = False
+        if self.has_running_worker():
+            self.worker.stop()
 
     def _stop_decomposition(self):
         """Show stop options immediately. Worker keeps running until user chooses.
@@ -2087,7 +2160,7 @@ class DecompositionTab(QWidget):
         outer.addWidget(title)
 
         disc_note = (
-            "  \u2014  closing the app will discard the current grid."
+            "  \u2014  the current grid will finish before stopping."
             if n_complete > 0
             else "  \u2014  no grids completed yet."
         )
@@ -2101,13 +2174,13 @@ class DecompositionTab(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        wait_btn = QPushButton("Stop after current grid")
+        wait_btn = QPushButton("Stop after current grid & save")
         wait_btn.setStyleSheet(
             f"background-color: {COLORS.get('info', '#4a9eff')}; color: white; "
             f"border-radius: 6px; font-weight: bold; padding: 10px 16px; font-size: 10pt;"
         )
 
-        stop_btn = QPushButton("Stop now and close application")
+        stop_btn = QPushButton("Stop after current grid & discard")
         stop_btn.setStyleSheet(
             f"background-color: {COLORS['error']}; color: white; "
             f"border-radius: 6px; font-weight: bold; padding: 10px 16px; font-size: 10pt;"
@@ -2150,18 +2223,15 @@ class DecompositionTab(QWidget):
         if choice[0] == "wait":
             self._show_waiting_dialog()
         elif choice[0] == "stop":
-            import sys
-
-            sys.exit(0)
+            self._show_waiting_dialog(discard=True)
         # else: cancel — worker continues untouched
 
-    def _show_waiting_dialog(self):
+    def _show_waiting_dialog(self, *, discard: bool = False):
         """Keep a dialogue open while the current grid finishes.
         Updates live with number of iterations completed.
         Closes automatically when the worker emits stopped()."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Waiting for current grid…")
-        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
         dlg.setMinimumWidth(420)
 
         layout = QVBoxLayout(dlg)
@@ -2173,9 +2243,10 @@ class DecompositionTab(QWidget):
         title_lbl.setStyleSheet("font-size: 13pt;")
         layout.addWidget(title_lbl)
 
+        result_action = "discarded" if discard else "saved"
         info_lbl = QLabel(
             "The current grid will be allowed to finish normally.<br>"
-            "All previously completed grids will be saved."
+            f"Completed results will then be {result_action}."
         )
         info_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_lbl.setWordWrap(True)
@@ -2189,14 +2260,12 @@ class DecompositionTab(QWidget):
         )
         layout.addWidget(iter_lbl)
 
-        cancel_now_btn = QPushButton(
-            "Stop now and close application (results will be deleted)"
+        hide_btn = QPushButton("Hide this dialog")
+        hide_btn.setStyleSheet(
+            f"background-color: {COLORS.get('background_light', '#2a2a3c')}; "
+            f"color: {COLORS['foreground']}; border-radius: 4px; padding: 8px;"
         )
-        cancel_now_btn.setStyleSheet(
-            f"background-color: {COLORS['error']}; color: white; "
-            f"border-radius: 4px; padding: 8px; font-weight: bold;"
-        )
-        layout.addWidget(cancel_now_btn)
+        layout.addWidget(hide_btn)
 
         def _on_source(_source, _timestamps, iteration, _silhouette):
             iterations = self.global_widgets["iterations"].text()
@@ -2210,20 +2279,42 @@ class DecompositionTab(QWidget):
                 self.worker.source_found.disconnect(_on_source)
             dlg.accept()
 
-        def _on_cancel_now():
-            """Close the application — only reliable way to stop mid-grid."""
-            import sys
-
-            sys.exit(0)
+        def _on_finished():
+            with contextlib.suppress(Exception):
+                dlg.accept()
 
         self.worker.source_found.connect(_on_source)
         self.worker.stopped.connect(_on_stopped)
-        cancel_now_btn.clicked.connect(_on_cancel_now)
+        self.worker.finished.connect(_on_finished)
+        hide_btn.clicked.connect(dlg.reject)
 
         # Tell the worker to stop after this grid completes
+        self._discard_on_stop = discard
         self.worker.stop()
 
         dlg.exec()
+
+    def _save_partial_worker_results(
+        self, *, emit_completion: bool
+    ) -> tuple[bool, str | None]:
+        """Save completed grids, returning ``(had_results, error_message)``."""
+        if self.worker is None:
+            return False, None
+        partial = self.worker._partial_results
+        n_complete = len(partial[0]["ports"]) if partial else 0
+        if not partial or n_complete == 0:
+            return False, None
+
+        try:
+            results, _ = partial
+            self.worker._save_results(results)
+            decomp_path = Path(self.worker.save_path)
+            self._last_decomp_path = decomp_path
+            if emit_completion:
+                self.decomposition_complete.emit(decomp_path)
+            return True, None
+        except Exception as exc:
+            return True, str(exc)
 
     def _on_worker_stopped(self, _info: dict):
         """Called when the worker emits stopped() after finishing the current grid.
@@ -2232,25 +2323,43 @@ class DecompositionTab(QWidget):
         self._discard_on_stop = False  # always reset
 
         if not discard:
-            partial = self.worker._partial_results
-            n_complete = len(partial[0]["ports"]) if partial else 0
-
-            if partial and n_complete > 0:
-                try:
-                    results, _ = partial
-                    self.worker._save_results(results)
-                    decomp_path = Path(self.worker.save_path)
-                    self._last_decomp_path = decomp_path
-                    self.decomposition_complete.emit(decomp_path)
-                except Exception as e:
-                    QMessageBox.critical(
-                        self, "Save Error", f"Could not save results:\n{e}"
-                    )
+            had_results, save_error = self._save_partial_worker_results(
+                emit_completion=not self._shutdown_requested
+            )
+            if had_results and save_error is not None:
+                if self._shutdown_requested:
+                    self._shutdown_save_failed = True
+                QMessageBox.critical(
+                    self,
+                    "Save Error",
+                    f"Could not save completed results:\n{save_error}",
+                )
 
         self._reset_ui_state()
 
     def _on_decomposition_error(self, err_msg):
-        QMessageBox.critical(self, "Error", f"Decomposition Failed:\n{err_msg}")
+        had_results, save_error = self._save_partial_worker_results(
+            emit_completion=False
+        )
+        if had_results and save_error is not None and self._shutdown_requested:
+            self._shutdown_save_failed = True
+
+        if not self._shutdown_requested:
+            if had_results and save_error is None:
+                recovery = (
+                    f"\n\nCompleted grids were saved to:\n{self._last_decomp_path}"
+                )
+            elif had_results:
+                recovery = f"\n\nCompleted grids could not be saved:\n{save_error}"
+            else:
+                recovery = ""
+            QMessageBox.critical(
+                self, "Error", f"Decomposition Failed:\n{err_msg}{recovery}"
+            )
+        elif had_results and save_error is not None:
+            QMessageBox.critical(
+                self, "Save Error", f"Could not save completed results:\n{save_error}"
+            )
         self._reset_ui_state()
 
     def _on_source_found(self, source, timestamps, iteration, silhouette):

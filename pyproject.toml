@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "GUI for editing and visualizing SCD decomposition results"
 readme = "README.md"
 license = "BSD-3-Clause"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [
     {name = "Agnese Grison", email = "agnese.grison16@imperial.ac.uk"},
 ]
@@ -18,15 +19,17 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 keywords = ["EMG", "decomposition", "GUI", "spike editing", "motor units"]
 
 dependencies = [
     "swarm-contrastive-decomposition>=0.2.3",
-    "motor_unit_toolbox @ git+https://github.com/imendezguerra/motor_unit_toolbox.git@d84dc6c943daa5d686b2911b48b13bf718628130",
     "numpy>=1.20.0",
     "scipy>=1.7.0",
+    "h5py>=3.8.0",
     "matplotlib>=3.5.0",
     "pyqtgraph>=0.13.0",
     "PySide6>=6.5.0",
@@ -45,6 +48,7 @@ cuda = [
     "torch>=2.11.0",
 ]
 dev = [
+    "pillow>=11.0",
     "ruff>=0.16.8",
 ]
 
@@ -54,6 +58,7 @@ scd-edition = "scd_app.gui.main_window:main"
 [project.urls]
 Homepage = "https://github.com/AgneGris/scd-edition"
 Repository = "https://github.com/AgneGris/scd-edition"
+Issues = "https://github.com/AgneGris/scd-edition/issues"
 
 [tool.uv]
 required-environments = [
@@ -90,6 +95,9 @@ include = ["scd_app*"]
 scd_app = [
     "gui/style/fonts/*.ttf",
     "resources/loaders_configs/*.yaml",
+    "resources/examples/*.json",
+    "resources/examples/*.mat",
+    "resources/examples/*.md",
 ]
 
 [tool.pytest.ini_options]
@@ -100,6 +108,7 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "pillow>=11.0",
     "ruff>=0.16.8",
     "pytest>=8.0",
 ]
@@ -107,7 +116,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py310"
-extend-exclude = ["pytest_*"]
+extend-exclude = ["pytest_*", "src/scd_app/_vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PERF", "RUF"]
@@ -134,7 +143,7 @@ ignore = [
 # trace across methods. These rules report almost only that, so they are off.
 [tool.pyright]
 include = ["src", "scripts"]
-exclude = ["**/__pycache__", ".venv", "pytest_*"]
+exclude = ["**/__pycache__", ".venv", "pytest_*", "src/scd_app/_vendor"]
 pythonVersion = "3.10"
 reportArgumentType = "none"
 reportAttributeAccessIssue = "none"

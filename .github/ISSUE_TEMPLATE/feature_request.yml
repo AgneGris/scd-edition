@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a focused improvement to the workflow
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Research or workflow problem
+      description: Describe the task that is difficult today, not only the proposed interface.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: format
+    attributes:
+      label: Acquisition system or file format
+      description: Complete this when the request concerns data import.

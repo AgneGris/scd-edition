@@ -15,6 +15,7 @@ from scipy import signal
 from scipy.io import loadmat, savemat
 
 from scd_app.core.mu_model import MotorUnit, UndoAction
+from scd_app.io.atomic_pickle import atomic_pickle_dump
 
 
 @dataclass
@@ -302,8 +303,7 @@ class DataHandler:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         if path.suffix == ".pkl":
-            with open(path, "wb") as f:
-                pickle.dump(data, f)
+            atomic_pickle_dump(data, path)
         elif path.suffix == ".mat":
             savemat(str(path), data)
         else:

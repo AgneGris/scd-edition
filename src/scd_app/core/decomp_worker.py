@@ -3,7 +3,6 @@ Decomposition Worker - Manages EMG signal decomposition (via SCD).
 """
 
 import copy
-import pickle
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +11,8 @@ from PySide6.QtCore import QThread, Signal
 from scd.config.structures import Config
 from scd.models.scd import SwarmContrastiveDecomposition
 from scd.processing.preprocess import replace_bad_channels_with_noise
+
+from scd_app.io.atomic_pickle import atomic_pickle_dump
 
 
 class DecompositionWorker(QThread):
@@ -428,12 +429,8 @@ class DecompositionWorker(QThread):
         }
 
         # 6. Write
-        save_path_obj = Path(self.save_path)
-        save_path_obj.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(self.save_path, "wb") as f:
-            pickle.dump(save_dict, f)
-            print(f"File saved successfully: {self.save_path}")
+        atomic_pickle_dump(save_dict, Path(self.save_path))
+        print(f"File saved successfully: {self.save_path}")
 
     def _load_aux_file_channel(self, file_path: Path, aux_config: dict) -> dict | None:
         """Load one channel from the format's canonical auxiliary field."""

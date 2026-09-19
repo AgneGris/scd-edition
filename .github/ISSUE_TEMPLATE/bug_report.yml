@@ -1,0 +1,73 @@
+name: Bug report
+description: Report reproducible incorrect behaviour or a crash
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Do not attach participant recordings or identifying metadata to this public issue.
+  - type: input
+    id: version
+    attributes:
+      label: SCD Edition version
+      description: Release number or commit hash.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - PyPI
+        - GitHub checkout with uv
+        - GitHub checkout with pip
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system, Python version, CPU/GPU model and CUDA driver when relevant.
+      placeholder: "Windows 11, Python 3.13, NVIDIA RTX 4070, driver 580.xx"
+    validations:
+      required: true
+  - type: input
+    id: format
+    attributes:
+      label: Acquisition system and format
+      placeholder: "Quattrocento / .otb+"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour and traceback
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Data privacy
+      options:
+        - label: I have not attached participant recordings or identifying metadata.
+          required: true

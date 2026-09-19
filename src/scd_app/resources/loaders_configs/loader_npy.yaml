@@ -1,0 +1,10 @@
+# Generic NumPy array. The loader never enables pickle when opening the file.
+
+name: ".npy"
+format: npy
+
+fields:
+  emg:
+    path: "array"
+    channels: null
+    orientation: auto

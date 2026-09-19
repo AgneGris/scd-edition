@@ -1,13 +1,14 @@
 """
-mu_properties.py  —  Motor Unit property computation via motor_unit_toolbox.
+mu_properties.py  —  Motor Unit property computation.
 
 Responsibility:
     Convert between the app's internal data formats and the formats expected
-    by motor_unit_toolbox, then compute and cache all MU properties.
+    by the vendored Motor Unit Toolbox routines, then compute and cache all
+    MU properties.
 
 Data-format contracts
 ─────────────────────
-  motor_unit_toolbox expects:
+  Motor Unit Toolbox expects:
     spike_train  : np.ndarray  (n_samples, n_units)  bool / int
     ipts         : np.ndarray  (n_samples, n_units)  float  (pulse trains)
     emg_ch_array : np.ndarray  (rows, cols, n_samples)  — 3-D grid
@@ -32,6 +33,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from scd_app._vendor.motor_unit_toolbox import props as tb_props
+from scd_app._vendor.motor_unit_toolbox import spike_comp as tb_spike
 from scd_app.core.constants import (
     COV_THRESHOLD_PCT,
     DR_MAX_HZ,
@@ -48,21 +51,9 @@ from scd_app.core.utils import to_numpy  # noqa: F401 — re-exported for caller
 logger = logging.getLogger(__name__)
 
 # ── toolbox imports ────────────────────────────────────────────────────────────
-try:
-    from motor_unit_toolbox import props as tb_props
-    from motor_unit_toolbox import spike_comp as tb_spike
-
-    _TOOLBOX_AVAILABLE = True
-except ImportError:
-    _TOOLBOX_AVAILABLE = False
-    import warnings
-
-    warnings.warn(
-        "motor_unit_toolbox not installed – quality metrics will be unavailable. "
-        "Install with: pip install git+https://github.com/imendezguerra/motor_unit_toolbox.git",
-        ImportWarning,
-        stacklevel=2,
-    )
+# These are vendored from motor_unit_toolbox 1.0 at the commit documented in
+# THIRD_PARTY_NOTICES.md.
+_TOOLBOX_AVAILABLE = True
 
 
 def _center_muaps(muaps: np.ndarray) -> np.ndarray:
@@ -93,7 +84,7 @@ def _center_muaps(muaps: np.ndarray) -> np.ndarray:
 class MUProperties:
     """All quality and morphological properties for a single motor unit.
 
-    Naming follows motor_unit_toolbox conventions where possible.
+    Naming follows Motor Unit Toolbox conventions where possible.
     Values are NaN when computation failed or data was insufficient.
     """
 

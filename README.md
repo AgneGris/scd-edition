@@ -5,6 +5,9 @@
 
 A graphical application for researchers and engineers to decompose high-density surface or intramuscular EMG recordings into individual motor unit spike trains, edit them manually, and visualise population-level discharge behaviour.
 
+Supports OT Bioelettronica `.otb+`/`.otb4`, Intan `.rhs`, MATLAB, HDF5,
+NumPy and CSV recordings on Windows, Linux and macOS.
+
 ![SCD Edition demo](docs/demo.gif)
 
 Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris/swarm-contrastive-decomposition) algorithm.
@@ -15,24 +18,39 @@ The desktop interface uses the official [Qt for Python (PySide6)](https://doc.qt
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [Launching the app](#launching-the-app)
-3. [Complete workflow](#complete-workflow)
+2. [Two-minute example](#two-minute-example)
+3. [Choosing a tool](#choosing-a-tool)
+4. [Launching the app](#launching-the-app)
+5. [Complete workflow](#complete-workflow)
    - [Tab 1 — Configuration](#tab-1--configuration)
    - [Tab 2 — Decomposition](#tab-2--decomposition)
    - [Tab 3 — Edition](#tab-3--edition)
    - [Tab 4 — Visualisation](#tab-4--visualisation)
-4. [Saving and loading](#saving-and-loading)
-5. [Keyboard shortcuts](#keyboard-shortcuts)
-6. [File formats](#file-formats)
-7. [Force channel setup](#force-channel-setup)
-8. [Citation](#citation)
-9. [License](#license)
+6. [Saving and loading](#saving-and-loading)
+7. [Keyboard shortcuts](#keyboard-shortcuts)
+8. [File formats](#file-formats)
+9. [Importing an unfamiliar format](#importing-an-unfamiliar-format)
+10. [Force channel setup](#force-channel-setup)
+11. [Citation](#citation)
+12. [Contributing](#contributing)
+13. [License](#license)
 
 ---
 
 ## Installation
 
-### From GitHub (recommended)
+### From PyPI (recommended)
+
+```bash
+pip install scd-edition
+```
+
+Windows users who do not want to manage Python can instead download the
+`windows-x86_64.zip` archive from the latest GitHub Release, extract it and run
+`SCD-Edition.exe`. This standalone build is CPU-only; use a source installation
+with the `cuda` extra for NVIDIA GPU acceleration.
+
+### Latest development version
 
 ```bash
 pip install git+https://github.com/AgneGris/scd-edition.git
@@ -94,6 +112,45 @@ cd scd-edition
 pip install -e .
 ```
 
+## Two-minute example
+
+SCD Edition includes the 64-channel, 10-second example recording used by the
+SCD algorithm repository. Open it with its loader, sampling rate and electrode
+layout already filled in:
+
+```bash
+scd-edition --example
+```
+
+Then:
+
+1. Click **Apply Configuration**.
+2. Click **Start Decomposition** and confirm the automatically selected channels.
+3. Select **Full file**, or choose a short time interval for a faster first run.
+4. Review the resulting units in **Edition** and **Visualisation**.
+
+The example is for learning the workflow, not for benchmarking decomposition
+accuracy. See the [illustrated quick-start](docs/quickstart.md) or the executable
+[tutorial notebook](docs/tutorial.ipynb) for more detail.
+
+## Choosing a tool
+
+SCD Edition is one of several strong tools for motor-unit decomposition. The
+right choice depends on the algorithm, acquisition system and analysis workflow;
+this table describes scope rather than ranking performance.
+
+| Tool | Decomposition and scope | Environment and access | Particularly useful when |
+|---|---|---|---|
+| **SCD Edition** | Swarm Contrastive Decomposition; surface and intramuscular EMG; integrated review, spike editing and population plots | Open-source BSD Python/Qt app; PyPI and a standalone Windows release | You want the SCD method and a reproducible path from raw recording to edited units |
+| [DEMUSE](https://demuse.feri.um.si/) | CKC decomposition, accuracy assessment and manual editing for multichannel surface EMG | Commercially available MATLAB program | You want the established CKC/DEMUSE workflow |
+| [OTBioLab+](https://otbioelettronica.it/en/software/) | Manufacturer acquisition and processing suite with motor-unit decomposition | Vendor-distributed desktop software | You acquire with OT Bioelettronica hardware and want its native workflow |
+| [openhdemg](https://github.com/GiacomoValliPhD/openhdemg) | Convolutive BSS plus broad import, analysis, tracking and editing functionality for HD-sEMG | Open-source BSD Python framework with graphical software | You need a broad motor-unit analysis library or interoperability with several decomposition formats |
+| [MUedit](https://github.com/simonavrillon/MUedit) | fastICA decomposition and manual pulse-train editing | Open-source MATLAB app;  | You want the published MUedit protocol and its fastICA workflow |
+
+Algorithm outputs should be reviewed using physiological criteria and validation
+appropriate to the study; this table is not evidence that the tools are
+interchangeable.
+
 ## Usage 🚀
 
 ## Launching the app
@@ -105,7 +162,7 @@ scd-edition
 Or, if the entry point is not on your PATH:
 
 ```bash
-python -m scd_app.gui.main_window
+python -m scd_app
 ```
 
 The application opens with four tabs along the top. Work left to right: configure → decompose → edit → visualise.
@@ -158,7 +215,7 @@ This tab is where you tell the application about your recording before doing any
 
 #### 1. Select your input file
 
-Click **Select Input File** and choose your EMG recording. Supported formats:
+Click **Choose recording…** and select your EMG recording. Supported formats:
 
 | Extension | Format |
 |-----------|--------|
@@ -170,7 +227,16 @@ Click **Select Input File** and choose your EMG recording. Supported formats:
 | `.npy`    | NumPy array |
 | `.csv`    | Comma-separated values |
 
-You can also queue **multiple files** for batch processing using **Add Files**. All files in the queue will be decomposed sequentially with the same configuration.
+Use **Choose batch…** to select multiple recordings that share one format and
+channel layout. They will be decomposed sequentially with the same
+configuration.
+
+If a MATLAB, HDF5, NumPy, CSV, or text file does not match the selected format,
+the array inspector opens automatically. You can also reopen it with the
+advanced **Inspect arrays…** action beside **Data Format**. It lists numeric
+arrays, lets you choose the EMG matrix and orientation, and previews the
+resulting sample/channel shape. See
+[Importing recordings without a built-in loader](docs/importing-data.md).
 
 #### 2. Set the sampling rate
 
@@ -399,30 +465,37 @@ Saved Edition files can be reloaded in any order and remain fully editable.
 
 ## Keyboard shortcuts
 
+Global shortcuts:
+
 | Key | Action |
 |-----|--------|
 | `Ctrl+1` | Switch to Configuration tab |
 | `Ctrl+2` | Switch to Decomposition tab |
 | `Ctrl+3` | Switch to Edition tab |
-| `V` | View mode |
-| `A` | Add mode |
-| `Ctrl+A` | Add in Selection mode |
-| `D` | Delete mode |
-| `Ctrl+D` | Delete in Selection mode |
-| `R` | Toggle ROI |
-| `Shift+A` | Add spikes in ROI |
-| `Shift+D` | Delete spikes in ROI |
-| `F` | Recalculate Filter |
-| `X` | Flag unit |
+| `Ctrl+4` | Switch to Visualisation tab |
+
+Edition shortcuts (after a decomposition is loaded):
+
+| Key | Action |
+|-----|--------|
+| `A` | Arm **Add in Selection**; drag a rectangle to add enclosed peaks |
+| `D` | Arm **Del in Selection**; drag a rectangle to remove enclosed spikes |
+| `Esc` | Disarm selection and return to normal view interaction |
+| `F` | Replay peel-off and recalculate the current unit's filter, source and timestamps |
+| `O` | Remove instantaneous-firing-rate outlier spikes from the current unit |
+| `E` | Run rule-based auto-editing on the current unit |
+| `X` | Toggle the deletion flag on the current unit |
 | `T` | Toggle the reliability verdict of the current unit |
 | `Shift+T` | Reset reliability to the automatic verdict |
-| `Ctrl+Z` | Undo |
-| `Ctrl+Y` | Redo |
-| `Ctrl+S` | Save |
-| `Up / Down` | Next / previous motor unit |
-| `Home` | Reset view |
+| `Ctrl+Z` | Undo (`Cmd+Z` on macOS) |
+| `Ctrl+Y` | Redo (`Cmd+Shift+Z` on macOS) |
+| `Ctrl+S` | Save (`Cmd+S` on macOS) |
+| `Up` / `Down` | Previous / next motor unit |
+| `Ctrl+Up` / `Ctrl+Down` | Previous / next electrode grid or probe |
+| `Left` / `Right` | Pan the source plot left / right |
+| `Home` | Reset the source and firing-rate view |
 | `Scroll` | Zoom time axis |
-| `Shift+Scroll` | Scroll horizontally |
+| `Shift+Scroll` | Pan horizontally |
 | `Ctrl+Scroll` | Zoom both axes |
 
 ---
@@ -436,11 +509,24 @@ Saved Edition files can be reloaded in any order and remain fully editable.
 | `.otb+` | OTBiolab+ archive (Quattrocento). EMG channels and auxiliary `.sip` channels (force, angle) are both supported. |
 | `.otb4` | OTBiolab 4 archive (Novecento+). EMG grids, external/AUX channels, sampling rate, and acquisition metadata are discovered from the embedded track metadata. |
 | `.rhs` | Intan RHS2000 recording. Enabled amplifier channels (mV), board ADC inputs (V, as `aux`) and the sampling rate are read from the file header. Intan recordings are usually heavily oversampled relative to the amplifier bandwidth; use **Decimate by** (e.g. 5 for 20 kHz → 4 kHz with a 500 Hz band limit). |
-| `.mat` | MATLAB v5 and v7.3 (HDF5-based). The field containing the EMG matrix is configurable via `src/scd_app/resources/loaders_configs/loader_mat.yaml`. |
-| `.h5` | HDF5. Field path configurable via `src/scd_app/resources/loaders_configs/loader_h5.yaml`. |
+| `.mat` | MATLAB v5 and v7.3 (HDF5-based). Nested arrays can be selected with **Inspect arrays…** using paths such as `recording.signal`. |
+| `.h5`, `.hdf5` | HDF5. Numeric datasets can be selected with **Inspect arrays…**; portable SCD HDF5 files are recognised automatically. |
 | `.npy` | NumPy array, shape `(channels, samples)` or `(samples, channels)` — the longer axis is assumed to be time. |
-| `.csv` | Rows = samples, columns = channels. |
+| `.csv`, `.txt` | Numeric samples × channels table. CSV accepts one header row; text is whitespace-delimited. |
 | `.pkl` (Edition tab) | SCD Edition files, and raw output of the [`swarm-contrastive-decomposition`](https://github.com/AgneGris/swarm-contrastive-decomposition) package (`scd.save_results`), which is converted on load. |
+
+## Importing an unfamiliar format
+
+For an unfamiliar MATLAB, HDF5, NumPy, CSV, or text layout, select it with
+**Choose recording…**. The inspector opens automatically when the selected
+format cannot locate an EMG matrix; it can also be opened manually with
+**Inspect arrays…**. Save the finished configuration as a reusable JSON profile.
+For a proprietary acquisition format, decode it with the vendor SDK
+and write a portable, sample-first `.scd.h5` file with
+`scd_app.io.write_portable_recording`. The schema, conversion example, and
+verification checklist are in the
+[data-import guide](docs/importing-data.md). Loader profiles never execute
+file-supplied Python code.
 
 ### Output
 
@@ -516,7 +602,20 @@ After running decomposition, switch to Tab 4 and open the **DR vs Force** sub-ta
 
 ## Citation
 
-If you use this software, please cite:
+If you use SCD Edition, please cite the software itself. The DOI will be added
+here after the first archived release; until then, use:
+
+```bibtex
+@software{grison_scd_edition_2026,
+  author = {Grison, Agnese},
+  title = {SCD Edition},
+  version = {0.1.0},
+  year = {2026},
+  url = {https://github.com/AgneGris/scd-edition}
+}
+```
+
+The decomposition method is described in:
 
 ```bibtex
 @article{grison2024particle,
@@ -544,11 +643,21 @@ If you use this software, please cite:
 }
 ```
 
+Machine-readable citation metadata are available in [`CITATION.cff`](CITATION.cff).
+
+## Contributing
+
+Bug reports, format requests and code contributions are welcome. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the development setup, test commands
+and the information to include in a useful report.
+
 ## License
 
 SCD Edition is open-source software licensed under the [BSD 3-Clause License](LICENSE).
 
 Third-party packages, including PySide6 and Qt, retain their own licences.
+Vendored code and example-data provenance are listed in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Contact
 

@@ -1,0 +1,13 @@
+# Generic numeric CSV or whitespace-delimited text recording.
+# The first non-comment row is treated as a header when it is not numeric.
+
+name: ".csv"
+format: csv
+
+fields:
+  emg:
+    path: "table"
+    delimiter: null                 # comma for .csv, whitespace for .txt
+    skip_header: auto
+    channels: null
+    orientation: samples_first

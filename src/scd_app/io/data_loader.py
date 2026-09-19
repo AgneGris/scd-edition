@@ -35,7 +35,8 @@ def load_field(
     Parameters
     ----------
     file_path : Path
-        Path to the data file (.mat, .h5, .hdf5, .npy, .otb+, .otb4, .rhs)
+        Path to the data file (.mat, .h5, .hdf5, .npy, .csv, .txt,
+        .otb+, .otb4, .rhs)
     layout : dict
         Parsed YAML layout descriptor (from load_layout)
     field : str
@@ -124,6 +125,7 @@ FORMAT_EXTENSIONS: dict[str, tuple] = {
     "h5": (".h5", ".hdf5"),
     "mat": (".mat",),
     "npy": (".npy",),
+    "csv": (".csv", ".txt"),
     "otb": (".otb", ".otb+"),
     "otb4": (".otb4",),
     "rhs": (".rhs",),
@@ -175,6 +177,14 @@ def can_read_field(
 
     try:
         with h5py.File(file_path, "r") as f:
+            for name, expected in layout.get("required_attributes", {}).items():
+                if name not in f.attrs:
+                    return False
+                actual = f.attrs[name]
+                if isinstance(actual, bytes):
+                    actual = actual.decode("utf-8", errors="replace")
+                if expected is not None and str(actual) != str(expected):
+                    return False
             return any(key in f and isinstance(f[key], h5py.Dataset) for key in keys)
     except OSError:
         # Not an HDF5 container. A "mat" layout then points at a v5/v7 file,
@@ -199,6 +209,8 @@ def load_metadata(file_path: str | Path, layout: dict[str, Any]) -> dict[str, An
         from scd_app.io.rhs_loader import read_rhs_metadata
 
         meta = read_rhs_metadata(file_path)
+    elif fmt == "h5":
+        meta = _read_h5_metadata(file_path, layout)
     else:
         return {"format": fmt}
 
@@ -223,7 +235,7 @@ def _read_array(
 ) -> np.ndarray:
     """Read a raw numpy array from file using the field spec."""
 
-    primary_path = field_spec["path"]
+    primary_path = field_spec.get("path", "")
     fallbacks = field_spec.get("fallback_keys", [])
 
     if fmt == "h5":
@@ -231,7 +243,9 @@ def _read_array(
     elif fmt == "mat":
         return _read_mat(file_path, primary_path, fallbacks)
     elif fmt == "npy":
-        return np.load(str(file_path))
+        return np.load(str(file_path), allow_pickle=False)
+    elif fmt == "csv":
+        return _read_delimited(file_path, field_spec)
     elif fmt == "otb":
         return _read_otb(file_path, field_name)
     elif fmt == "otb4":
@@ -244,6 +258,120 @@ def _read_array(
         return read_rhs(file_path, field_name)
     else:
         raise ValueError(f"Unsupported format: '{fmt}'")
+
+
+def _read_delimited(file_path: Path, field_spec: dict) -> np.ndarray:
+    """Read a numeric delimited-text matrix.
+
+    ``delimiter`` defaults to a comma for CSV and to whitespace for ``.txt``.
+    ``skip_header`` may be an integer or ``"auto"``; auto skips one leading
+    row when it is not entirely numeric. Comment lines beginning with ``#``
+    are ignored by NumPy.
+    """
+    delimiter = field_spec.get("delimiter")
+    if delimiter is None:
+        delimiter = None if file_path.suffix.lower() == ".txt" else ","
+
+    skip_header = field_spec.get("skip_header", "auto")
+    if skip_header == "auto":
+        skip_header = _detect_text_header(file_path, delimiter)
+    try:
+        skip_header = int(skip_header)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            "CSV 'skip_header' must be a non-negative integer or 'auto'"
+        ) from err
+    if skip_header < 0:
+        raise ValueError("CSV 'skip_header' must be non-negative")
+
+    data = np.genfromtxt(
+        file_path,
+        delimiter=delimiter,
+        comments="#",
+        dtype=np.float64,
+        skip_header=skip_header,
+    )
+    data = np.asarray(data)
+    if data.size == 0 or data.ndim == 0:
+        raise ValueError(f"No numeric matrix found in {file_path.name}")
+    if np.isnan(data).all():
+        raise ValueError(f"No numeric values found in {file_path.name}")
+    return data
+
+
+def _detect_text_header(file_path: Path, delimiter: str | None) -> int:
+    """Return 1 when the first non-comment text row contains non-numbers."""
+    with open(file_path, encoding="utf-8-sig") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            values = stripped.split(delimiter) if delimiter else stripped.split()
+            try:
+                for value in values:
+                    float(value.strip())
+            except ValueError:
+                # genfromtxt counts physical lines for skip_header, including
+                # comments and blanks before this first data-like row.
+                return line_number
+            return 0
+    return 0
+
+
+def _read_h5_metadata(file_path: Path, layout: dict[str, Any]) -> dict[str, Any]:
+    """Read shape and standard sampling-rate attributes without loading arrays."""
+    import h5py
+
+    meta: dict[str, Any] = {"format": "h5"}
+    field_spec = layout.get("fields", {}).get("emg", {})
+    paths = [field_spec.get("path"), *field_spec.get("fallback_keys", [])]
+    paths = [path for path in paths if path]
+
+    with h5py.File(file_path, "r") as file:
+        dataset = next(
+            (
+                file[path]
+                for path in paths
+                if path in file and isinstance(file[path], h5py.Dataset)
+            ),
+            None,
+        )
+        if dataset is None:
+            return meta
+
+        if dataset.ndim == 2:
+            first, second = map(int, dataset.shape)
+            orientation = field_spec.get("orientation", "auto")
+            if orientation == "channels_first" or (
+                orientation == "auto" and second > first
+            ):
+                n_samples, n_channels = second, first
+            else:
+                n_samples, n_channels = first, second
+            meta["n_samples"] = n_samples
+            meta["emg_channel_count"] = n_channels
+
+        attr_names = (
+            "sampling_rate_hz",
+            "sampling_frequency",
+            "sampling_rate",
+            "fsamp",
+            "fs",
+        )
+        for attrs in (dataset.attrs, file.attrs):
+            for name in attr_names:
+                if name not in attrs:
+                    continue
+                value = np.asarray(attrs[name]).squeeze()
+                if value.ndim == 0:
+                    try:
+                        frequency = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if np.isfinite(frequency) and frequency > 0:
+                        meta["sampling_frequency"] = frequency
+                        return meta
+    return meta
 
 
 def _read_h5(file_path: Path, dataset_path: str, fallbacks: list[str]) -> np.ndarray:

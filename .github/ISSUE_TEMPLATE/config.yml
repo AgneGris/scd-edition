@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support and privacy guidance
+    url: https://github.com/AgneGris/scd-edition/blob/main/SUPPORT.md
+    about: Read this before sharing logs or example data.
