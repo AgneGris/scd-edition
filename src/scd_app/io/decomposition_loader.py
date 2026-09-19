@@ -143,6 +143,23 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
     n_channels = _infer_channel_count(filters, w_mat, preprocessing_config)
     port_name = _infer_port_name(source_path)
 
+    # Signal as loaded by SCD (train(..., save_data=True) or
+    # save_results(..., neural_data=...)); stored (channels, samples) like
+    # decomp_worker does. It is the untrimmed recording with rejected channels
+    # untouched, so the trimming and bad-channel fill that SCD's
+    # preprocess_data applied are reproduced from preprocessing_config below.
+    emg_data = _signal_array(data.get("data"))
+    if emg_data is not None and not n_channels:
+        n_channels = int(emg_data.shape[0])
+    if emg_data is not None and n_channels and emg_data.shape[0] != n_channels:
+        raise UnsupportedDecompositionFormat(
+            f"SCD data has {emg_data.shape[0]} channels but the filters were "
+            f"computed on {n_channels}."
+        )
+
+    emg_mask = _rejected_channel_mask(preprocessing_config, n_channels)
+    start_sample = _window_start_sample(preprocessing_config, sampling_rate)
+
     provenance = {
         "format": UPSTREAM_SCD_FORMAT,
         "source_file": source_path.name if source_path is not None else None,
@@ -155,7 +172,7 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
         key: _portable_value(data[key]) for key in _SCD_METRIC_KEYS if key in data
     }
 
-    return {
+    converted = {
         "version": 1.1,
         "ports": [port_name],
         "sampling_rate": sampling_rate,
@@ -165,10 +182,10 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
         "w_mat": [w_mat],
         "peel_off_sequence": [_portable_value(data.get("peel_off_sequence", []))],
         "preprocessing_config": [_portable_value(preprocessing_config)],
-        "plateau_coords": [0, source_length],
+        "plateau_coords": [start_sample, start_sample + source_length],
         "chans_per_electrode": [n_channels],
         "channel_indices": [list(range(n_channels))],
-        "emg_mask": [[0] * n_channels],
+        "emg_mask": [emg_mask],
         "electrodes": [None],
         "aux_channels": [],
         "aux_configs": [],
@@ -177,6 +194,58 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
         "import_provenance": provenance,
         "scd_metadata": scd_metadata,
     }
+    # Only present when SCD stored the signal: the full-source and filter
+    # recalculation checks test for the key, and None would not survive them.
+    if emg_data is not None:
+        converted["data"] = emg_data
+    return converted
+
+
+def _signal_array(value: Any) -> np.ndarray | None:
+    if value is None:
+        return None
+    arr = to_numpy(value)
+    if arr.ndim != 2 or arr.size == 0:
+        raise UnsupportedDecompositionFormat(
+            f"SCD data must be a 2D signal, found shape {arr.shape}."
+        )
+    if arr.shape[0] > arr.shape[1]:
+        arr = arr.T
+    return np.ascontiguousarray(arr)
+
+
+def _rejected_channel_mask(preprocessing_config: dict, n_channels: int) -> list[int]:
+    """1 for channels SCD replaced with noise before decomposing, else 0."""
+    mask = [0] * n_channels
+    for channel in preprocessing_config.get("bad_channels") or []:
+        try:
+            channel = int(channel)
+        except (TypeError, ValueError) as exc:
+            raise UnsupportedDecompositionFormat(
+                f"SCD bad_channels contains a non-integer entry: {channel!r}."
+            ) from exc
+        if not 0 <= channel < n_channels:
+            raise UnsupportedDecompositionFormat(
+                f"SCD bad channel {channel} is outside the {n_channels} channels."
+            )
+        mask[channel] = 1
+    return mask
+
+
+def _window_start_sample(preprocessing_config: dict, sampling_rate: float) -> int:
+    """First sample of the window SCD decomposed, in the signal as loaded."""
+    start_time = preprocessing_config.get("start_time") or 0
+    try:
+        start_sample = int(round(float(start_time) * sampling_rate))
+    except (TypeError, ValueError) as exc:
+        raise UnsupportedDecompositionFormat(
+            f"SCD start_time is not a number: {start_time!r}."
+        ) from exc
+    if start_sample < 0:
+        raise UnsupportedDecompositionFormat(
+            f"SCD start_time must not be negative, found {start_time!r}."
+        )
+    return start_sample
 
 
 def _first_present(data: dict, keys: tuple[str, ...]):

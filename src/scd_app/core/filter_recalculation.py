@@ -122,6 +122,14 @@ def _replace_bad_channels(
     return raw_port
 
 
+def _edge_mask_samples(config: dict[str, Any]) -> int:
+    """Edge mask SCD applied during optimisation, in samples (0 if unknown)."""
+    try:
+        return max(0, int(config.get("edge_mask_size", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _get_plateau_bounds(decomp_data: dict, full_samples: int) -> tuple[int, int]:
     """Extract plateau start/end from decomp_data."""
     sel_pts = decomp_data.get("plateau_coords", decomp_data.get("selected_points"))
@@ -239,11 +247,22 @@ def _extract_timestamps(
     fn: dict,
     min_peak_sep: int = MIN_PEAK_SEP,
     square_source: bool = True,
+    edge_mask: int = 0,
 ) -> np.ndarray:
-    """Run source_to_timestamps and return absolute sample indices."""
+    """Run source_to_timestamps and return absolute sample indices.
+
+    `edge_mask` samples at each end are zeroed first, as SCD does during
+    optimisation (Data.edge_mask): the band-pass transient at the start of a
+    recording can dwarf every real spike, and source_to_timestamps would then
+    cluster on it and return that single peak.
+    """
     source_clean = torch.nan_to_num(source_t, nan=0.0, posinf=0.0, neginf=0.0)
     if square_source:
         source_clean = source_clean**2
+    if edge_mask > 0 and source_clean.shape[0] > 2 * edge_mask:
+        source_clean = source_clean.clone()
+        source_clean[:edge_mask] = 0
+        source_clean[-edge_mask:] = 0
     locs, _heights, _sil = fn["source_to_timestamps"](
         source_clean,
         min_peak_separation=min_peak_sep,
@@ -346,6 +365,7 @@ def _process_saved_peel_entry(
     recalculate_filters: bool,
     redetect_timestamps: bool,
     square_source: bool,
+    edge_mask: int = 0,
 ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
     """Handle one accepted peel entry when use_saved_peel_timestamps=True.
 
@@ -385,7 +405,11 @@ def _process_saved_peel_entry(
 
     if redetect_timestamps and source_t is not None:
         ts_display = _extract_timestamps(
-            source_t, fn, min_peak_sep, square_source=square_source
+            source_t,
+            fn,
+            min_peak_sep,
+            square_source=square_source,
+            edge_mask=edge_mask,
         )
     else:
         ts_display = ts_peel
@@ -406,6 +430,7 @@ def _process_recalc_entry(
     device: torch.device,
     fn: dict,
     square_source: bool,
+    edge_mask: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Handle one accepted peel entry in recalculate mode.
 
@@ -413,7 +438,11 @@ def _process_recalc_entry(
     """
     source_t = _apply_filter_torch(emg_running, filt, device)
     ts_abs = _extract_timestamps(
-        source_t, fn, min_peak_sep, square_source=square_source
+        source_t,
+        fn,
+        min_peak_sep,
+        square_source=square_source,
+        edge_mask=edge_mask,
     )
     if len(ts_abs) > 0:
         ts_t = torch.from_numpy(ts_abs).to(device)
@@ -436,6 +465,7 @@ def _replay_peel_off_for_port(
     use_saved_peel_timestamps: bool = False,
     recalculate_filters: bool = False,
     redetect_timestamps: bool = True,
+    edge_mask: int = 0,
 ) -> tuple[torch.Tensor, dict[int, tuple[np.ndarray, np.ndarray]]]:
     """Replay peel-off for one port, optionally stopping before a given unit.
 
@@ -444,6 +474,8 @@ def _replay_peel_off_for_port(
             timestamps that were stored in peel_off_sequence.
         recalculate_filters: When True (and use_saved_peel_timestamps is True),
             recompute each unit's filter via STA on the peeled EMG.
+        edge_mask: Samples zeroed at each end of a source before spikes are
+            re-detected (preprocessing_config["edge_mask_size"]).
 
     Returns:
         emg_running:  peeled EMG tensor (modified clone)
@@ -486,6 +518,7 @@ def _replay_peel_off_for_port(
                 recalculate_filters,
                 redetect_timestamps,
                 square_source,
+                edge_mask,
             )
             results_dict[local_idx] = (source_np, ts_display, new_filt_np)
         elif filt is not None:
@@ -497,6 +530,7 @@ def _replay_peel_off_for_port(
                 device,
                 fn,
                 square_source,
+                edge_mask,
             )
             results_dict[local_idx] = (source_np, ts_abs, None)
         else:
@@ -596,6 +630,7 @@ def compute_all_full_sources(
         min_peak_sep = int(config.get("min_peak_separation", MIN_PEAK_SEP))
         # square_sources_spike_det not saved by SCD; default True for back-compat
         square_source = bool(config.get("square_sources_spike_det", True))
+        edge_mask = _edge_mask_samples(config)
 
         if _is_per_port_peel:
             port_peel_seq = (
@@ -650,6 +685,7 @@ def compute_all_full_sources(
             use_saved_peel_timestamps=True,
             recalculate_filters=True,
             redetect_timestamps=redetect_timestamps,
+            edge_mask=edge_mask,
         )
 
         port_results[port_idx] = [
@@ -701,6 +737,7 @@ def recalculate_unit_filter(
     window_size = int(config["peel_off_window_size"])
     min_peak_sep = int(config.get("min_peak_separation", MIN_PEAK_SEP))
     square_source = bool(config.get("square_sources_spike_det", True))
+    edge_mask = _edge_mask_samples(config)
 
     w_mat_list = decomp_data.get("w_mat")
     w_mat = None
@@ -746,6 +783,7 @@ def recalculate_unit_filter(
         device,
         stop_before_local_idx=local_mu_idx,
         square_source=square_source,
+        edge_mask=edge_mask,
     )
 
     # ── Step 3: STA filter from all edited timestamps (full signal) ───────

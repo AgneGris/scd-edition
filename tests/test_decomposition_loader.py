@@ -1,5 +1,6 @@
 import os
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -131,3 +132,152 @@ def test_edition_loads_and_edits_upstream_scd_output(tmp_path):
 
     tab.close()
     app.processEvents()
+
+
+def _raw_scd_result_with_signal():
+    """Raw SCD output as written by train(..., save_data=True) (scd >= 0.2.3)."""
+    raw = _raw_scd_result()
+    # 3 channels x 300 samples as loaded; SCD decomposed samples 50..250
+    # (start_time 0.05 s at 1 kHz, 200 samples of source) with channel 1 rejected.
+    raw["data"] = np.arange(900, dtype=np.float32).reshape(3, 300)
+    raw["preprocessing_config"].update(
+        {"bad_channels": [1], "start_time": 0.05, "end_time": 0.25}
+    )
+    return raw
+
+
+def test_converts_signal_rejection_mask_and_window_from_upstream_output():
+    from scd_app.core.filter_recalculation import (
+        supports_filter_recalculation,
+        supports_full_source_computation,
+    )
+
+    converted = convert_scd_output(_raw_scd_result_with_signal())
+
+    assert converted["data"].shape == (3, 300)
+    assert converted["emg_mask"] == [[0, 1, 0]]
+    assert converted["plateau_coords"] == [50, 250]
+    assert supports_full_source_computation(converted) == (True, "")
+    assert supports_filter_recalculation(converted) == (True, "")
+
+
+def test_upstream_signal_stored_time_major_is_transposed():
+    raw = _raw_scd_result_with_signal()
+    raw["data"] = raw["data"].T.copy()  # (samples, channels)
+
+    converted = convert_scd_output(raw)
+
+    assert converted["data"].shape == (3, 300)
+
+
+def test_upstream_output_without_signal_omits_data_key():
+    converted = convert_scd_output(_raw_scd_result())
+
+    assert "data" not in converted
+    assert converted["emg_mask"] == [[0, 0, 0]]
+    assert converted["plateau_coords"] == [0, 200]
+
+
+def test_rejects_upstream_signal_with_wrong_channel_count():
+    raw = _raw_scd_result_with_signal()
+    raw["data"] = np.zeros((4, 300), dtype=np.float32)
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="4 channels"):
+        convert_scd_output(raw)
+
+
+def test_rejects_upstream_bad_channel_outside_signal():
+    raw = _raw_scd_result_with_signal()
+    raw["preprocessing_config"]["bad_channels"] = [3]
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="outside"):
+        convert_scd_output(raw)
+
+
+def test_redetection_ignores_filter_transient_inside_edge_mask():
+    from scd_app.core.filter_recalculation import (
+        _extract_timestamps,
+        _get_scd_modules,
+    )
+
+    fn = _get_scd_modules()
+    rng = np.random.default_rng(0)
+    # Noise floor with small peaks, real spikes at ~5, and a band-pass
+    # transient at the start of the recording that dwarfs them.
+    source = torch.from_numpy(rng.normal(0.0, 0.3, 2000).astype(np.float32))
+    spikes = list(range(100, 2000, 100))
+    source[spikes] = torch.from_numpy(
+        rng.uniform(4.5, 5.5, len(spikes)).astype(np.float32)
+    )
+    source[1] = 60.0
+
+    unmasked = _extract_timestamps(source, fn, min_peak_sep=10, edge_mask=0)
+    masked = _extract_timestamps(source, fn, min_peak_sep=10, edge_mask=50)
+
+    assert 1 in unmasked
+    assert 1 not in masked
+    assert set(spikes) <= set(masked.tolist())
+
+
+def test_edge_mask_samples_reads_snapshot_and_tolerates_missing_values():
+    from scd_app.core.filter_recalculation import _edge_mask_samples
+
+    assert _edge_mask_samples({"edge_mask_size": 200}) == 200
+    assert _edge_mask_samples({}) == 0
+    assert _edge_mask_samples({"edge_mask_size": None}) == 0
+    assert _edge_mask_samples({"edge_mask_size": "bad"}) == 0
+
+
+_SWARM_TEST_DATA = (
+    Path(__file__).resolve().parents[2]
+    / "swarm-contrastive-decomposition"
+    / "data"
+    / "input"
+    / "emg.mat"
+)
+
+
+@pytest.mark.slow
+def test_swarm_output_replays_to_its_own_timestamps(tmp_path):
+    """Decompose with swarm-contrastive-decomposition, load here, replay.
+
+    The regression this guards: without the rejection mask the replay whitens
+    the real rejected channel with a w_mat computed on noise, and the
+    re-detected spikes bear no relation to the saved ones.
+    """
+    import scd
+
+    if tuple(int(p) for p in scd.__version__.split(".")[:3]) < (0, 2, 3):
+        pytest.skip("needs swarm-contrastive-decomposition >= 0.2.3 (save_data)")
+    if not _SWARM_TEST_DATA.is_file():
+        pytest.skip(f"test recording not found at {_SWARM_TEST_DATA}")
+
+    from scd_app.core.filter_recalculation import compute_all_full_sources
+
+    dictionary, _ = scd.train(
+        _SWARM_TEST_DATA,
+        config_name="surface",
+        max_iterations=2,
+        verbose_mode=False,
+        output_final_source_plot=False,
+    )
+    pkl_path = tmp_path / "emg_surface.pkl"
+    scd.save_results(pkl_path, dictionary)
+
+    converted = load_decomposition_file(pkl_path)
+    assert converted["emg_mask"][0][56] == 1
+    assert converted["data"].shape[0] == 64
+
+    saved = converted["discharge_times"][0]
+    for redetect in (False, True):
+        results, _, _, err = compute_all_full_sources(
+            converted, device=torch.device("cpu"), redetect_timestamps=redetect
+        )
+        assert err == ""
+        for unit_idx, (_source, timestamps, _filt) in enumerate(results[0]):
+            if redetect:
+                # The STA-recalculated filter can shift a peak by a sample or two
+                near = sum(np.min(np.abs(timestamps - t)) <= 2 for t in saved[unit_idx])
+                assert near >= 0.95 * len(saved[unit_idx])
+            else:
+                np.testing.assert_array_equal(timestamps, saved[unit_idx])

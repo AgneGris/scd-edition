@@ -110,6 +110,44 @@ python -m scd_app.gui.main_window
 
 The application opens with four tabs along the top. Work left to right: configure → decompose → edit → visualise.
 
+You can also skip the first two tabs entirely: decompose with the [`swarm-contrastive-decomposition`](https://github.com/AgneGris/swarm-contrastive-decomposition) package in a script and open its output here — see [Decomposing with the SCD package, editing here](#decomposing-with-the-scd-package-editing-here).
+
+---
+
+## Decomposing with the SCD package, editing here
+
+The Decomposition tab runs the same algorithm as the [`swarm-contrastive-decomposition`](https://github.com/AgneGris/swarm-contrastive-decomposition) Python package, so you can decompose in a script or on a cluster and use this app only for editing. Save the results with the package's `save_results`, then load the `.pkl` with **Load Decomposition** in the Edition tab:
+
+```python
+import scd
+
+dictionary, timestamps = scd.train("recording.mat", config_name="surface")
+scd.save_results("recording_surface.pkl", dictionary)
+```
+
+Since version 0.2.3 the package stores the loaded signal in the results by default (`save_data`), together with the trimming window and rejected channels it decomposed with. With that in the file, the Edition tab has everything an in-app decomposition would have: full-length sources, MUAP display, filter recalculation and spike re-detection. Note that the stored signal makes the file larger by `channels × samples × 4 bytes`; the package README explains how to turn it off.
+
+What differs from an in-app decomposition:
+
+- The file holds one grid, named after the `muscle-<name>` part of the filename, or the filename itself.
+- No electrode geometry is recorded, so MUAPs are shown in the default grid layout, and there are no force or auxiliary channels.
+- Files written with `save_data=False`, or by package versions before 0.2.3, open without the signal: spike trains and sources can still be edited and saved, but MUAPs, filter recalculation and re-detection are unavailable.
+
+### The silhouette (SIL) is not the same number in the two tools
+
+The package accepts sources using a silhouette it computes during decomposition; this app computes its own SIL for the Quality chart and the reliability flag. They are different quantities and should not be compared or thresholded interchangeably. This also applies to decompositions run in the Decomposition tab, whose *SIL Threshold* is the package's acceptance silhouette.
+
+| | `swarm-contrastive-decomposition` (`dictionary["silhouettes"]`) | SCD Edition (MU properties, Quality chart) |
+|---|---|---|
+| When | During decomposition, at the iteration that accepted the unit; frozen in the output | After loading and after every edit, from the unit's current spikes |
+| Source | The source of that iteration: computed from the peeled EMG (earlier units removed), restricted to the decomposition window, edge-masked, clamped, squared | The full-length source recomputed on load (spike-triggered-average filter on the whole recording, z-scored on the decomposition window), squared; not clamped or edge-masked |
+| Points | Every peak of the squared source at least `reset_peak_separation_ms` apart — spikes *and* baseline peaks | Spikes: the unit's current timestamps. Baseline: every peak lower than the smallest spike |
+| Classes | Two-class k-medians on peak heights; spikes are the upper cluster | No clustering — the spike set is whatever the unit currently has |
+| Score | For each peak, `a` = distance to its own centroid, `b` = distance to the other centroid; SIL = mean over all peaks of `(b − a) / max(a, b)` | Only spike amplitudes enter: `d_s = Σ (s − mean_spikes)²`, `d_b = Σ (s − mean_baseline)²`; SIL = `(d_b − d_s) / max(d_b, d_s)` (`motor_unit_toolbox.get_silhouette_measure`, the formulation of Negro et al., 2016). Squared distances, summed; the baseline enters only through its mean |
+| Threshold | `acceptance_silhouette` (0.85 default, 0.8 in the `surface` preset) decides whether a source is accepted | SIL ≥ 0.9 marks a unit as reliable |
+
+In practice the two values are often close for well-separated units, but they diverge when the baseline peaks are numerous or spread out (the package averages over them, the toolbox ignores their spread), when a unit has been edited (only this app's value follows the edits), and whenever the two sources differ (window vs full recording, peeled vs recomputed filter). The package's values are kept in the file under `scd_metadata["silhouettes"]` for reference but are not displayed.
+
 ---
 
 ## Complete workflow
@@ -178,7 +216,7 @@ These apply to all grids:
 
 | Parameter | What it does |
 |-----------|--------------|
-| **SIL Threshold** | Minimum silhouette score for a source to be accepted as a motor unit. Higher = stricter (fewer but more reliable MUs). Default 0.9. |
+| **SIL Threshold** | Minimum silhouette score for a source to be accepted as a motor unit. Higher = stricter (fewer but more reliable MUs). Default 0.9. This is the decomposition algorithm's own silhouette, computed differently from the SIL shown in the Quality chart — see [The silhouette is not the same number in the two tools](#the-silhouette-sil-is-not-the-same-number-in-the-two-tools). |
 | **Iterations** | Maximum number of optimisation steps per source. More iterations → longer runtime but potentially more MUs found. |
 | **MUAP Window (ms)** | Duration of the spike-triggered average window used for peel-off. |
 | **Fitness** | Optimisation criterion: `SIL` (silhouette) or `CoV` (coefficient of variation of ISI). |
@@ -328,7 +366,10 @@ If force channels are configured, they appear as overlays on the time-domain plo
 
 **Quality** — SIL and MUAP template-stability bar charts for all units. The SIL
 chart shows the automatic reliability threshold (SIL ≥ 0.9); template
-stability is descriptive and therefore has no threshold line.
+stability is descriptive and therefore has no threshold line. This SIL is
+computed by the app from the unit's current spikes and is not the silhouette
+the decomposition algorithm used to accept the source — see
+[The silhouette is not the same number in the two tools](#the-silhouette-sil-is-not-the-same-number-in-the-two-tools).
 
 **DR vs Force** — scatter plot of each motor unit's recruitment force (%MVC at first spike) against its mean discharge rate during the plateau. A regression line is drawn when three or more units are present. This plot requires at least one active force channel.
 
@@ -348,7 +389,7 @@ Decomposition results are stored as `.pkl` (Python pickle) files. Each file cont
 
 To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select the `.pkl` file. The app automatically recognises both SCD Edition files and raw `*_scddict.pkl` output from `swarm-contrastive-decomposition`. Raw SCD output is converted into a one-grid Edition session; the muscle label in the filename is used as the grid name, and any companion `*_scdcommit.txt` is retained as provenance.
 
-SCD Edition files that contain the original EMG can replay peel-off and recalculate filters. Raw `swarm-contrastive-decomposition` output does not contain the original EMG, so its motor-unit spikes and source signals remain editable and can be saved from Edition, but filter/MUAP recalculation is unavailable unless the original EMG is supplied in an Edition file.
+SCD Edition files that contain the original EMG can replay peel-off and recalculate filters. Raw `swarm-contrastive-decomposition` output contains it too when saved with the package's default `save_data=True` (version 0.2.3 or later), so it gets the same treatment; output saved without the signal remains editable and can be saved from Edition, but filter/MUAP recalculation is unavailable. See [Decomposing with the SCD package, editing here](#decomposing-with-the-scd-package-editing-here).
 
 For compatible SCD Edition files, the app may ask whether to re-run peel-off replay on the full signal (recommended for the first load) or to use the stored timestamps as-is (faster; appropriate when reloading a previously edited file).
 
@@ -399,6 +440,7 @@ Saved Edition files can be reloaded in any order and remain fully editable.
 | `.h5` | HDF5. Field path configurable via `src/scd_app/resources/loaders_configs/loader_h5.yaml`. |
 | `.npy` | NumPy array, shape `(channels, samples)` or `(samples, channels)` — the longer axis is assumed to be time. |
 | `.csv` | Rows = samples, columns = channels. |
+| `.pkl` (Edition tab) | SCD Edition files, and raw output of the [`swarm-contrastive-decomposition`](https://github.com/AgneGris/swarm-contrastive-decomposition) package (`scd.save_results`), which is converted on load. |
 
 ### Output
 

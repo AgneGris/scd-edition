@@ -23,7 +23,7 @@ classifiers = [
 keywords = ["EMG", "decomposition", "GUI", "spike editing", "motor units"]
 
 dependencies = [
-    "swarm-contrastive-decomposition>=0.2.0",
+    "swarm-contrastive-decomposition>=0.2.3",
     "motor_unit_toolbox @ git+https://github.com/imendezguerra/motor_unit_toolbox.git@d84dc6c943daa5d686b2911b48b13bf718628130",
     "numpy>=1.20.0",
     "scipy>=1.7.0",
@@ -45,9 +45,7 @@ cuda = [
     "torch>=2.11.0",
 ]
 dev = [
-    "pytest>=7.0",
-    "black>=23.0",
-    "flake8>=6.0",
+    "ruff>=0.16.8",
 ]
 
 [project.scripts]
@@ -94,9 +92,16 @@ scd_app = [
     "resources/loaders_configs/*.yaml",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: runs a real decomposition; deselect with -m 'not slow'",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.16.8",
+    "pytest>=8.0",
 ]
 
 [tool.ruff]
