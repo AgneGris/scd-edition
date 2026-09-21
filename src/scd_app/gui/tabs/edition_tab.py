@@ -2091,7 +2091,7 @@ class EditionTab(QWidget):
         # the linked FR plot) feeds spike-marker bounds back through the X link
         # and re-clips the range to the plateau region, so we avoid it entirely.
         src_sq = np.nan_to_num(mu.source**2)
-        y_max = float(np.max(src_sq)) if len(src_sq) > 0 else 1.0
+        y_max = float(np.max(src_sq[self._start_sample:self._end_sample])) if len(src_sq) > 0 else 1.0
         y_pad = y_max * 0.05
         self.source_plot.getViewBox().setRange(
             xRange=(0, x_max), yRange=(-y_pad, y_max + y_pad), padding=0
