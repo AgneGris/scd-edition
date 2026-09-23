@@ -24,7 +24,7 @@ def test_save_dict_preserves_full_source_and_provenance_contract():
         source=np.arange(200, dtype=float),
         port_name="Grid 1",
         mu_filter=np.array([0.25, 0.75]),
-        flagged_duplicate=True,
+        within_duplicate_role="delete",
         reviewed=True,
         props=properties,
     )

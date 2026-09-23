@@ -61,18 +61,30 @@ def motor_unit_quality_key(motor_unit: MotorUnit) -> tuple[float, float, int, in
 def clear_duplicate_roles(
     ports: Mapping[str, Sequence[MotorUnit]], kind: DuplicateKind
 ) -> None:
-    """Clear one scan kind without removing flags owned by the other kind."""
-    other_kind: DuplicateKind = "cross" if kind == "within" else "within"
+    """Clear one scan kind without changing manual or other-scan flags."""
     for motor_units in ports.values():
         for motor_unit in motor_units:
-            was_delete = getattr(motor_unit, f"{kind}_duplicate_role") == "delete"
             setattr(motor_unit, f"{kind}_duplicate_role", None)
             setattr(motor_unit, f"{kind}_duplicate_partners", [])
-            if (
-                was_delete
-                and getattr(motor_unit, f"{other_kind}_duplicate_role") != "delete"
-            ):
-                motor_unit.flagged_duplicate = False
+
+
+def _duplicate_keeper_keys(
+    ports: Mapping[str, Sequence[MotorUnit]],
+) -> dict[int, tuple[bool, float, float, int, int]]:
+    """Snapshot keeper priority before this scan adds duplicate suggestions.
+
+    All units still participate in comparisons, but an existing deletion flag
+    must lose to an unflagged duplicate so a scan cannot schedule both units for
+    deletion. Quality decides only when their existing flag state is equal.
+    """
+    return {
+        id(motor_unit): (
+            not motor_unit.flagged_for_deletion,
+            *motor_unit_quality_key(motor_unit),
+        )
+        for motor_units in ports.values()
+        for motor_unit in motor_units
+    }
 
 
 def scan_within_port_duplicates(
@@ -84,6 +96,7 @@ def scan_within_port_duplicates(
 ) -> DuplicateScanResult:
     """Find duplicate pairs within each port and flag lower-quality units."""
     clear_duplicate_roles(ports, "within")
+    keeper_keys = _duplicate_keeper_keys(ports)
     compute_agreement = agreement_computer or _tb_spike_comp.rate_of_agreement_full
 
     pairs: list[DuplicatePair] = []
@@ -139,14 +152,11 @@ def scan_within_port_duplicates(
             partners = [
                 candidate for candidate in motor_units if candidate.id in partner_ids
             ]
-            best_partner = max(partners, key=motor_unit_quality_key)
-            if motor_unit_quality_key(motor_unit) >= motor_unit_quality_key(
-                best_partner
-            ):
+            best_partner = max(partners, key=lambda unit: keeper_keys[id(unit)])
+            if keeper_keys[id(motor_unit)] >= keeper_keys[id(best_partner)]:
                 motor_unit.within_duplicate_role = "keep"
             else:
                 motor_unit.within_duplicate_role = "delete"
-                motor_unit.flagged_duplicate = True
 
     flagged_by_port = {
         port_name: [
@@ -174,6 +184,7 @@ def scan_cross_port_duplicates(
 ) -> DuplicateScanResult:
     """Find duplicate pairs across ports and flag lower-quality units."""
     clear_duplicate_roles(ports, "cross")
+    keeper_keys = _duplicate_keeper_keys(ports)
     compute_agreement = agreement_computer or _tb_spike_comp.rate_of_agreement_full
 
     port_names = list(ports)
@@ -244,15 +255,12 @@ def scan_cross_port_duplicates(
                         break
             if not partners:
                 continue
-            best_partner = max(partners, key=motor_unit_quality_key)
-            if motor_unit_quality_key(motor_unit) >= motor_unit_quality_key(
-                best_partner
-            ):
+            best_partner = max(partners, key=lambda unit: keeper_keys[id(unit)])
+            if keeper_keys[id(motor_unit)] >= keeper_keys[id(best_partner)]:
                 if motor_unit.cross_duplicate_role != "delete":
                     motor_unit.cross_duplicate_role = "keep"
             else:
                 motor_unit.cross_duplicate_role = "delete"
-                motor_unit.flagged_duplicate = True
 
     flagged_by_port = {
         port_name: [

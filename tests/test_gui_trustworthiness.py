@@ -107,30 +107,21 @@ def test_edition_save_writes_reproducibility_report(tmp_path):
     app.processEvents()
 
 
-def test_canceling_pickle_trust_warning_prevents_deserialization(tmp_path):
+def test_invalid_pickle_reports_a_load_error(tmp_path):
     from PySide6.QtWidgets import QMessageBox
 
     from scd_app.gui.tabs.edition_tab import EditionTab
 
     app = _application()
-    path = tmp_path / "untrusted.pkl"
-    path.write_bytes(b"not opened")
+    path = tmp_path / "invalid.pkl"
+    path.write_bytes(b"not a pickle")
     tab = EditionTab()
 
-    with (
-        patch.object(
-            QMessageBox,
-            "warning",
-            return_value=QMessageBox.StandardButton.Cancel,
-        ),
-        patch(
-            "scd_app.gui.tabs.edition_tab.load_decomposition_file"
-        ) as load_decomposition,
-    ):
+    with patch.object(QMessageBox, "critical") as critical:
         loaded = tab.load_from_path(path)
 
     assert loaded is False
-    load_decomposition.assert_not_called()
+    critical.assert_called_once()
     tab.close()
     app.processEvents()
 
@@ -185,7 +176,7 @@ def test_failed_parse_restores_the_current_edition_session(tmp_path):
         ),
         patch.object(QMessageBox, "critical"),
     ):
-        loaded = tab.load_from_path(replacement_path, trusted=True)
+        loaded = tab.load_from_path(replacement_path)
 
     assert loaded is False
     assert tab._ports is original_ports

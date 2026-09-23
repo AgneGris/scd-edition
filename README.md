@@ -417,12 +417,12 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 | **Recalculate Filter** | `F` | Re-estimates the spatial filter from your edited spike train, then re-computes the source signal and re-detects timestamps. Requires ≥2 spikes in the plateau region. |
 | **Auto-edit** | — | Automatically removes obvious outlier spikes based on physiological firing rate limits. |
 | **Remove outliers** | — | Removes spikes with very short or very long ISIs. |
-| **Flag unit** | `X` | Marks the unit for deletion. Duplicates are auto-flagged. |
+| **Flag unit** | `X` | Manually marks the unit for deletion. |
 | **Mark Reviewed** | `M` | Marks or unmarks the current unit as manually reviewed. |
 | **Next Unreviewed** | `N` | Moves to the next unreviewed unit, including across ports. |
-| **Flag within-port duplicates** | — | Compares all units in each port and flags the lower-quality unit of every pair whose rate of agreement is above threshold. A summary dialog reports the pairs found, their RoA scores and which units were flagged. |
-| **Flag cross-port duplicates** | — | Same, across all ports, with the same summary dialog. |
-| **Delete All Flagged MUs** | — | Permanently removes all flagged units from the session (cannot be undone). Afterwards the view jumps back to the first unit of the first port. |
+| **Delete All Flagged Units** | — | Permanently removes flagged units from every port and clears undo/redo history. A confirmation lists the count for each affected port. |
+| **Check Duplicates in Current Port** | — | Compares every unit in the selected port, including flagged units, and suggests the lower-priority member of duplicate pairs for deletion. An existing flag cannot cause an unflagged partner to be suggested. |
+| **Check Duplicates Across Ports** | — | Optionally performs the same comparison across grids/probes. Use this only when ports may record overlapping motor-unit populations. |
 
 #### Saving
 
@@ -463,7 +463,7 @@ Decomposition results are stored as `.pkl` (Python pickle) files. Each file cont
 
 > **Security:** Python pickle files can execute code while they are opened.
 > Only load decomposition files that you created yourself or received from a
-> source you trust. SCD Edition asks for confirmation before opening a pickle.
+> source you trust. Selected files are opened immediately.
 
 - Raw EMG data (all channels, full recording)
 - Spike timestamps for every motor unit

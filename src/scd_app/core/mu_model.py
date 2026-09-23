@@ -20,6 +20,8 @@ class MotorUnit:
     port_name: str = ""
     mu_filter: np.ndarray | None = None
     enabled: bool = True
+    # Persisted user/general deletion flag. Duplicate suggestions remain in
+    # their scan-specific roles and are combined by ``flagged_for_deletion``.
     flagged_duplicate: bool = False
     reviewed: bool = False
     props: MUProperties | None = field(default=None, repr=False)
@@ -34,6 +36,15 @@ class MotorUnit:
         default_factory=list
     )
     cross_duplicate_partners: list[tuple[str, int, float]] = field(default_factory=list)
+
+    @property
+    def flagged_for_deletion(self) -> bool:
+        """Whether any manual or duplicate-scan reason marks this unit."""
+        return (
+            self.flagged_duplicate
+            or self.within_duplicate_role == "delete"
+            or self.cross_duplicate_role == "delete"
+        )
 
 
 @dataclass

@@ -118,7 +118,21 @@ def test_deleting_flagged_units_preserves_review_state_of_retained_units():
     deleted = _motor_unit(0, "Grid A", reviewed=True)
     deleted.flagged_duplicate = True
     retained = _motor_unit(1, "Grid A", reviewed=True)
+    retained.within_duplicate_role = "keep"
+    retained.within_duplicate_partners = [("Grid A", 0, 0.5)]
     tab._ports = {"Grid A": [deleted, retained]}
+    tab._undo_stack = {("Grid A", 1): [object()]}
+    tab._redo_stack = {("Grid A", 1): [object()]}
+    tab._pending_props_key = ("Grid A", 1)
+    tab._original_decomp_data = {
+        "peel_off_sequence": [
+            [
+                {"accepted_unit_idx": 0, "name": "deleted"},
+                {"accepted_unit_idx": 1, "name": "retained"},
+                {"name": "metadata"},
+            ]
+        ]
+    }
     _set_current(tab, "Grid A", 0)
 
     with (
@@ -134,6 +148,17 @@ def test_deleting_flagged_units_preserves_review_state_of_retained_units():
     assert tab._ports == {"Grid A": [retained]}
     assert retained.id == 0
     assert retained.reviewed is True
+    assert retained.within_duplicate_role is None
+    assert retained.within_duplicate_partners == []
+    assert tab._undo_stack == {}
+    assert tab._redo_stack == {}
+    assert tab._pending_props_key is None
+    assert tab._original_decomp_data["peel_off_sequence"] == [
+        [
+            {"accepted_unit_idx": 0, "name": "retained"},
+            {"name": "metadata"},
+        ]
+    ]
     assert tab.review_progress_label.text() == "Reviewed 1/1"
 
     tab._set_dirty(False)

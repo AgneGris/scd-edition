@@ -164,7 +164,7 @@ def test_edition_loads_and_edits_upstream_scd_output(tmp_path):
 
     app = QApplication.instance() or QApplication([])
     tab = EditionTab()
-    tab.load_from_path(source_path, trusted=True)
+    tab.load_from_path(source_path)
 
     assert list(tab._ports) == ["FD"]
     assert len(tab._ports["FD"]) == 2
