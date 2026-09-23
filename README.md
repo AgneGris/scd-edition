@@ -11,6 +11,16 @@ NumPy and CSV recordings on Windows, Linux and macOS.
 
 ![SCD Edition demo](docs/demo.gif)
 
+### Interface at a glance
+
+| Configuration | Decomposition |
+|---|---|
+| [![Configuration tab with the bundled example loaded](docs/screenshots/configuration.png)](docs/screenshots/configuration.png) | [![Decomposition tab showing live source feedback](docs/screenshots/decomposition.png)](docs/screenshots/decomposition.png) |
+| Load recordings, define grids and auxiliary channels, and review the channel map. | Configure and monitor decomposition with live source and quality feedback. |
+| **Edition** | **Visualisation** |
+| [![Edition tab comparing one spike MUAP with its unit template](docs/screenshots/edition.png)](docs/screenshots/edition.png) | [![Visualisation tab showing population-level motor-unit plots](docs/screenshots/visualisation.png)](docs/screenshots/visualisation.png) |
+| Review quality, edit spike trains, inspect individual MUAPs and manage duplicate units. | Explore raster, discharge-rate, recruitment, force and quality summaries. |
+
 Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris/swarm-contrastive-decomposition) algorithm.
 The desktop interface uses the official [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/) bindings.
 
