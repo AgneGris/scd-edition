@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QDialog, QVBoxLayout
 
+from scd_app.core.spike_muap import SpikeMUAPInspection
 from scd_app.gui.style.styling import COLORS, FONT_FAMILY
 
 
@@ -38,28 +39,55 @@ class MuapPopoutDialog(QDialog):
         grid_cfg: dict,
         rejected_positions: set,
         mu_idx: int,
+        *,
+        inspection: SpikeMUAPInspection | None = None,
+        fsamp: float = 1.0,
     ):
         self._plot.clear()
         rows, cols = grid_cfg["grid_shape"]
         positions = grid_cfg["positions"]
         electrode_positions = set(positions.values())
+        reference_grid = (
+            inspection.reference_grid if inspection is not None else muap_grid
+        )
+        selected_grid = inspection.selected_grid if inspection is not None else None
 
         valid_wavs = [
-            muap_grid[r, c]
-            for r in range(min(rows, muap_grid.shape[0]))
-            for c in range(min(cols, muap_grid.shape[1]))
+            grid[r, c]
+            for grid in (
+                [reference_grid, selected_grid]
+                if selected_grid is not None
+                else [reference_grid]
+            )
+            for r in range(min(rows, grid.shape[0]))
+            for c in range(min(cols, grid.shape[1]))
             if (r, c) in electrode_positions
             and (r, c) not in rejected_positions
-            and len(muap_grid[r, c]) > 0
-            and np.any(muap_grid[r, c] != 0)
+            and len(grid[r, c]) > 0
+            and np.any(np.isfinite(grid[r, c]) & (grid[r, c] != 0))
         ]
-        amp = np.max(np.abs(np.concatenate(valid_wavs))) * 1.2 if valid_wavs else 1.0
-        n_samples = muap_grid.shape[2] if muap_grid.ndim == 3 else 409
+        all_values = np.concatenate(valid_wavs) if valid_wavs else np.array([])
+        finite_values = all_values[np.isfinite(all_values)]
+        amp = float(np.max(np.abs(finite_values))) * 1.2 if finite_values.size else 1.0
+        n_samples = reference_grid.shape[2] if reference_grid.ndim == 3 else 409
 
-        label = (
-            f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
-            f"MU {mu_idx}</span>"
-        )
+        if inspection is None:
+            label = (
+                f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
+                f"MU {mu_idx}</span>"
+            )
+        else:
+            spike_time = inspection.selected_sample / fsamp
+            label = (
+                f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
+                f"MU {mu_idx} · spike {spike_time:.3f} s · "
+                f"similarity {inspection.similarity:.3f} · "
+                f"amplitude {inspection.amplitude_ratio:.2f}× · "
+                f"lag {inspection.lag_ms:+.2f} ms</span><br>"
+                f"<span style='color:{COLORS['info']};font-size:9pt;'>"
+                f"reference (other {inspection.n_reference_spikes})</span> · "
+                f"<span style='color:#ed8936;font-size:9pt;'>selected spike</span>"
+            )
         self._plot.addLabel(label, row=0, col=0, colspan=cols + 1, justify="center")
 
         lbl_style = f"color:{COLORS.get('text_dim', '#6c7086')}; font-size:8pt;"
@@ -129,39 +157,84 @@ class MuapPopoutDialog(QDialog):
             gl.setRowMinimumHeight(r + 2, 0)
             gl.setRowStretchFactor(r + 2, 1)
 
-        for r in range(min(rows, muap_grid.shape[0])):
-            for c in range(min(cols, muap_grid.shape[1])):
+        for r in range(min(rows, reference_grid.shape[0])):
+            for c in range(min(cols, reference_grid.shape[1])):
                 rc = (r, c)
                 if rc not in electrode_positions or rc in rejected_positions:
                     continue
-                wav = muap_grid[r, c]
-                if len(wav) == 0 or not np.any(wav != 0):
+                wav = reference_grid[r, c]
+                if len(wav) == 0 or not np.any(np.isfinite(wav)):
                     continue
                 p = cell_plots.get(rc)
                 if p is not None:
-                    p.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=1.5))
+                    p.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=3.0))
+                    if selected_grid is not None:
+                        selected = selected_grid[r, c]
+                        if len(selected) > 0 and np.any(np.isfinite(selected)):
+                            p.plot(
+                                selected,
+                                pen=pg.mkPen(
+                                    color=(237, 137, 54, 210),
+                                    width=1.5,
+                                    style=Qt.PenStyle.SolidLine,
+                                ),
+                            )
 
         self.setWindowTitle(f"MUAP Shapes — MU {mu_idx}")
 
-    def render_stacked(self, waveforms, ch_indices, mu_idx):
+    def render_stacked(
+        self,
+        waveforms,
+        ch_indices,
+        mu_idx,
+        *,
+        selected_waveforms=None,
+        inspection: SpikeMUAPInspection | None = None,
+        fsamp: float = 1.0,
+    ):
         self._plot.clear()
         plot = self._plot.addPlot(row=0, col=0)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:
             return
-        all_data = np.concatenate([w for _, w in valid])
-        spacing = np.max(np.abs(all_data)) * 0.6 if len(all_data) > 0 else 1.0
+        spacing_waveforms = [w for _, w in valid]
+        if selected_waveforms is not None:
+            spacing_waveforms.extend(selected_waveforms)
+        all_data = np.concatenate(spacing_waveforms)
+        finite_data = all_data[np.isfinite(all_data)]
+        spacing = float(np.max(np.abs(finite_data))) * 0.6 if finite_data.size else 1.0
         n = len(valid)
         for rank, (pidx, wav) in enumerate(valid):
             offset = (n - rank - 1) * spacing
             ch = int(ch_indices[pidx]) if pidx < len(ch_indices) else pidx
-            plot.plot(wav + offset, pen=pg.mkPen(COLORS["foreground"], width=1.5))
+            plot.plot(wav + offset, pen=pg.mkPen(COLORS["info"], width=3.0))
+            if selected_waveforms is not None and pidx < len(selected_waveforms):
+                selected = selected_waveforms[pidx]
+                if len(selected) > 0 and np.any(np.isfinite(selected)):
+                    plot.plot(
+                        selected + offset,
+                        pen=pg.mkPen(
+                            color=(237, 137, 54, 210),
+                            width=1.5,
+                            style=Qt.PenStyle.SolidLine,
+                        ),
+                    )
             txt = pg.TextItem(f"Ch {ch}", color=(150, 150, 150), anchor=(1, 0.5))
             txt.setPos(-1, offset)
             txt.setFont(QFont(FONT_FAMILY, 8))
             plot.addItem(txt)
         plot.getAxis("left").setVisible(False)
-        plot.setTitle(f"MU {mu_idx} — Stacked", color=COLORS["foreground"], size="11pt")
+        if inspection is None:
+            title = f"MU {mu_idx} — Stacked"
+        else:
+            spike_time = inspection.selected_sample / fsamp
+            title = (
+                f"MU {mu_idx} · spike {spike_time:.3f} s · "
+                f"similarity {inspection.similarity:.3f} · "
+                f"amplitude {inspection.amplitude_ratio:.2f}× · "
+                f"lag {inspection.lag_ms:+.2f} ms"
+            )
+        plot.setTitle(title, color=COLORS["foreground"], size="11pt")
         self.setWindowTitle(f"MUAP Shapes — MU {mu_idx} (Stacked)")
 
     def clear(self, message="Select a Motor Unit"):

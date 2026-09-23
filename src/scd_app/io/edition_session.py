@@ -68,6 +68,7 @@ class LoadedEditionPort:
     emg: np.ndarray | None
     raw_channels: np.ndarray | None
     grid_config: dict | None
+    active_grid_positions: dict[int, tuple[int, int]] | None
     rejected_channel_positions: set[tuple[int, int]]
     migrated_notes: list[str]
 
@@ -371,6 +372,7 @@ def load_edition_port(
         emg=emg_port,
         raw_channels=raw_channels,
         grid_config=grid_config,
+        active_grid_positions=corrected_positions,
         rejected_channel_positions=rejected_positions,
         migrated_notes=migrated_notes,
     )

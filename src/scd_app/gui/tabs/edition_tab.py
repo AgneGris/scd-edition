@@ -63,6 +63,11 @@ from scd_app.core.mu_properties import (
     compute_port_properties,
     recompute_unit_properties,
 )
+from scd_app.core.spike_muap import (
+    SpikeMUAPInspection,
+    SpikeMUAPUnavailable,
+    inspect_spike_muap,
+)
 from scd_app.core.utils import to_numpy
 from scd_app.gui.style.styling import (
     COLORS,
@@ -106,6 +111,7 @@ class EditionTab(QWidget):
         self._ports: dict[str, list[MotorUnit]] = {}
         self._emg_data: dict[str, np.ndarray] = {}
         self._grid_info: dict[str, dict | None] = {}
+        self._active_grid_positions: dict[str, dict[int, tuple[int, int]] | None] = {}
         self._raw_port_channels: dict[str, np.ndarray] = {}
         self._rejected_ch_positions: dict[str, set] = {}
         self._notes: list[str] = []
@@ -132,6 +138,8 @@ class EditionTab(QWidget):
         self._filter_recalc_available: bool = False
         self._muap_popout: MuapPopoutDialog | None = None
         self._last_action_msg: str | None = None
+        self._spike_muap_inspection: SpikeMUAPInspection | None = None
+        self._spike_muap_inspection_key: tuple[str, int] | None = None
 
         # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
         self._props_timer = QTimer(self)
@@ -144,6 +152,7 @@ class EditionTab(QWidget):
         # MUAP grid reuse: keep cell PlotDataItems alive across MU switches
         self._muap_cell_plots: dict[tuple[int, int], object] = {}
         self._muap_waveform_items: dict[tuple[int, int], object] = {}
+        self._muap_inspection_items: dict[tuple[int, int], object] = {}
         self._muap_grid_key: tuple | None = None
         self._muap_title_label = None
 
@@ -599,6 +608,7 @@ class EditionTab(QWidget):
         self.source_plot.set_fsamp(self._fsamp)
         self.source_plot.spike_add_requested.connect(self._handle_add_click)
         self.source_plot.spike_delete_requested.connect(self._handle_delete_click)
+        self.source_plot.spike_inspect_requested.connect(self._inspect_spike_muap)
         self.source_plot.region_selected.connect(self._on_region_selected)
         plot_splitter.addWidget(self.source_plot)
 
@@ -631,7 +641,7 @@ class EditionTab(QWidget):
         QShortcut(QKeySequence("Right"), self, lambda: self._pan_source(0.02))
         QShortcut(QKeySequence("A"), self, lambda: self.btn_sel_add.setChecked(True))
         QShortcut(QKeySequence("D"), self, lambda: self.btn_sel_delete.setChecked(True))
-        QShortcut(QKeySequence("Escape"), self, lambda: self._set_mode(EditMode.VIEW))
+        QShortcut(QKeySequence("Escape"), self, self._handle_escape)
         QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
         QShortcut(QKeySequence("M"), self, self.btn_reviewed.click)
         QShortcut(QKeySequence("N"), self, self.btn_next_unreviewed.click)
@@ -849,6 +859,7 @@ class EditionTab(QWidget):
             "_ports",
             "_emg_data",
             "_grid_info",
+            "_active_grid_positions",
             "_raw_port_channels",
             "_rejected_ch_positions",
             "_notes",
@@ -868,6 +879,8 @@ class EditionTab(QWidget):
             "_original_decomp_data",
             "_filter_recalc_available",
             "_last_action_msg",
+            "_spike_muap_inspection",
+            "_spike_muap_inspection_key",
             "_pending_source_changed",
             "_pending_props_key",
         )
@@ -1024,11 +1037,14 @@ class EditionTab(QWidget):
         self._ports = {}
         self._emg_data = {}
         self._grid_info = {}
+        self._active_grid_positions = {}
         self._notes = []
         self._raw_port_channels = {}
         self._rejected_ch_positions = {}
         self._undo_stack = {}
         self._redo_stack = {}
+        self._spike_muap_inspection = None
+        self._spike_muap_inspection_key = None
         # Carry forward any edit history already stored in the file so the log
         # accumulates across multiple editing sessions.
         prior_history = decomp_data.get("edit_history", [])
@@ -1210,6 +1226,7 @@ class EditionTab(QWidget):
 
         self._ports[port_name] = loaded.motor_units
         self._grid_info[port_name] = loaded.grid_config
+        self._active_grid_positions[port_name] = loaded.active_grid_positions
         self._rejected_ch_positions[port_name] = loaded.rejected_channel_positions
         self._notes.extend(loaded.migrated_notes)
         if loaded.raw_channels is not None:
@@ -1310,6 +1327,14 @@ class EditionTab(QWidget):
         self._disarm_selection()
         self._update_status()
 
+    def _handle_escape(self):
+        """Return to view mode and dismiss any transient MUAP inspection."""
+        had_inspection = self._spike_muap_inspection is not None
+        self._clear_spike_muap_inspection()
+        self._set_mode(EditMode.VIEW)
+        if had_inspection:
+            self._update_status("Spike MUAP inspection cleared")
+
     def _reset_view_full(self):
         """Reset both plots to show the entire signal length."""
         mu = self._current_mu()
@@ -1340,6 +1365,61 @@ class EditionTab(QWidget):
     # ------------------------------------------------------------------
     # Point-click spike editing
     # ------------------------------------------------------------------
+
+    def _current_spike_muap_inspection(self) -> SpikeMUAPInspection | None:
+        key = (self._current_port or "", self._current_mu_idx)
+        if self._spike_muap_inspection_key != key:
+            return None
+        return self._spike_muap_inspection
+
+    def _clear_spike_muap_inspection(self, *, render: bool = True):
+        had_inspection = self._spike_muap_inspection is not None
+        self._spike_muap_inspection = None
+        self._spike_muap_inspection_key = None
+        self.source_plot.set_inspected_spike(None)
+        if render and had_inspection and self._current_mu() is not None:
+            self._plot_muap()
+
+    def _inspect_spike_muap(self, sample: int):
+        """Show a single discharge against a leave-one-out MUAP template."""
+        had_inspection = self._spike_muap_inspection is not None
+        self._clear_spike_muap_inspection(render=False)
+        mu = self._current_mu()
+        port_name = self._current_port
+        if mu is None or port_name is None:
+            return
+        emg_port = self._emg_data.get(port_name)
+        if emg_port is None:
+            if had_inspection:
+                self._plot_muap()
+            self._update_status("Spike MUAP inspection unavailable: no raw EMG")
+            return
+
+        grid_cfg = self._grid_info.get(port_name)
+        try:
+            inspection = inspect_spike_muap(
+                emg_port=emg_port,
+                timestamps=mu.timestamps,
+                selected_sample=sample,
+                fsamp=self._fsamp,
+                grid_positions=self._active_grid_positions.get(port_name),
+                grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
+            )
+        except SpikeMUAPUnavailable as exc:
+            if had_inspection:
+                self._plot_muap()
+            self._update_status(f"Spike MUAP inspection unavailable: {exc}")
+            return
+
+        self._spike_muap_inspection = inspection
+        self._spike_muap_inspection_key = (port_name, self._current_mu_idx)
+        self.source_plot.set_inspected_spike(sample)
+        self._plot_muap()
+        self._update_status(
+            f"Spike {sample / self._fsamp:.3f}s: similarity "
+            f"{inspection.similarity:.3f}, amplitude "
+            f"{inspection.amplitude_ratio:.2f}x, lag {inspection.lag_ms:+.2f} ms"
+        )
 
     def _handle_add_click(self, sample: int):
         if self._edit_mode != EditMode.ADD:
@@ -1673,6 +1753,8 @@ class EditionTab(QWidget):
         mus = self._ports.get(self._current_port, [])
         if index < 0 or index >= len(mus):
             return
+        if index != self._current_mu_idx:
+            self._clear_spike_muap_inspection(render=False)
         self._current_mu_idx = index
         mu = self._current_mu()
         if mu:
@@ -2350,6 +2432,7 @@ class EditionTab(QWidget):
     def _on_port_changed(self, port_name: str):
         if not port_name or port_name not in self._ports:
             return
+        self._clear_spike_muap_inspection(render=False)
         self._current_port = port_name
         self._current_mu_idx = -1
         self._clear_plots()
@@ -2410,6 +2493,10 @@ class EditionTab(QWidget):
             had_custom_range = not vb.autoRangeEnabled()[0]
 
         self.source_plot.set_data(mu.source, mu.timestamps)
+        inspection = self._current_spike_muap_inspection()
+        self.source_plot.set_inspected_spike(
+            inspection.selected_sample if inspection is not None else None
+        )
         # In full-source mode mu.source covers the whole recording (offset = 0);
         # otherwise it covers only the plateau window (offset = _start_sample).
         self.source_plot.set_force_offset(
@@ -2428,6 +2515,8 @@ class EditionTab(QWidget):
         self._update_quality_panel(mu)
 
     def _clear_plots(self):
+        self._spike_muap_inspection = None
+        self._spike_muap_inspection_key = None
         self.source_plot.clear_data()
         self.fr_plot.clear_data()
         self._clear_muap_plot()
@@ -2435,6 +2524,7 @@ class EditionTab(QWidget):
 
     def _on_data_changed(self, msg: str = "Modified", source_changed: bool = False):
         """Immediate cheap updates; expensive recompute+render deferred 120 ms."""
+        self._clear_spike_muap_inspection()
         mu = self._current_mu()
         review_reset = False
         if mu is not None:
@@ -2498,7 +2588,7 @@ class EditionTab(QWidget):
             new_timestamps=mu.timestamps,
             source=mu.source,
             emg_port=emg_port,
-            grid_positions=grid_cfg["positions"] if grid_cfg else None,
+            grid_positions=self._active_grid_positions.get(port_name),
             grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
             fsamp=self._fsamp,
         )
@@ -2686,27 +2776,74 @@ class EditionTab(QWidget):
         muap_grid = mu.props.muap_grid
         grid_cfg = self._grid_info.get(self._current_port)
         rejected_pos = self._rejected_ch_positions.get(self._current_port, set())
+        inspection = self._current_spike_muap_inspection()
 
         if grid_cfg is not None:
-            self._render_muap_grid(muap_grid, grid_cfg, rejected_pos)
+            self._render_muap_grid(
+                muap_grid, grid_cfg, rejected_pos, inspection=inspection
+            )
             if self._muap_popout and self._muap_popout.isVisible():
                 self._muap_popout.render_grid(
-                    muap_grid, grid_cfg, rejected_pos, self._current_mu_idx
+                    muap_grid,
+                    grid_cfg,
+                    rejected_pos,
+                    self._current_mu_idx,
+                    inspection=inspection,
+                    fsamp=self._fsamp,
                 )
         else:
-            n_ch = muap_grid.shape[0]
-            waveforms = [muap_grid[i, 0] for i in range(n_ch)]
-            self._render_muap_stacked(waveforms, list(range(n_ch)))
+            display_grid = (
+                inspection.reference_grid if inspection is not None else muap_grid
+            )
+            n_ch = display_grid.shape[0]
+            waveforms = [display_grid[i, 0] for i in range(n_ch)]
+            selected_waveforms = (
+                [inspection.selected_grid[i, 0] for i in range(n_ch)]
+                if inspection is not None
+                else None
+            )
+            self._render_muap_stacked(
+                waveforms,
+                list(range(n_ch)),
+                selected_waveforms=selected_waveforms,
+                inspection=inspection,
+            )
             if self._muap_popout and self._muap_popout.isVisible():
                 self._muap_popout.render_stacked(
-                    waveforms, list(range(n_ch)), self._current_mu_idx
+                    waveforms,
+                    list(range(n_ch)),
+                    self._current_mu_idx,
+                    selected_waveforms=selected_waveforms,
+                    inspection=inspection,
+                    fsamp=self._fsamp,
                 )
+
+    def _muap_title_html(
+        self, inspection: SpikeMUAPInspection | None, *, font_size: str = "10pt"
+    ) -> str:
+        if inspection is None:
+            return (
+                f"<span style='color:{COLORS['foreground']};font-size:{font_size};'>"
+                f"MU {self._current_mu_idx}</span>"
+            )
+        spike_time = inspection.selected_sample / self._fsamp
+        return (
+            f"<span style='color:{COLORS['foreground']};font-size:{font_size};'>"
+            f"MU {self._current_mu_idx} | spike {spike_time:.3f} s | "
+            f"similarity {inspection.similarity:.3f} | "
+            f"amplitude {inspection.amplitude_ratio:.2f}x | "
+            f"lag {inspection.lag_ms:+.2f} ms</span><br>"
+            f"<span style='color:{COLORS['info']};font-size:8pt;'>"
+            f"reference (other {inspection.n_reference_spikes})</span> | "
+            f"<span style='color:#ed8936;font-size:8pt;'>selected spike</span>"
+        )
 
     def _render_muap_grid(
         self,
         muap_grid: np.ndarray,
         grid_cfg: dict,
         rejected_positions: set | None = None,
+        inspection: SpikeMUAPInspection | None = None,
     ):
         """Render MUAPs in physical grid layout (portrait, rows × cols).
 
@@ -2718,26 +2855,34 @@ class EditionTab(QWidget):
         if rejected_positions is None:
             rejected_positions = set()
 
+        reference_grid = (
+            inspection.reference_grid if inspection is not None else muap_grid
+        )
+        selected_grid = inspection.selected_grid if inspection is not None else None
         rows, cols = grid_cfg["grid_shape"]
         electrode_positions = set(grid_cfg["positions"].values())
-        n_samples = muap_grid.shape[2] if muap_grid.ndim == 3 else 409
+        n_samples = reference_grid.shape[2] if reference_grid.ndim == 3 else 409
 
         valid_wavs = [
-            muap_grid[r, c]
-            for r in range(min(rows, muap_grid.shape[0]))
-            for c in range(min(cols, muap_grid.shape[1]))
+            grid[r, c]
+            for grid in (
+                [reference_grid, selected_grid]
+                if selected_grid is not None
+                else [reference_grid]
+            )
+            for r in range(min(rows, grid.shape[0]))
+            for c in range(min(cols, grid.shape[1]))
             if (r, c) in electrode_positions
             and (r, c) not in rejected_positions
-            and len(muap_grid[r, c]) > 0
-            and np.any(muap_grid[r, c] != 0)
+            and len(grid[r, c]) > 0
+            and np.any(np.isfinite(grid[r, c]) & (grid[r, c] != 0))
         ]
-        amp = np.max(np.abs(np.concatenate(valid_wavs))) * 1.2 if valid_wavs else 1.0
+        all_values = np.concatenate(valid_wavs) if valid_wavs else np.array([])
+        finite_values = all_values[np.isfinite(all_values)]
+        amp = float(np.max(np.abs(finite_values))) * 1.2 if finite_values.size else 1.0
         grid_key = (rows, cols, n_samples, frozenset(rejected_positions))
 
-        title_html = (
-            f"<span style='color:{COLORS['foreground']};font-size:10pt;'>"
-            f"MU {self._current_mu_idx}</span>"
-        )
+        title_html = self._muap_title_html(inspection)
 
         if grid_key == self._muap_grid_key and self._muap_cell_plots:
             # Fast path: only update amplitudes and waveform data in existing plots
@@ -2745,11 +2890,23 @@ class EditionTab(QWidget):
                 p.setYRange(-amp, amp, padding=0)
             for (r, c), item in self._muap_waveform_items.items():
                 wav = (
-                    muap_grid[r, c]
-                    if r < muap_grid.shape[0] and c < muap_grid.shape[1]
+                    reference_grid[r, c]
+                    if r < reference_grid.shape[0] and c < reference_grid.shape[1]
                     else None
                 )
-                if wav is not None and len(wav) > 0 and np.any(wav != 0):
+                if wav is not None and len(wav) > 0 and np.any(np.isfinite(wav)):
+                    item.setData(wav)
+                else:
+                    item.setData([])
+            for (r, c), item in self._muap_inspection_items.items():
+                wav = (
+                    selected_grid[r, c]
+                    if selected_grid is not None
+                    and r < selected_grid.shape[0]
+                    and c < selected_grid.shape[1]
+                    else None
+                )
+                if wav is not None and len(wav) > 0 and np.any(np.isfinite(wav)):
                     item.setData(wav)
                 else:
                     item.setData([])
@@ -2761,6 +2918,7 @@ class EditionTab(QWidget):
         self.muap_widget.clear()
         self._muap_cell_plots = {}
         self._muap_waveform_items = {}
+        self._muap_inspection_items = {}
 
         lbl_style = f"color:{COLORS.get('text_dim', '#6c7086')}; font-size:7pt;"
 
@@ -2827,9 +2985,19 @@ class EditionTab(QWidget):
                 elif rc not in electrode_positions:
                     p.getViewBox().setBackgroundColor(_empty_bg)
                 else:
-                    # Pre-create waveform item; data filled below
-                    item = p.plot([], pen=pg.mkPen(color=COLORS["info"], width=1.5))
+                    # Pre-create both waveform items; the inspection overlay is
+                    # empty until the user right-clicks a spike marker.
+                    item = p.plot([], pen=pg.mkPen(color=COLORS["info"], width=3.0))
                     self._muap_waveform_items[rc] = item
+                    selected_item = p.plot(
+                        [],
+                        pen=pg.mkPen(
+                            color=(237, 137, 54, 210),
+                            width=1.5,
+                            style=Qt.PenStyle.SolidLine,
+                        ),
+                    )
+                    self._muap_inspection_items[rc] = selected_item
 
         gl.setSpacing(0)
         gl.setHorizontalSpacing(6)
@@ -2846,41 +3014,73 @@ class EditionTab(QWidget):
             gl.setRowStretchFactor(r + 2, 1)
 
         for (r, c), item in self._muap_waveform_items.items():
-            if r < muap_grid.shape[0] and c < muap_grid.shape[1]:
-                wav = muap_grid[r, c]
-                if len(wav) > 0 and np.any(wav != 0):
+            if r < reference_grid.shape[0] and c < reference_grid.shape[1]:
+                wav = reference_grid[r, c]
+                if len(wav) > 0 and np.any(np.isfinite(wav)):
                     item.setData(wav)
+        if selected_grid is not None:
+            for (r, c), item in self._muap_inspection_items.items():
+                if r < selected_grid.shape[0] and c < selected_grid.shape[1]:
+                    wav = selected_grid[r, c]
+                    if len(wav) > 0 and np.any(np.isfinite(wav)):
+                        item.setData(wav)
 
         self._muap_grid_key = grid_key
 
-    def _render_muap_stacked(self, waveforms, ch_indices):
+    def _render_muap_stacked(
+        self,
+        waveforms,
+        ch_indices,
+        *,
+        selected_waveforms=None,
+        inspection: SpikeMUAPInspection | None = None,
+    ):
         self.muap_widget.clear()
         self._muap_grid_key = None  # force grid rebuild on next _render_muap_grid call
         plot = self.muap_widget.addPlot(row=0, col=0)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:
             return
-        all_data = np.concatenate([w for _, w in valid])
-        spacing = np.max(np.abs(all_data)) * 0.6 if len(all_data) > 0 else 1.0
+        spacing_waveforms = [w for _, w in valid]
+        if selected_waveforms is not None:
+            spacing_waveforms.extend(selected_waveforms)
+        all_data = np.concatenate(spacing_waveforms)
+        finite_data = all_data[np.isfinite(all_data)]
+        spacing = float(np.max(np.abs(finite_data))) * 0.6 if finite_data.size else 1.0
         n = len(valid)
         for rank, (pidx, wav) in enumerate(valid):
             offset = (n - rank - 1) * spacing
             ch = int(ch_indices[pidx]) if pidx < len(ch_indices) else pidx
-            plot.plot(wav + offset, pen=pg.mkPen(COLORS["foreground"], width=1.5))
+            plot.plot(wav + offset, pen=pg.mkPen(COLORS["info"], width=3.0))
+            if selected_waveforms is not None and pidx < len(selected_waveforms):
+                selected = selected_waveforms[pidx]
+                if len(selected) > 0 and np.any(np.isfinite(selected)):
+                    plot.plot(
+                        selected + offset,
+                        pen=pg.mkPen(
+                            color=(237, 137, 54, 210),
+                            width=1.5,
+                            style=Qt.PenStyle.SolidLine,
+                        ),
+                    )
             txt = pg.TextItem(f"Ch {ch}", color=(150, 150, 150), anchor=(1, 0.5))
             txt.setPos(-1, offset)
             txt.setFont(QFont(FONT_FAMILY, 7))
             plot.addItem(txt)
         plot.getAxis("left").setVisible(False)
-        plot.setTitle(
-            f"MU {self._current_mu_idx} — Stacked",
-            color=COLORS["foreground"],
-            size="10pt",
-        )
+        if inspection is None:
+            plot.setTitle(
+                f"MU {self._current_mu_idx} — Stacked",
+                color=COLORS["foreground"],
+                size="10pt",
+            )
+        else:
+            plot.setTitle(self._muap_title_html(inspection, font_size="9pt"))
 
     def _clear_muap_plot(self, message: str = "Select a Motor Unit"):
         self.muap_widget.clear()
         self._muap_grid_key = None
+        self._muap_inspection_items = {}
         p = self.muap_widget.addPlot(row=0, col=0)
         p.hideAxis("left")
         p.hideAxis("bottom")
