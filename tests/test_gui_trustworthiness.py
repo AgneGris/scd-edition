@@ -386,11 +386,11 @@ def test_reset_view_empty_full_source_window_uses_safe_fallback():
 
 
 def test_file_note_normalisation_rejects_malformed_and_blank_entries():
-    from scd_app.gui.tabs.edition_tab import EditionTab
+    from scd_app.io.edition_session import normalise_notes
 
-    assert EditionTab._normalise_notes(None) == []
-    assert EditionTab._normalise_notes("not a list") == []
-    assert EditionTab._normalise_notes([" first ", "", " \n ", 3, "second"]) == [
+    assert normalise_notes(None) == []
+    assert normalise_notes("not a list") == []
+    assert normalise_notes([" first ", "", " \n ", 3, "second"]) == [
         "first",
         "second",
     ]

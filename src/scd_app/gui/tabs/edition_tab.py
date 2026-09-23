@@ -43,9 +43,13 @@ from PySide6.QtWidgets import (
 )
 from scipy import signal as sp_signal
 
-from scd_app._vendor.motor_unit_toolbox import spike_comp as _tb_spike_comp
 from scd_app.core.auto_editor import MIN_SPIKES, auto_edit
 from scd_app.core.constants import ROA_THRESHOLD
+from scd_app.core.duplicate_detection import (
+    DUPLICATE_DETECTION_AVAILABLE,
+    scan_cross_port_duplicates,
+    scan_within_port_duplicates,
+)
 from scd_app.core.filter_recalculation import (
     compute_all_full_sources,
     recalculate_unit_filter,
@@ -55,7 +59,6 @@ from scd_app.core.filter_recalculation import (
 from scd_app.core.mu_model import EditMode, MotorUnit, UndoAction
 from scd_app.core.mu_properties import (
     MUProperties,
-    build_spike_train_matrix,
     compute_port_properties,
     recompute_unit_properties,
 )
@@ -75,632 +78,16 @@ from scd_app.gui.widgets.source_plot_widget import (
 )
 from scd_app.io.atomic_pickle import atomic_pickle_dump
 from scd_app.io.audit_report import write_audit_report
-from scd_app.io.decomposition_loader import (
-    CURRENT_SCHEMA_VERSION,
-    GUI_FORMAT,
-    load_decomposition_file,
+from scd_app.io.decomposition_loader import load_decomposition_file
+from scd_app.io.edition_session import (
+    EditionSaveState,
+    build_edition_save_data,
+    load_edition_port,
+    normalise_aux_channels,
+    normalise_notes,
 )
 
 logger = logging.getLogger(__name__)
-
-_SPIKE_COMP_AVAILABLE = True
-
-
-# ---------------------------------------------------------------------------
-# Grid definitions
-# ---------------------------------------------------------------------------
-
-GRID_POSITIONS_13x5 = {
-    1: (1, 0),
-    2: (2, 0),
-    3: (3, 0),
-    4: (4, 0),
-    5: (5, 0),
-    6: (6, 0),
-    7: (7, 0),
-    8: (8, 0),
-    9: (9, 0),
-    10: (10, 0),
-    11: (11, 0),
-    12: (12, 0),
-    25: (0, 1),
-    24: (1, 1),
-    23: (2, 1),
-    22: (3, 1),
-    21: (4, 1),
-    20: (5, 1),
-    19: (6, 1),
-    18: (7, 1),
-    17: (8, 1),
-    16: (9, 1),
-    15: (10, 1),
-    14: (11, 1),
-    13: (12, 1),
-    26: (0, 2),
-    27: (1, 2),
-    28: (2, 2),
-    29: (3, 2),
-    30: (4, 2),
-    31: (5, 2),
-    32: (6, 2),
-    33: (7, 2),
-    34: (8, 2),
-    35: (9, 2),
-    36: (10, 2),
-    37: (11, 2),
-    38: (12, 2),
-    51: (0, 3),
-    50: (1, 3),
-    49: (2, 3),
-    48: (3, 3),
-    47: (4, 3),
-    46: (5, 3),
-    45: (6, 3),
-    44: (7, 3),
-    43: (8, 3),
-    42: (9, 3),
-    41: (10, 3),
-    40: (11, 3),
-    39: (12, 3),
-    52: (0, 4),
-    53: (1, 4),
-    54: (2, 4),
-    55: (3, 4),
-    56: (4, 4),
-    57: (5, 4),
-    58: (6, 4),
-    59: (7, 4),
-    60: (8, 4),
-    61: (9, 4),
-    62: (10, 4),
-    63: (11, 4),
-    64: (12, 4),
-}
-GRID_POSITIONS_8x8 = {
-    8: (0, 0),
-    7: (1, 0),
-    6: (2, 0),
-    5: (3, 0),
-    4: (4, 0),
-    3: (5, 0),
-    2: (6, 0),
-    1: (7, 0),
-    16: (0, 1),
-    15: (1, 1),
-    14: (2, 1),
-    13: (3, 1),
-    12: (4, 1),
-    11: (5, 1),
-    10: (6, 1),
-    9: (7, 1),
-    24: (0, 2),
-    23: (1, 2),
-    22: (2, 2),
-    21: (3, 2),
-    20: (4, 2),
-    19: (5, 2),
-    18: (6, 2),
-    17: (7, 2),
-    32: (0, 3),
-    31: (1, 3),
-    30: (2, 3),
-    29: (3, 3),
-    28: (4, 3),
-    27: (5, 3),
-    26: (6, 3),
-    25: (7, 3),
-    40: (0, 4),
-    39: (1, 4),
-    38: (2, 4),
-    37: (3, 4),
-    36: (4, 4),
-    35: (5, 4),
-    34: (6, 4),
-    33: (7, 4),
-    48: (0, 5),
-    47: (1, 5),
-    46: (2, 5),
-    45: (3, 5),
-    44: (4, 5),
-    43: (5, 5),
-    42: (6, 5),
-    41: (7, 5),
-    56: (0, 6),
-    55: (1, 6),
-    54: (2, 6),
-    53: (3, 6),
-    52: (4, 6),
-    51: (5, 6),
-    50: (6, 6),
-    49: (7, 6),
-    64: (0, 7),
-    63: (1, 7),
-    62: (2, 7),
-    61: (3, 7),
-    60: (4, 7),
-    59: (5, 7),
-    58: (6, 7),
-    57: (7, 7),
-}
-GRID_POSITIONS_20x2 = {
-    # Key = 0-based OTBio channel index, value = (row, col) physical position
-    # Col 0 = Side A (pads 1-20), Col 1 = Side B (pads 21-40)
-    # Row 0 = pad 1/21 (proximal end), Row 19 = pad 20/40 (distal end)
-    # Derived from DEMOVE->OTBio connector mapping table
-    0: (18, 1),  # OTBio 1  -> DEMOVE 39 -> Side B pad 19
-    1: (17, 1),  # OTBio 2  -> DEMOVE 38 -> Side B pad 18
-    2: (16, 1),  # OTBio 3  -> DEMOVE 37 -> Side B pad 17
-    3: (19, 1),  # OTBio 4  -> DEMOVE 40 -> Side B pad 20
-    4: (12, 1),  # OTBio 5  -> DEMOVE 33 -> Side B pad 13
-    5: (15, 1),  # OTBio 6  -> DEMOVE 36 -> Side B pad 16
-    6: (14, 1),  # OTBio 7  -> DEMOVE 35 -> Side B pad 15
-    7: (13, 1),  # OTBio 8  -> DEMOVE 34 -> Side B pad 14
-    8: (10, 1),  # OTBio 9  -> DEMOVE 31 -> Side B pad 11
-    9: (9, 1),  # OTBio 10 -> DEMOVE 30 -> Side B pad 10
-    10: (6, 1),  # OTBio 11 -> DEMOVE 27 -> Side B pad 7
-    11: (5, 1),  # OTBio 12 -> DEMOVE 26 -> Side B pad 6
-    12: (2, 1),  # OTBio 13 -> DEMOVE 23 -> Side B pad 3
-    13: (1, 1),  # OTBio 14 -> DEMOVE 22 -> Side B pad 2
-    14: (18, 0),  # OTBio 15 -> DEMOVE 19 -> Side A pad 19
-    15: (17, 0),  # OTBio 16 -> DEMOVE 18 -> Side A pad 18
-    16: (14, 0),  # OTBio 17 -> DEMOVE 15 -> Side A pad 15
-    17: (13, 0),  # OTBio 18 -> DEMOVE 14 -> Side A pad 14
-    18: (10, 0),  # OTBio 19 -> DEMOVE 11 -> Side A pad 11
-    19: (9, 0),  # OTBio 20 -> DEMOVE 10 -> Side A pad 10
-    20: (6, 0),  # OTBio 21 -> DEMOVE 7  -> Side A pad 7
-    21: (5, 0),  # OTBio 22 -> DEMOVE 6  -> Side A pad 6
-    22: (2, 0),  # OTBio 23 -> DEMOVE 3  -> Side A pad 3
-    23: (1, 0),  # OTBio 24 -> DEMOVE 2  -> Side A pad 2
-    24: (0, 0),  # OTBio 25 -> DEMOVE 1  -> Side A pad 1
-    25: (3, 0),  # OTBio 26 -> DEMOVE 4  -> Side A pad 4
-    26: (4, 0),  # OTBio 27 -> DEMOVE 5  -> Side A pad 5
-    27: (7, 0),  # OTBio 28 -> DEMOVE 8  -> Side A pad 8
-    28: (8, 0),  # OTBio 29 -> DEMOVE 9  -> Side A pad 9
-    29: (11, 0),  # OTBio 30 -> DEMOVE 12 -> Side A pad 12
-    30: (12, 0),  # OTBio 31 -> DEMOVE 13 -> Side A pad 13
-    31: (15, 0),  # OTBio 32 -> DEMOVE 16 -> Side A pad 16
-    32: (16, 0),  # OTBio 33 -> DEMOVE 17 -> Side A pad 17
-    33: (19, 0),  # OTBio 34 -> DEMOVE 20 -> Side A pad 20
-    34: (0, 1),  # OTBio 35 -> DEMOVE 21 -> Side B pad 1
-    35: (3, 1),  # OTBio 36 -> DEMOVE 24 -> Side B pad 4
-    36: (4, 1),  # OTBio 37 -> DEMOVE 25 -> Side B pad 5
-    37: (7, 1),  # OTBio 38 -> DEMOVE 28 -> Side B pad 8
-    38: (8, 1),  # OTBio 39 -> DEMOVE 29 -> Side B pad 9
-    39: (11, 1),  # OTBio 40 -> DEMOVE 32 -> Side B pad 12
-}
-
-GRID_POSITIONS_HD02MM0808 = {
-    # Col 0
-    53: (0, 0),
-    54: (0, 1),
-    55: (0, 2),
-    56: (0, 3),
-    64: (0, 4),
-    63: (0, 5),
-    62: (0, 6),
-    61: (0, 7),
-    52: (1, 0),
-    51: (1, 1),
-    50: (1, 2),
-    49: (1, 3),
-    60: (1, 4),
-    57: (1, 5),
-    58: (1, 6),
-    59: (1, 7),
-    48: (2, 0),
-    47: (2, 1),
-    46: (2, 2),
-    45: (2, 3),
-    33: (2, 4),
-    34: (2, 5),
-    35: (2, 6),
-    36: (2, 7),
-    44: (3, 0),
-    43: (3, 1),
-    42: (3, 2),
-    41: (3, 3),
-    37: (3, 4),
-    38: (3, 5),
-    39: (3, 6),
-    40: (3, 7),
-    32: (4, 0),
-    31: (4, 1),
-    30: (4, 2),
-    29: (4, 3),
-    28: (4, 4),
-    27: (4, 5),
-    26: (4, 6),
-    25: (4, 7),
-    24: (5, 0),
-    23: (5, 1),
-    22: (5, 2),
-    21: (5, 3),
-    20: (5, 4),
-    19: (5, 5),
-    18: (5, 6),
-    17: (5, 7),
-    1: (6, 0),
-    2: (6, 1),
-    3: (6, 2),
-    4: (6, 3),
-    5: (6, 4),
-    6: (6, 5),
-    7: (6, 6),
-    8: (6, 7),
-    16: (7, 0),
-    15: (7, 1),
-    14: (7, 2),
-    13: (7, 3),
-    12: (7, 4),
-    11: (7, 5),
-    10: (7, 6),
-    9: (7, 7),
-}
-
-GRID_POSITIONS_HD04MM1305 = {
-    # Col 0
-    52: (0, 0),
-    53: (0, 1),
-    54: (0, 2),
-    55: (0, 3),
-    56: (0, 4),
-    57: (0, 5),
-    58: (0, 6),
-    59: (0, 7),
-    60: (0, 8),
-    61: (0, 9),
-    62: (0, 10),
-    63: (0, 11),
-    64: (0, 12),
-    39: (1, 0),
-    40: (1, 1),
-    41: (1, 2),
-    42: (1, 3),
-    43: (1, 4),
-    44: (1, 5),
-    45: (1, 6),
-    46: (1, 7),
-    47: (1, 8),
-    48: (1, 9),
-    49: (1, 10),
-    50: (1, 11),
-    51: (1, 12),
-    26: (2, 0),
-    27: (2, 1),
-    28: (2, 2),
-    29: (2, 3),
-    30: (2, 4),
-    31: (2, 5),
-    32: (2, 6),
-    33: (2, 7),
-    34: (2, 8),
-    35: (2, 9),
-    36: (2, 10),
-    37: (2, 11),
-    38: (2, 12),
-    13: (3, 0),
-    14: (3, 1),
-    15: (3, 2),
-    16: (3, 3),
-    17: (3, 4),
-    18: (3, 5),
-    19: (3, 6),
-    20: (3, 7),
-    21: (3, 8),
-    22: (3, 9),
-    23: (3, 10),
-    24: (3, 11),
-    25: (3, 12),
-    1: (4, 1),
-    2: (4, 2),
-    3: (4, 3),
-    4: (4, 4),
-    5: (4, 5),
-    6: (4, 6),
-    7: (4, 7),
-    8: (4, 8),
-    9: (4, 9),
-    10: (4, 10),
-    11: (4, 11),
-    12: (4, 12),
-}
-
-GRID_POSITIONS_HD04MM1606 = {
-    # Col 0: ch 81–96 (rows 0–15)
-    81: (0, 0),
-    82: (1, 0),
-    83: (2, 0),
-    84: (3, 0),
-    85: (4, 0),
-    86: (5, 0),
-    87: (6, 0),
-    88: (7, 0),
-    89: (8, 0),
-    90: (9, 0),
-    91: (10, 0),
-    92: (11, 0),
-    93: (12, 0),
-    94: (13, 0),
-    95: (14, 0),
-    96: (15, 0),
-    # Col 1: ch 65–80
-    65: (0, 1),
-    66: (1, 1),
-    67: (2, 1),
-    68: (3, 1),
-    69: (4, 1),
-    70: (5, 1),
-    71: (6, 1),
-    72: (7, 1),
-    73: (8, 1),
-    74: (9, 1),
-    75: (10, 1),
-    76: (11, 1),
-    77: (12, 1),
-    78: (13, 1),
-    79: (14, 1),
-    80: (15, 1),
-    # Col 2: ch 49–64
-    49: (0, 2),
-    50: (1, 2),
-    51: (2, 2),
-    52: (3, 2),
-    53: (4, 2),
-    54: (5, 2),
-    55: (6, 2),
-    56: (7, 2),
-    57: (8, 2),
-    58: (9, 2),
-    59: (10, 2),
-    60: (11, 2),
-    61: (12, 2),
-    62: (13, 2),
-    63: (14, 2),
-    64: (15, 2),
-    # Col 3: ch 33–48
-    33: (0, 3),
-    34: (1, 3),
-    35: (2, 3),
-    36: (3, 3),
-    37: (4, 3),
-    38: (5, 3),
-    39: (6, 3),
-    40: (7, 3),
-    41: (8, 3),
-    42: (9, 3),
-    43: (10, 3),
-    44: (11, 3),
-    45: (12, 3),
-    46: (13, 3),
-    47: (14, 3),
-    48: (15, 3),
-    # Col 4: ch 17–32
-    17: (0, 4),
-    18: (1, 4),
-    19: (2, 4),
-    20: (3, 4),
-    21: (4, 4),
-    22: (5, 4),
-    23: (6, 4),
-    24: (7, 4),
-    25: (8, 4),
-    26: (9, 4),
-    27: (10, 4),
-    28: (11, 4),
-    29: (12, 4),
-    30: (13, 4),
-    31: (14, 4),
-    32: (15, 4),
-    # Col 5: ch 1–16
-    1: (0, 5),
-    2: (1, 5),
-    3: (2, 5),
-    4: (3, 5),
-    5: (4, 5),
-    6: (5, 5),
-    7: (6, 5),
-    8: (7, 5),
-    9: (8, 5),
-    10: (9, 5),
-    11: (10, 5),
-    12: (11, 5),
-    13: (12, 5),
-    14: (13, 5),
-    15: (14, 5),
-    16: (15, 5),
-}
-
-# HD10MM0804 / HD05MM0804: 8 rows × 4 cols = 32 channels
-# Sequential layout (NOT serpentine): channels increase monotonically
-# top-to-bottom within each physical column, columns left-to-right.
-# grid_shape=(8,4) → positions as (row, col), matching the (rows,cols) convention
-# used by GR08MM1305 and GR10MM0808.
-GRID_POSITIONS_8x4 = {
-    1: (0, 0),
-    2: (1, 0),
-    3: (2, 0),
-    4: (3, 0),
-    5: (4, 0),
-    6: (5, 0),
-    7: (6, 0),
-    8: (7, 0),
-    9: (0, 1),
-    10: (1, 1),
-    11: (2, 1),
-    12: (3, 1),
-    13: (4, 1),
-    14: (5, 1),
-    15: (6, 1),
-    16: (7, 1),
-    17: (0, 2),
-    18: (1, 2),
-    19: (2, 2),
-    20: (3, 2),
-    21: (4, 2),
-    22: (5, 2),
-    23: (6, 2),
-    24: (7, 2),
-    25: (0, 3),
-    26: (1, 3),
-    27: (2, 3),
-    28: (3, 3),
-    29: (4, 3),
-    30: (5, 3),
-    31: (6, 3),
-    32: (7, 3),
-}
-
-
-# SIM10X32: simulated 10 rows x 32 cols = 320 channels.
-# Row-major channel order (ch = row * 32 + col), matching the ch_map dataset in
-# the simulation HDF5 files, so port-local indices are already grid keys.
-GRID_POSITIONS_SIM10x32 = {i: (i // 32, i % 32) for i in range(320)}
-
-# ULTRAHD 4X4: 16-channel ultra-high-density array, 4 rows x 4 cols, 250 um
-# pitch. Channel numbering (ch1..ch16 in file order) wraps around the array
-# rather than running row-major:
-#
-#     ch1   ch2   ch15  ch16
-#     ch3   ch4   ch13  ch14
-#     ch5   ch6   ch11  ch12
-#     ch7   ch8   ch9   ch10
-GRID_POSITIONS_ULTRAHD4x4 = {
-    1: (0, 0),
-    2: (0, 1),
-    15: (0, 2),
-    16: (0, 3),
-    3: (1, 0),
-    4: (1, 1),
-    13: (1, 2),
-    14: (1, 3),
-    5: (2, 0),
-    6: (2, 1),
-    11: (2, 2),
-    12: (2, 3),
-    7: (3, 0),
-    8: (3, 1),
-    9: (3, 2),
-    10: (3, 3),
-}
-
-
-ELECTRODE_GRIDS = {
-    "GR04MM1305": {
-        "grid_shape": (13, 5),
-        "ied_mm": 4,
-        "n_channels": 64,
-        "muap_mapping": {i: i + 1 for i in range(64)},
-        "positions": GRID_POSITIONS_13x5,
-    },
-    "GR08MM1305": {
-        "grid_shape": (13, 5),
-        "ied_mm": 8,
-        "n_channels": 64,
-        "muap_mapping": {i: i + 1 for i in range(64)},
-        "positions": GRID_POSITIONS_13x5,
-    },
-    "GR10MM0808": {
-        "grid_shape": (8, 8),
-        "ied_mm": 10,
-        "n_channels": 64,
-        "muap_mapping": {i: i + 1 for i in range(64)},
-        "positions": GRID_POSITIONS_8x8,
-    },
-    "Thin-film": {
-        "grid_shape": (20, 2),
-        "ied_mm": 5,
-        "n_channels": 40,
-        "muap_mapping": {i: i for i in range(40)},
-        "positions": GRID_POSITIONS_20x2,
-    },
-    "HD02MM0808": {
-        "grid_shape": (8, 8),
-        "ied_mm": 2,
-        "n_channels": 64,
-        "muap_mapping": {i: i + 1 for i in range(64)},
-        "positions": GRID_POSITIONS_HD02MM0808,
-    },
-    "HD04MM1305": {
-        "grid_shape": (5, 13),
-        "ied_mm": 4,
-        "n_channels": 64,
-        "muap_mapping": {i: i + 1 for i in range(64)},
-        "positions": GRID_POSITIONS_HD04MM1305,
-    },
-    "HD04MM1606": {
-        "grid_shape": (16, 6),
-        "ied_mm": 4,
-        "n_channels": 96,
-        "muap_mapping": {i: i + 1 for i in range(96)},
-        "positions": GRID_POSITIONS_HD04MM1606,
-    },
-    # Same 16x6 electrode with hardware channels 1-16 disconnected.  The
-    # remaining channels occupy five complete columns; re-key them locally so
-    # an 80-channel decomposition retains the correct physical arrangement.
-    "HD08MM1606, CHANNELS 17-96": {
-        "grid_shape": (16, 5),
-        "ied_mm": 8,
-        "n_channels": 80,
-        "muap_mapping": {i: i + 1 for i in range(80)},
-        "positions": {
-            local_ch: GRID_POSITIONS_HD04MM1606[local_ch + 16]
-            for local_ch in range(1, 81)
-        },
-    },
-    "HD08MM1606": {
-        "grid_shape": (16, 6),
-        "ied_mm": 8,
-        "n_channels": 96,
-        "muap_mapping": {i: i + 1 for i in range(96)},
-        "positions": GRID_POSITIONS_HD04MM1606,
-    },
-    "HD08MM1305": {
-        "grid_shape": (5, 13),
-        "ied_mm": 8,
-        "n_channels": 64,
-        "muap_mapping": {i: i + 1 for i in range(64)},
-        "positions": GRID_POSITIONS_HD04MM1305,
-    },
-    "HD10MM0804": {
-        "grid_shape": (8, 4),
-        "ied_mm": 10,
-        "n_channels": 32,
-        "muap_mapping": {i: i + 1 for i in range(32)},
-        "positions": GRID_POSITIONS_8x4,
-    },
-    "HD05MM0804": {
-        "grid_shape": (8, 4),
-        "ied_mm": 5,
-        "n_channels": 32,
-        "muap_mapping": {i: i + 1 for i in range(32)},
-        "positions": GRID_POSITIONS_8x4,
-    },
-    "SIM10X32": {
-        "grid_shape": (10, 32),
-        "ied_mm": 4,
-        "n_channels": 320,
-        "muap_mapping": {i: i for i in range(320)},
-        "positions": GRID_POSITIONS_SIM10x32,
-    },
-    "ULTRAHD 4X4": {
-        "grid_shape": (4, 4),
-        "ied_mm": 0.25,
-        "n_channels": 16,
-        "muap_mapping": {i: i + 1 for i in range(16)},
-        "positions": GRID_POSITIONS_ULTRAHD4x4,
-    },
-}
-
-
-def get_grid_config(electrode_type: str | None) -> dict | None:
-    if electrode_type is None:
-        return None
-    key = electrode_type.upper()
-    for name, cfg in ELECTRODE_GRIDS.items():
-        if name.upper() in key:
-            return cfg
-    return None
-
 
 # ---------------------------------------------------------------------------
 # EditionTab
@@ -771,15 +158,6 @@ class EditionTab(QWidget):
 
     def _ts_to_absolute(self, plateau_local: np.ndarray) -> np.ndarray:
         return plateau_local + self._start_sample
-
-    @staticmethod
-    def _normalise_notes(notes: object) -> list[str]:
-        """Return non-empty text entries from a persisted or edited note list."""
-        if not isinstance(notes, list):
-            return []
-        return [
-            note.strip() for note in notes if isinstance(note, str) and note.strip()
-        ]
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1630,54 +1008,13 @@ class EditionTab(QWidget):
         else:
             self._edit_history = []
 
-        self._notes = self._normalise_notes(decomp_data.get("notes"))
-        # Normalise aux channel structure: older saves nest metadata under "meta";
-        # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
+        self._notes = normalise_notes(decomp_data.get("notes"))
         acquisition_format = decomp_data.get("acquisition_metadata", {}).get("format")
-        for ch in decomp_data.get("aux_channels", []):
-            meta = ch.pop("meta", None)
-            if isinstance(meta, dict):
-                for k, v in meta.items():
-                    ch.setdefault(k, v)
-            # Old files stored mvc in Volts (OTB display units); signal is in mV.
-            # Any legitimate force MVC will be ≥ 1 mV, so mvc < 1.0 means it's in V.
-            # Formats whose aux streams are genuinely in Volts are exempt.
-            mvc = ch.get("mvc")
-            if (
-                acquisition_format not in ("otb4", "rhs")
-                and mvc is not None
-                and 0 < float(mvc) < 1.0
-            ):
-                corrected = float(mvc) * 1000.0
-                logger.info(
-                    "Corrected legacy MVC unit for %s: %s V -> %s mV",
-                    ch.get("unit", "?"),
-                    mvc,
-                    corrected,
-                )
-                ch["mvc"] = corrected
-
-        # Fill in missing MVC from the currently loaded config (matched by name or unit).
-        # This handles old decompositions that were saved before MVC was configured.
-        if self._config_aux_channels:
-            cfg_by_key = {}
-            for cfg in self._config_aux_channels:
-                for key in (cfg.get("name", ""), cfg.get("unit", "")):
-                    if key:
-                        cfg_by_key[key] = cfg
-            for ch in decomp_data.get("aux_channels", []):
-                if ch.get("mvc") is not None:
-                    continue
-                match = cfg_by_key.get(ch.get("name", "")) or cfg_by_key.get(
-                    ch.get("unit", "")
-                )
-                if match and match.get("mvc") is not None:
-                    ch["mvc"] = match["mvc"]
-                    logger.info(
-                        "Filled MVC from configuration for %s: %s mV",
-                        ch.get("unit", "?"),
-                        ch["mvc"],
-                    )
+        normalise_aux_channels(
+            decomp_data.get("aux_channels", []),
+            acquisition_format=acquisition_format,
+            configured_channels=self._config_aux_channels,
+        )
 
         self._original_decomp_data = decomp_data
 
@@ -1827,216 +1164,30 @@ class EditionTab(QWidget):
         full_port_results: dict,
         ch_offset: int,
     ) -> int:
-        chans_per_electrode = decomp_data.get("chans_per_electrode", [])
-        channel_indices_all = decomp_data.get("channel_indices")
-        mask_list = decomp_data.get("emg_mask", [])
-        electrode_list = decomp_data.get("electrodes", [])
-
-        n_ch = (
-            int(chans_per_electrode[port_idx])
-            if port_idx < len(chans_per_electrode)
-            else 64
+        loaded = load_edition_port(
+            port_index=port_idx,
+            port_name=port_name,
+            decomposition=decomp_data,
+            emg_full=emg_full,
+            start_sample=start_sample,
+            end_sample=end_sample,
+            full_port_results=full_port_results,
+            channel_offset=ch_offset,
+            full_source_mode=self._full_source_mode,
+            sampling_rate=self._fsamp,
+            existing_notes=self._notes,
+            property_computer=compute_port_properties,
         )
 
-        if (
-            channel_indices_all is not None
-            and port_idx < len(channel_indices_all)
-            and channel_indices_all[port_idx] is not None
-        ):
-            port_ch_idx = np.asarray(channel_indices_all[port_idx], dtype=int)
-        else:
-            port_ch_idx = np.arange(ch_offset, ch_offset + n_ch, dtype=int)
-
-        if port_idx < len(mask_list) and mask_list[port_idx] is not None:
-            local_active = np.where(
-                to_numpy(np.asarray(mask_list[port_idx])).flatten() == 0
-            )[0]
-        else:
-            local_active = np.arange(n_ch)
-        global_active = port_ch_idx[local_active[local_active < len(port_ch_idx)]]
-
-        emg_port = None
-        if emg_full is not None:
-            valid_chs = global_active[global_active < emg_full.shape[0]]
-            if len(valid_chs) > 0:
-                if self._full_source_mode:
-                    emg_port = emg_full[valid_chs, :]
-                else:
-                    emg_port = emg_full[
-                        valid_chs,
-                        max(0, start_sample) : min(end_sample, emg_full.shape[1]),
-                    ]
-                valid_port_chs = port_ch_idx[port_ch_idx < emg_full.shape[0]]
-                self._raw_port_channels[port_name] = emg_full[valid_port_chs, :]
-
-        port_discharge = (
-            decomp_data["discharge_times"][port_idx]
-            if port_idx < len(decomp_data["discharge_times"])
-            else []
-        )
-        port_sources = (
-            decomp_data["pulse_trains"][port_idx]
-            if port_idx < len(decomp_data["pulse_trains"])
-            else []
-        )
-        port_filters_raw = decomp_data.get("mu_filters", [])
-        port_filters = (
-            port_filters_raw[port_idx] if port_idx < len(port_filters_raw) else None
-        )
-
-        ts_list = self._ensure_list_of_arrays(port_discharge)
-        src_list = self._ensure_list_of_arrays(port_sources)
-        filt_list = (
-            self._ensure_list_of_arrays(port_filters)
-            if port_filters is not None
-            else [None] * len(ts_list)
-        )
-
-        full_results = full_port_results.get(port_idx, [])
-
-        motor_units = []
-        for mu_idx in range(len(ts_list)):
-            filt = (
-                to_numpy(filt_list[mu_idx])
-                if mu_idx < len(filt_list) and filt_list[mu_idx] is not None
-                else None
-            )
-
-            if (
-                self._full_source_mode
-                and mu_idx < len(full_results)
-                and full_results[mu_idx][0] is not None
-            ):
-                entry = full_results[mu_idx]
-                source = entry[0]
-                ts_abs = entry[1]
-                if len(entry) > 2 and entry[2] is not None:
-                    filt = entry[2]
-            else:
-                source = (
-                    to_numpy(src_list[mu_idx]).flatten()
-                    if mu_idx < len(src_list)
-                    else np.zeros(1)
-                )
-                ts_plateau = to_numpy(ts_list[mu_idx]).flatten().astype(np.int64)
-                ts_abs = (
-                    self._ts_to_absolute(ts_plateau)
-                    if self._full_source_mode
-                    else ts_plateau
-                )
-
-            motor_units.append(
-                MotorUnit(
-                    id=mu_idx,
-                    timestamps=ts_abs,
-                    source=source,
-                    port_name=port_name,
-                    mu_filter=filt,
-                )
-            )
-
-        etype = electrode_list[port_idx] if port_idx < len(electrode_list) else None
-        grid_cfg = get_grid_config(etype)
-
-        # Build corrected grid positions: maps new-0-based emg_port row -> (r, c).
-        # The raw positions dicts use 1-based channel keys (matching hardware numbering)
-        # while emg_port rows are 0-based and may have gaps due to rejected channels.
-        # muap_mapping converts original port-local index -> grid key.
-        corrected_positions = None
-        rejected_pos_set: set = set()
-        if grid_cfg is not None:
-            muap_map = grid_cfg.get("muap_mapping", {})
-            raw_pos = grid_cfg["positions"]
-            corrected_positions = {}
-            for new_idx, orig_idx in enumerate(local_active):
-                key = muap_map.get(int(orig_idx), int(orig_idx))
-                pos = raw_pos.get(key)
-                if pos is not None:
-                    corrected_positions[new_idx] = pos
-            # Positions of rejected channels for visual masking
-            for orig_idx in range(n_ch):
-                if orig_idx in set(local_active):
-                    continue
-                key = muap_map.get(orig_idx, orig_idx)
-                pos = raw_pos.get(key)
-                if pos is not None:
-                    rejected_pos_set.add(pos)
-
-        if motor_units:
-            props_ts = [mu.timestamps for mu in motor_units]
-            props_src = [mu.source for mu in motor_units]
-
-            props_list = compute_port_properties(
-                all_timestamps=props_ts,
-                all_sources=props_src,
-                emg_port=emg_port,
-                grid_positions=(
-                    corrected_positions
-                    if corrected_positions is not None
-                    else (grid_cfg["positions"] if grid_cfg else None)
-                ),
-                grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
-                fsamp=self._fsamp,
-            )
-            for mu, p in zip(motor_units, props_list, strict=True):
-                mu.props = p
-
-        self._ports[port_name] = motor_units
-
-        # Restore flagged state persisted from a previous save
-        for idx in decomp_data.get("flagged_mus", {}).get(port_name, []):
-            if 0 <= idx < len(motor_units):
-                motor_units[idx].flagged_duplicate = True
-
-        # Restore manual reliability verdicts (absent in older files)
-        overrides = decomp_data.get("reliability_overrides", {}).get(port_name, {})
-        for idx, value in overrides.items():
-            if 0 <= idx < len(motor_units) and motor_units[idx].props is not None:
-                motor_units[idx].props.reliability_override = bool(value)
-
-        # Migrate non-empty per-unit notes from older files into the per-file log.
-        port_notes = decomp_data.get("mu_notes", [])
-        if port_idx < len(port_notes):
-            # Saved notes may not cover every unit in older files; truncate.
-            for mu, note in zip(motor_units, port_notes[port_idx], strict=False):
-                if not isinstance(note, str) or not note.strip():
-                    continue
-                note = " ".join(note.splitlines()).strip()
-                full_note = f"0000-00-00 00:00:00 ({port_name}, MU {mu.id}): {note}"
-                if full_note not in self._notes:
-                    self._notes.append(full_note)
-
-        self._grid_info[port_name] = grid_cfg
-        self._rejected_ch_positions[port_name] = rejected_pos_set
-        if emg_port is not None:
-            self._emg_data[port_name] = emg_port
-
-        logger.info(
-            "Port '%s': %d MUs, %d spikes%s",
-            port_name,
-            len(motor_units),
-            sum(len(m.timestamps) for m in motor_units),
-            " (full)" if self._full_source_mode else "",
-        )
-        return n_ch
-
-    @staticmethod
-    def _ensure_list_of_arrays(data) -> list:
-        if data is None or (isinstance(data, np.ndarray) and data.size == 0):
-            return []
-        if isinstance(data, list):
-            if len(data) == 0:
-                return []
-            first = data[0]
-            if isinstance(first, (np.ndarray, list)) or hasattr(first, "detach"):
-                return [to_numpy(x) for x in data]
-            return [to_numpy(data)]
-        arr = to_numpy(data)
-        if arr.ndim == 0 or arr.size == 0:
-            return []
-        if arr.ndim == 1:
-            return [arr]
-        return [arr[i] for i in range(arr.shape[0])]
+        self._ports[port_name] = loaded.motor_units
+        self._grid_info[port_name] = loaded.grid_config
+        self._rejected_ch_positions[port_name] = loaded.rejected_channel_positions
+        self._notes.extend(loaded.migrated_notes)
+        if loaded.raw_channels is not None:
+            self._raw_port_channels[port_name] = loaded.raw_channels
+        if loaded.emg is not None:
+            self._emg_data[port_name] = loaded.emg
+        return loaded.channel_count
 
     def _load_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2106,120 +1257,18 @@ class EditionTab(QWidget):
             return False
 
     def _build_save_dict(self) -> dict:
-        import dataclasses
-
-        ports = list(self._ports.keys())
-        discharge_times, pulse_trains, mu_filters, mu_properties = (
-            [],
-            [],
-            [],
-            [],
+        state = EditionSaveState(
+            ports=self._ports,
+            sampling_rate=self._fsamp,
+            full_source_mode=self._full_source_mode,
+            start_sample=self._start_sample,
+            end_sample=self._end_sample,
+            edit_history=self._edit_history,
+            notes=self._notes,
+            original_decomposition=self._original_decomp_data,
+            emg_data=self._emg_data,
         )
-        flagged_mus_per_port = {}
-        reliability_overrides_per_port = {}
-
-        for port_name in ports:
-            mus = self._ports[port_name]
-            flagged_mus_per_port[port_name] = [
-                i for i, mu in enumerate(mus) if mu.flagged_duplicate
-            ]
-            # Manual reliability verdicts, keyed by unit index.  Properties are
-            # recomputed on load, so the override has to be stored separately.
-            reliability_overrides_per_port[port_name] = {
-                i: mu.props.reliability_override
-                for i, mu in enumerate(mus)
-                if mu.props is not None and mu.props.reliability_is_overridden
-            }
-
-            if self._full_source_mode:
-                save_ts = [self._ts_to_plateau_local(mu.timestamps) for mu in mus]
-                save_src = [
-                    (
-                        mu.source[self._start_sample : self._end_sample]
-                        if len(mu.source) > (self._end_sample - self._start_sample)
-                        else mu.source
-                    )
-                    for mu in mus
-                ]
-            else:
-                save_ts = [mu.timestamps for mu in mus]
-                save_src = [mu.source for mu in mus]
-
-            discharge_times.append(save_ts)
-            pulse_trains.append(save_src)
-            mu_filters.append([mu.mu_filter for mu in mus] or None)
-
-            port_props = []
-            for mu in mus:
-                if mu.props is not None:
-                    d = dataclasses.asdict(mu.props)
-                    d.pop("muap_grid", None)
-                    d.pop("duplicate_candidates", None)
-                    # Derived properties are not dataclass fields, so add the
-                    # reliability verdict explicitly for downstream readers.
-                    d["is_reliable"] = mu.props.is_reliable
-                    d["auto_reliable"] = mu.props.auto_reliable
-                    port_props.append(d)
-                else:
-                    port_props.append({})
-            mu_properties.append(port_props)
-
-        save_data = {
-            "format": GUI_FORMAT,
-            "schema_version": CURRENT_SCHEMA_VERSION,
-            "ports": ports,
-            "sampling_rate": self._fsamp,
-            "discharge_times": discharge_times,
-            "pulse_trains": pulse_trains,
-            "mu_filters": mu_filters,
-            "skip_filter_recalc": True,
-            "mu_properties": mu_properties,
-            "flagged_mus": flagged_mus_per_port,
-            "reliability_overrides": reliability_overrides_per_port,
-            "edit_history": self._edit_history,
-            "notes": self._notes,
-        }
-
-        if self._original_decomp_data is not None:
-            for key in [
-                "data",
-                "aux_channels",
-                "plateau_coords",
-                "chans_per_electrode",
-                "channel_indices",
-                "emg_mask",
-                "electrodes",
-                "dewhitened_filters",
-                "version",
-                "preprocessing_config",
-                "w_mat",
-                "selected_points",
-                "import_provenance",
-                "scd_metadata",
-                "audit_provenance",
-                "decomposition_params",
-                "aux_configs",
-                "acquisition_metadata",
-            ]:
-                val = self._original_decomp_data.get(key)
-                if val is not None and key not in save_data:
-                    save_data[key] = val
-
-            # Pass peel_off_sequence through unchanged — all MUs are saved,
-            # so no index remapping is needed. Remapping only happens when
-            # units are physically deleted via "Delete All Flagged MUs".
-            orig_peel = self._original_decomp_data.get("peel_off_sequence")
-            if orig_peel is not None:
-                save_data["peel_off_sequence"] = orig_peel
-
-            orig_filters = self._original_decomp_data.get("mu_filters")
-            if orig_filters is not None:
-                save_data["mu_filters_original"] = orig_filters
-
-        if self._emg_data:
-            save_data["emg_per_port"] = dict(self._emg_data)
-
-        return save_data
+        return build_edition_save_data(state)
 
     # ------------------------------------------------------------------
     # Edit mode (point-click)
@@ -2946,108 +1995,22 @@ class EditionTab(QWidget):
     # Duplicate detection
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _mu_quality_key(mu: MotorUnit) -> tuple:
-        """Return a sort key where a higher tuple means higher quality."""
-        if mu.props is None:
-            return (-float("inf"), -float("inf"), 0, -mu.id)
-        sil = mu.props.sil if not np.isnan(mu.props.sil) else -float("inf")
-        stability = (
-            mu.props.muap_template_stability
-            if not np.isnan(mu.props.muap_template_stability)
-            else -float("inf")
-        )
-        return (sil, stability, mu.props.n_spikes, -mu.id)
-
-    def _clear_duplicate_roles(self, kind: str):
-        """Clear `kind` duplicate roles/partners; un-flag MUs not also deleted by the other kind."""
-        other = "cross" if kind == "within" else "within"
-        for mus in self._ports.values():
-            for mu in mus:
-                prev_delete = getattr(mu, f"{kind}_duplicate_role") == "delete"
-                setattr(mu, f"{kind}_duplicate_role", None)
-                setattr(mu, f"{kind}_duplicate_partners", [])
-                if prev_delete and getattr(mu, f"{other}_duplicate_role") != "delete":
-                    mu.flagged_duplicate = False
-
     def _flag_within_duplicates(self):
         """Detect and flag lower-quality within-port duplicate MUs for deletion."""
-        if not _SPIKE_COMP_AVAILABLE:
+        if not DUPLICATE_DETECTION_AVAILABLE:
             self._update_status(
                 "motor_unit_toolbox not available — cannot detect duplicates"
             )
             return
 
-        self._clear_duplicate_roles("within")
-
-        found_pairs: list = []
-        skipped_ports: list = []
-        failed_ports: list = []
-        n_compared = 0
-
-        for port_name, mus in self._ports.items():
-            if len(mus) < 2:
-                if mus:
-                    skipped_ports.append(port_name)
-                continue
-            n_compared += len(mus)
-
-            n_samples = max(len(mu.source) for mu in mus)
-            spike_mat = build_spike_train_matrix(
-                [mu.timestamps for mu in mus], n_samples
-            )
-
-            try:
-                # rate_of_agreement_full returns full (n, n) RoA matrix
-                roa, _ = _tb_spike_comp.rate_of_agreement_full(
-                    spike_trains_ref=spike_mat,
-                    spike_trains_test=spike_mat,
-                    fs=int(round(self._fsamp)),
-                )
-            except Exception as exc:
-                logger.warning("Within-port RoA failed for %s: %s", port_name, exc)
-                failed_ports.append(port_name)
-                continue
-
-            n = len(mus)
-            for i in range(n):
-                for j in range(i + 1, n):
-                    # Use max of both directions for a symmetric score
-                    score = float(max(roa[i, j], roa[j, i]))
-                    if score >= ROA_THRESHOLD:
-                        found_pairs.append(
-                            (port_name, mus[i].id, port_name, mus[j].id, score)
-                        )
-                        mus[i].within_duplicate_partners.append(
-                            (port_name, mus[j].id, score)
-                        )
-                        mus[j].within_duplicate_partners.append(
-                            (port_name, mus[i].id, score)
-                        )
-
-            for mu in mus:
-                if not mu.within_duplicate_partners:
-                    continue
-                partner_ids = {mid for (_, mid, _) in mu.within_duplicate_partners}
-                partner_mus = [m for m in mus if m.id in partner_ids]
-                best_partner = max(partner_mus, key=self._mu_quality_key)
-                if self._mu_quality_key(mu) >= self._mu_quality_key(best_partner):
-                    mu.within_duplicate_role = "keep"
-                else:
-                    mu.within_duplicate_role = "delete"
-                    mu.flagged_duplicate = True
-
-        flagged_by_port = {
-            p: [mu.id for mu in mus if mu.within_duplicate_role == "delete"]
-            for p, mus in self._ports.items()
-        }
-        n_flagged = sum(len(v) for v in flagged_by_port.values())
+        result = scan_within_port_duplicates(self._ports, self._fsamp)
+        n_flagged = result.n_flagged
         self._log_event(
             "flag_within_duplicates",
             f"flagged {n_flagged} within-port duplicate MU(s)",
             "",
             -1,
-            flagged_by_port=flagged_by_port,
+            flagged_by_port=result.flagged_by_port,
         )
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
@@ -3058,115 +2021,35 @@ class EditionTab(QWidget):
         self._show_duplicate_report(
             title="Within-Port Duplicates",
             scope="within each grid/probe",
-            pairs=found_pairs,
-            flagged_by_port=flagged_by_port,
-            n_compared=n_compared,
-            skipped_ports=skipped_ports,
-            failed_ports=failed_ports,
+            pairs=result.pairs,
+            flagged_by_port=result.flagged_by_port,
+            n_compared=result.n_compared,
+            skipped_ports=result.skipped_ports,
+            failed_ports=result.failed_ports,
             skipped_reason="fewer than 2 MUs",
         )
         self._mark_modified()
 
     def _flag_cross_duplicates(self):
         """Detect and flag lower-quality cross-port duplicate MUs for deletion."""
-        if not _SPIKE_COMP_AVAILABLE:
+        if not DUPLICATE_DETECTION_AVAILABLE:
             self._update_status(
                 "motor_unit_toolbox not available — cannot detect duplicates"
             )
             return
 
-        port_names = list(self._ports.keys())
-        if len(port_names) < 2:
+        if len(self._ports) < 2:
             self._update_status("Cross-port: only one port loaded — nothing to compare")
             return
 
-        self._clear_duplicate_roles("cross")
-
-        found_pairs: list = []
-        failed_ports: list = []
-        n_compared = sum(len(self._ports[p]) for p in port_names)
-
-        for idx_a in range(len(port_names)):
-            for idx_b in range(idx_a + 1, len(port_names)):
-                port_a, port_b = port_names[idx_a], port_names[idx_b]
-                mus_a = self._ports[port_a]
-                mus_b = self._ports[port_b]
-
-                if not mus_a or not mus_b:
-                    continue
-
-                n_samples = max(
-                    max(len(mu.source) for mu in mus_a),
-                    max(len(mu.source) for mu in mus_b),
-                )
-                spike_mat_a = build_spike_train_matrix(
-                    [mu.timestamps for mu in mus_a], n_samples
-                )
-                spike_mat_b = build_spike_train_matrix(
-                    [mu.timestamps for mu in mus_b], n_samples
-                )
-
-                try:
-                    # rate_of_agreement_full returns full (n_a, n_b) RoA matrix
-                    roa, _ = _tb_spike_comp.rate_of_agreement_full(
-                        spike_trains_ref=spike_mat_a,
-                        spike_trains_test=spike_mat_b,
-                        fs=int(round(self._fsamp)),
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Cross-port RoA failed for %s vs %s: %s", port_a, port_b, exc
-                    )
-                    failed_ports.append(f"{port_a} ↔ {port_b}")
-                    continue
-
-                na, nb = roa.shape[0], roa.shape[1]
-                for i in range(min(len(mus_a), na)):
-                    for j in range(min(len(mus_b), nb)):
-                        score = float(roa[i, j])
-                        if score >= ROA_THRESHOLD:
-                            found_pairs.append(
-                                (port_a, mus_a[i].id, port_b, mus_b[j].id, score)
-                            )
-                            mus_a[i].cross_duplicate_partners.append(
-                                (port_b, mus_b[j].id, score)
-                            )
-                            mus_b[j].cross_duplicate_partners.append(
-                                (port_a, mus_a[i].id, score)
-                            )
-
-        # Assign cross-port roles: lower quality than any partner → delete
-        for mus in self._ports.values():
-            for mu in mus:
-                if not mu.cross_duplicate_partners:
-                    continue
-                partner_mus = []
-                for pname, mid, _score in mu.cross_duplicate_partners:
-                    for pm in self._ports.get(pname, []):
-                        if pm.id == mid:
-                            partner_mus.append(pm)
-                            break
-                if not partner_mus:
-                    continue
-                best_partner = max(partner_mus, key=self._mu_quality_key)
-                if self._mu_quality_key(mu) >= self._mu_quality_key(best_partner):
-                    if mu.cross_duplicate_role != "delete":
-                        mu.cross_duplicate_role = "keep"
-                else:
-                    mu.cross_duplicate_role = "delete"
-                    mu.flagged_duplicate = True
-
-        flagged_by_port = {
-            p: [mu.id for mu in mus if mu.cross_duplicate_role == "delete"]
-            for p, mus in self._ports.items()
-        }
-        n_flagged = sum(len(v) for v in flagged_by_port.values())
+        result = scan_cross_port_duplicates(self._ports, self._fsamp)
+        n_flagged = result.n_flagged
         self._log_event(
             "flag_cross_duplicates",
             f"flagged {n_flagged} cross-port duplicate MU(s)",
             "",
             -1,
-            flagged_by_port=flagged_by_port,
+            flagged_by_port=result.flagged_by_port,
         )
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
@@ -3177,11 +2060,11 @@ class EditionTab(QWidget):
         self._show_duplicate_report(
             title="Cross-Port Duplicates",
             scope="across grids/probes",
-            pairs=found_pairs,
-            flagged_by_port=flagged_by_port,
-            n_compared=n_compared,
-            skipped_ports=[],
-            failed_ports=failed_ports,
+            pairs=result.pairs,
+            flagged_by_port=result.flagged_by_port,
+            n_compared=result.n_compared,
+            skipped_ports=result.skipped_ports,
+            failed_ports=result.failed_ports,
             skipped_reason="",
         )
         self._mark_modified()
@@ -3523,7 +2406,7 @@ class EditionTab(QWidget):
 
         # Connections:
         def edited_notes() -> list[str]:
-            return self._normalise_notes(history.toPlainText().splitlines())
+            return normalise_notes(history.toPlainText().splitlines())
 
         def mark_changes():
             """Mark history was changed in window title."""
