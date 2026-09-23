@@ -1,6 +1,9 @@
+import logging
 from pathlib import Path
 
 from PySide6.QtGui import QFontDatabase
+
+logger = logging.getLogger(__name__)
 
 FONT_FAMILY = "Lexend"
 
@@ -205,7 +208,7 @@ def load_font(font_type="Lexend"):
         font_path = _font_dir / font_file
         font_id = QFontDatabase.addApplicationFont(str(font_path))
         if font_id < 0:
-            print(f"Warning: Could not load font {font_path}")
+            logger.warning("Could not load font %s", font_path)
 
     return font_type
 

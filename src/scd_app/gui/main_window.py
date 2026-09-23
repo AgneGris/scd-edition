@@ -2,13 +2,14 @@
 Main application window for SCD-edition.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
 
 import torch
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -20,11 +21,19 @@ from PySide6.QtWidgets import (
 )
 
 from scd_app.core.config import ConfigManager, SessionConfig
+from scd_app.core.logging_config import (
+    configure_logging,
+    install_exception_hook,
+    log_startup_diagnostics,
+    runtime_diagnostics,
+)
 from scd_app.gui.style.styling import set_style_sheet
 from scd_app.gui.tabs.config_tab import ConfigTab
 from scd_app.gui.tabs.decomposition_tab import DecompositionTab
 from scd_app.gui.tabs.edition_tab import EditionTab
 from scd_app.gui.tabs.visualisation_tab import VisualisationTab
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -115,6 +124,16 @@ class MainWindow(QMainWindow):
 
         # Help Menu
         help_menu = menubar.addMenu("&Help")
+
+        open_logs_action = QAction("Open &Log Folder", self)
+        open_logs_action.triggered.connect(self._open_log_folder)
+        help_menu.addAction(open_logs_action)
+
+        copy_diagnostics_action = QAction("&Copy Diagnostics", self)
+        copy_diagnostics_action.triggered.connect(self._copy_diagnostics)
+        help_menu.addAction(copy_diagnostics_action)
+
+        help_menu.addSeparator()
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -183,7 +202,7 @@ class MainWindow(QMainWindow):
     def _on_decomposition_complete(self, decomp_path: Path):
         """Handle decomposition completion and auto-load into Edition tab."""
         try:
-            if self.edition_tab.load_from_path(decomp_path):
+            if self.edition_tab.load_from_path(decomp_path, trusted=True):
                 self.tabs.setCurrentWidget(self.edition_tab)
                 self.status_bar.showMessage(
                     "✓ Decomposition complete — loaded into Edition tab"
@@ -193,18 +212,34 @@ class MainWindow(QMainWindow):
                     f"Decomposition saved to {decomp_path.name}, but was not loaded"
                 )
         except Exception as e:
+            logger.exception("Could not load completed decomposition %s", decomp_path)
             QMessageBox.critical(
                 self,
                 "Load Error",
                 f"Decomposition finished but failed to load into Edition:\n{e}",
             )
 
+    def _open_log_folder(self):
+        log_directory = configure_logging().parent
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_directory))):
+            QMessageBox.warning(
+                self,
+                "Log Folder",
+                f"Could not open the log folder automatically:\n{log_directory}",
+            )
+
+    def _copy_diagnostics(self):
+        diagnostics = runtime_diagnostics(configure_logging())
+        QApplication.clipboard().setText(diagnostics)
+        self.status_bar.showMessage("Diagnostics copied to the clipboard", 5000)
+        logger.info("Runtime diagnostics copied to the clipboard")
+
     def _show_about(self):
         QMessageBox.about(
             self,
-            "About SCD Suite",
-            "SCD Suite\nEMG Decomposition & Edition\n\n"
-            "Real-time motor unit decomposition and spike editing\n\n"
+            "About SCD Edition",
+            "SCD Edition\nEMG Decomposition & Edition\n\n"
+            "Motor unit decomposition, review and spike editing\n\n"
             "Licensed under the BSD 3-Clause License.",
         )
 
@@ -285,6 +320,10 @@ def main():
     # parse_known_args so Qt's own flags (e.g. -platform) are left in sys.argv
     args, qt_argv = parser.parse_known_args()
 
+    log_path = configure_logging()
+    install_exception_hook()
+    log_startup_diagnostics(log_path)
+
     app = QApplication([sys.argv[0], *qt_argv])
     app.setApplicationName("SCD-Edition")
 
@@ -300,19 +339,22 @@ def main():
             f"cannot use it (PyTorch {torch.__version__}, CUDA build "
             f"{torch.version.cuda or 'none'}).\n\n"
             "For this source checkout, run:\n"
-            "uv sync --python 3.13 --managed-python --extra cuda"
+            "uv sync --python 3.13 --managed-python --extra cuda\n\n"
+            "For later uv commands, include --extra cuda or --no-sync; "
+            "a bare uv run may reinstall CPU-only PyTorch."
         )
-        print(f"SCD Edition startup error: {message}", file=sys.stderr)
+        logger.error("SCD Edition startup error: %s", message)
         QMessageBox.critical(None, "CUDA Required", message)
         return 1
 
     if cuda_available:
-        print(
-            f"SCD Edition device: CUDA ({torch.cuda.get_device_name(0)}) "
-            "because PyTorch detected a working CUDA device."
+        logger.info(
+            "SCD Edition device: CUDA (%s) because PyTorch detected a "
+            "working CUDA device.",
+            torch.cuda.get_device_name(0),
         )
     else:
-        print(
+        logger.info(
             "SCD Edition device: CPU because PyTorch did not detect a working "
             "CUDA device."
         )
@@ -347,7 +389,7 @@ def _open_on_startup(window: "MainWindow", path: Path):
         if window.edition_tab.load_from_path(path):
             window.tabs.setCurrentWidget(window.edition_tab)
     except Exception as e:
-        print(f"ERROR: Could not open file '{path}': {e}", file=sys.stderr)
+        logger.exception("Could not open file '%s'", path)
         from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.critical(window, "Load Error", f"Could not open file:\n{e}")
@@ -369,7 +411,7 @@ def _configure_example_on_startup(window: "MainWindow"):
             "Bundled example ready — review the settings and click Apply Configuration"
         )
     except Exception as exc:
-        print(f"ERROR: Could not configure bundled example: {exc}", file=sys.stderr)
+        logger.exception("Could not configure bundled example")
         from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.critical(

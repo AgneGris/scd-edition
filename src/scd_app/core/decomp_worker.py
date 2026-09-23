@@ -3,6 +3,9 @@ Decomposition Worker - Manages EMG signal decomposition (via SCD).
 """
 
 import copy
+import logging
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +16,13 @@ from scd.models.scd import SwarmContrastiveDecomposition
 from scd.processing.preprocess import replace_bad_channels_with_noise
 
 from scd_app.io.atomic_pickle import atomic_pickle_dump
+from scd_app.io.audit_report import (
+    create_decomposition_provenance,
+    write_audit_report,
+)
+from scd_app.io.decomposition_loader import CURRENT_SCHEMA_VERSION, GUI_FORMAT
+
+logger = logging.getLogger(__name__)
 
 
 class DecompositionWorker(QThread):
@@ -52,16 +62,23 @@ class DecompositionWorker(QThread):
         self._aux_data_cache = {}
         self._is_running = True
         self._partial_results = None  # (results_dict, total_mus) after each grid
+        self._started_at_utc: str | None = None
+        self._started_monotonic: float | None = None
 
     def run(self):
+        self._started_at_utc = (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        self._started_monotonic = time.monotonic()
         try:
             self.progress.emit("Starting decomposition...")
 
-            print(f"[DecompositionWorker] Sampling rate: {self.sampling_rate} Hz")
-            print(
-                f"[DecompositionWorker] EMG data shape: {tuple(self.emg_data.shape)} (samples x channels)"
+            logger.info("Decomposition sampling rate: %s Hz", self.sampling_rate)
+            logger.info(
+                "EMG data shape: %s (samples x channels)",
+                tuple(self.emg_data.shape),
             )
-            print(f"[DecompositionWorker] Grids: {list(self.grid_configs.keys())}")
+            logger.info("Decomposition grids: %s", list(self.grid_configs))
 
             results = {
                 "pulse_trains": [],
@@ -86,9 +103,13 @@ class DecompositionWorker(QThread):
                 # Extract data for this grid
                 channels = config["channels"]
                 n_total = self.emg_data.shape[1]
-                print(
-                    f"  [{port_name}] emg_data shape: {tuple(self.emg_data.shape)}, "
-                    f"channels [{channels[0]}..{channels[-1]}] ({len(channels)} ch)"
+                logger.info(
+                    "%s: EMG shape %s, channels [%s..%s] (%s channels)",
+                    port_name,
+                    tuple(self.emg_data.shape),
+                    channels[0],
+                    channels[-1],
+                    len(channels),
                 )
                 bad_ch_idx = [c for c in channels if c >= n_total]
                 if bad_ch_idx:
@@ -102,9 +123,12 @@ class DecompositionWorker(QThread):
                 rejected = self.rejected_channels[grid_idx]
                 # Guard: if mask was carried over from a different config, trim/pad it
                 if len(rejected) != len(channels):
-                    print(
-                        f"  [{port_name}] Warning: rejection mask length ({len(rejected)}) "
-                        f"!= n_channels ({len(channels)}), resetting mask."
+                    logger.warning(
+                        "%s: rejection mask length %s != channel count %s; "
+                        "resetting mask",
+                        port_name,
+                        len(rejected),
+                        len(channels),
                     )
                     rejected = np.zeros(len(channels), dtype=int)
                 bad_channels = np.where(rejected == 1)[0]
@@ -121,10 +145,11 @@ class DecompositionWorker(QThread):
                 grid_data = grid_data[start_sample:end_sample, :]
 
                 scd_config = self._create_scd_config(config["params"])
-                print(f"\n--- Decomposition config for {port_name} ---")
-                for field, value in vars(scd_config).items():
-                    print(f"  {field}: {value}")
-                print("---")
+                logger.info(
+                    "Decomposition configuration for %s: %s",
+                    port_name,
+                    vars(scd_config),
+                )
 
                 dictionary, timestamps = self._decompose_grid(grid_data, scd_config)
 
@@ -202,9 +227,7 @@ class DecompositionWorker(QThread):
             )
 
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
+            logger.exception("Decomposition failed")
             self.error.emit(str(e))
 
     def _create_notch_params(self, params: dict) -> tuple[int, float, bool] | None:
@@ -265,7 +288,7 @@ class DecompositionWorker(QThread):
         )
         return dictionary, timestamps
 
-    def _save_results(self, results: dict):
+    def _save_results(self, results: dict, *, status: str = "complete"):
         # 1. Channel counts, actual indices, electrode info and the user-set
         #    decomposition parameters per port.
         chans_per_electrode = []
@@ -308,7 +331,7 @@ class DecompositionWorker(QThread):
                 try:
                     dewhitened_filters.append(filters @ w_mat)
                 except Exception as e:
-                    print(f"Warning: de-whitening failed for grid {i}: {e}")
+                    logger.warning("Filter de-whitening failed for grid %s: %s", i, e)
                     dewhitened_filters.append(None)
             else:
                 dewhitened_filters.append(None)
@@ -322,7 +345,7 @@ class DecompositionWorker(QThread):
                     self.emg_file_path, self.data_layout
                 )
             except Exception as ex:
-                print(f"  [metadata] Could not preserve acquisition metadata: {ex}")
+                logger.warning("Could not preserve acquisition metadata: %s", ex)
 
         # 4. Aux channels — three source types:
         #    "signal"     → slice from full EMG array (channels, samples)
@@ -341,9 +364,10 @@ class DecompositionWorker(QThread):
                 source = a.get("source", "signal")
                 if source == "data_field":
                     if self.emg_file_path is None:
-                        print(
-                            f"  [aux] Skipping '{a.get('name', '?')}': "
-                            "data_field source requires emg_file_path"
+                        logger.warning(
+                            "Skipping auxiliary channel '%s': data_field source "
+                            "requires an EMG file path",
+                            a.get("name", "?"),
                         )
                         continue
                     entry = self._load_data_field_channel(self.emg_file_path, a)
@@ -353,9 +377,10 @@ class DecompositionWorker(QThread):
 
                 if source == "aux_file":
                     if self.emg_file_path is None:
-                        print(
-                            f"  [aux] Skipping '{a.get('name', '?')}': "
-                            "aux_file source requires emg_file_path"
+                        logger.warning(
+                            "Skipping auxiliary channel '%s': aux_file source "
+                            "requires an EMG file path",
+                            a.get("name", "?"),
                         )
                         continue
                     entry = self._load_aux_file_channel(self.emg_file_path, a)
@@ -373,19 +398,33 @@ class DecompositionWorker(QThread):
                 # source == "signal": slice from the EMG data array
                 s, e = int(a.get("start_chan", 0)), int(a.get("end_chan", 0))
                 if s >= e or e > n_total_ch:
-                    print(
-                        f"  [aux] Skipping '{a.get('name', '?')}': "
-                        f"channel range [{s},{e}) out of range ({n_total_ch} ch)"
+                    logger.warning(
+                        "Skipping auxiliary channel '%s': range [%s,%s) is "
+                        "outside %s channels",
+                        a.get("name", "?"),
+                        s,
+                        e,
+                        n_total_ch,
                     )
                     continue
                 sig = full_np[s:e, :].squeeze()  # (samples,) for single-ch aux
                 entry = dict(a.items())  # flat copy of full aux config
                 entry["data"] = sig
                 aux_channels_saved.append(entry)
-            print(f"  [aux] Saved {len(aux_channels_saved)} aux channel(s).")
+            logger.info("Saved %s auxiliary channels", len(aux_channels_saved))
 
         # 5. Build save dict
+        started_at_utc = self._started_at_utc or (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        duration_seconds = (
+            time.monotonic() - self._started_monotonic
+            if self._started_monotonic is not None
+            else 0.0
+        )
         save_dict = {
+            "format": GUI_FORMAT,
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "version": 1.1,
             # User-modifiable decomposition parameters, one dict per port.  Everything the
             # user can set in the Decomposition tab: sil_threshold, iterations,
@@ -426,11 +465,33 @@ class DecompositionWorker(QThread):
             ],
             "electrodes": electrodes,
             "aux_channels": aux_channels_saved,  # list of {data, meta, start_chan, end_chan}
+            "audit_provenance": create_decomposition_provenance(
+                self.emg_file_path,
+                status=status,
+                started_at_utc=started_at_utc,
+                duration_seconds=duration_seconds,
+                motor_units_by_port={
+                    str(port_name): len(results["discharge_times"][index])
+                    for index, port_name in enumerate(results["ports"])
+                },
+            ),
         }
 
         # 6. Write
-        atomic_pickle_dump(save_dict, Path(self.save_path))
-        print(f"File saved successfully: {self.save_path}")
+        save_path = Path(self.save_path)
+        atomic_pickle_dump(save_dict, save_path)
+        logger.info("Decomposition saved successfully: %s", self.save_path)
+        try:
+            audit_path = write_audit_report(
+                save_path,
+                save_dict,
+                operation="decomposition",
+            )
+            logger.info("Reproducibility report saved: %s", audit_path)
+        except Exception:
+            logger.exception(
+                "Decomposition was saved, but its audit report could not be written"
+            )
 
     def _load_aux_file_channel(self, file_path: Path, aux_config: dict) -> dict | None:
         """Load one channel from the format's canonical auxiliary field."""
@@ -441,9 +502,10 @@ class DecompositionWorker(QThread):
         if not layout or "aux" not in layout.get("fields", {}):
             fmt = self._FORMAT_BY_SUFFIX.get(file_path.suffix.lower())
             if not fmt:
-                print(
-                    f"  [aux] '{aux_config.get('name', '?')}': cannot determine "
-                    f"format for {file_path.suffix!r}"
+                logger.warning(
+                    "Auxiliary channel '%s': cannot determine format for %r",
+                    aux_config.get("name", "?"),
+                    file_path.suffix,
                 )
                 return None
             layout = {
@@ -465,18 +527,23 @@ class DecompositionWorker(QThread):
                 aux_np = load_field(file_path, layout, "aux").numpy()
                 self._aux_data_cache[cache_key] = aux_np
             except Exception as ex:
-                print(
-                    f"  [aux] Failed to read auxiliary stream from "
-                    f"{file_path.name}: {ex}"
+                logger.warning(
+                    "Failed to read auxiliary stream from %s: %s",
+                    file_path.name,
+                    ex,
                 )
                 return None
 
         s = int(aux_config.get("start_chan", 0))
         e = int(aux_config.get("end_chan", s + 1))
         if s >= e or e > aux_np.shape[1]:
-            print(
-                f"  [aux] Skipping '{aux_config.get('name', '?')}': "
-                f"range [{s},{e}) out of range ({aux_np.shape[1]} aux channels)"
+            logger.warning(
+                "Skipping auxiliary channel '%s': range [%s,%s) is outside "
+                "%s auxiliary channels",
+                aux_config.get("name", "?"),
+                s,
+                e,
+                aux_np.shape[1],
             )
             return None
 
@@ -512,7 +579,10 @@ class DecompositionWorker(QThread):
         name = aux_config.get("name", "?")
         field_path = str(aux_config.get("field_path", "")).strip()
         if not field_path:
-            print(f"  [aux] Skipping '{name}': data_field source needs a field_path")
+            logger.warning(
+                "Skipping auxiliary channel '%s': data_field source needs a field path",
+                name,
+            )
             return None
 
         file_path = Path(file_path)
@@ -522,9 +592,10 @@ class DecompositionWorker(QThread):
         if not fmt:
             fmt = self._FORMAT_BY_SUFFIX.get(file_path.suffix.lower())
         if not fmt:
-            print(
-                f"  [aux] Skipping '{name}': cannot determine format "
-                f"for {file_path.suffix!r}"
+            logger.warning(
+                "Skipping auxiliary channel '%s': cannot determine format for %r",
+                name,
+                file_path.suffix,
             )
             return None
 
@@ -546,23 +617,40 @@ class DecompositionWorker(QThread):
         try:
             sig = load_field(file_path, layout, "aux").numpy()
         except Exception as ex:
-            print(f"  [aux] Failed to read '{field_path}' from {file_path.name}: {ex}")
+            logger.warning(
+                "Failed to read auxiliary field '%s' from %s: %s",
+                field_path,
+                file_path.name,
+                ex,
+            )
             return None
 
         sig = np.asarray(sig, dtype=float).squeeze()
         if sig.ndim > 1:
-            print(
-                f"  [aux] Skipping '{name}': field '{field_path}' is "
-                f"{sig.shape}, expected a single trace"
+            logger.warning(
+                "Skipping auxiliary channel '%s': field '%s' has shape %s; "
+                "expected a single trace",
+                name,
+                field_path,
+                sig.shape,
             )
             return None
         if sig.size == 0:
-            print(f"  [aux] Skipping '{name}': field '{field_path}' is empty")
+            logger.warning(
+                "Skipping auxiliary channel '%s': field '%s' is empty",
+                name,
+                field_path,
+            )
             return None
 
         entry = dict(aux_config.items())  # flat copy
         entry["data"] = sig
-        print(f"  [aux] '{name}': read {field_path} -> {sig.shape[0]} samples")
+        logger.info(
+            "Auxiliary channel '%s': read %s (%s samples)",
+            name,
+            field_path,
+            sig.shape[0],
+        )
         return entry
 
     def stop(self):

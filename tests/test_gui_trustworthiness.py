@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import pickle
 from unittest.mock import MagicMock, patch
@@ -71,6 +72,131 @@ def test_atomic_pickle_writes_loadable_data(tmp_path):
         actual = pickle.load(handle)
     assert actual["ports"] == expected["ports"]
     np.testing.assert_array_equal(actual["value"], expected["value"])
+
+
+def test_edition_save_writes_reproducibility_report(tmp_path):
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab(fsamp=1000.0)
+    tab._ports = {
+        "Grid 1": [
+            MotorUnit(
+                id=0,
+                timestamps=np.array([2, 6], dtype=np.int64),
+                source=np.arange(10, dtype=float),
+                port_name="Grid 1",
+            )
+        ]
+    }
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._output_path = tmp_path / "edited.pkl"
+
+    assert tab._save_file() is True
+    assert tab._output_path.exists()
+    report_path = tab._output_path.with_suffix(".audit.json")
+    assert report_path.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["operation"] == "edition"
+    assert report["decomposition"]["motor_units_detected"] is None
+    assert report["decomposition"]["motor_units_retained"] == 1
+
+    tab.close()
+    app.processEvents()
+
+
+def test_canceling_pickle_trust_warning_prevents_deserialization(tmp_path):
+    from PySide6.QtWidgets import QMessageBox
+
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    path = tmp_path / "untrusted.pkl"
+    path.write_bytes(b"not opened")
+    tab = EditionTab()
+
+    with (
+        patch.object(
+            QMessageBox,
+            "warning",
+            return_value=QMessageBox.StandardButton.Cancel,
+        ),
+        patch(
+            "scd_app.gui.tabs.edition_tab.load_decomposition_file"
+        ) as load_decomposition,
+    ):
+        loaded = tab.load_from_path(path)
+
+    assert loaded is False
+    load_decomposition.assert_not_called()
+    tab.close()
+    app.processEvents()
+
+
+def test_failed_parse_restores_the_current_edition_session(tmp_path):
+    from PySide6.QtWidgets import QMessageBox
+
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab(fsamp=1000.0)
+    original_unit = MotorUnit(
+        id=0,
+        timestamps=np.array([2, 6], dtype=np.int64),
+        source=np.arange(10, dtype=float),
+        port_name="Original",
+    )
+    original_ports = {"Original": [original_unit]}
+    original_path = tmp_path / "original.pkl"
+    replacement_path = tmp_path / "replacement.pkl"
+    with replacement_path.open("wb") as handle:
+        pickle.dump(
+            {
+                "ports": ["Replacement"],
+                "sampling_rate": 1000,
+                "discharge_times": [[np.array([1])]],
+                "pulse_trains": [[np.arange(5, dtype=float)]],
+            },
+            handle,
+        )
+
+    tab._ports = original_ports
+    tab._current_port = "Original"
+    tab._current_mu_idx = 0
+    tab._loaded_path = original_path
+    tab._set_dirty(True)
+    tab._refresh_port_combo()
+    tab._refresh_mu_combo()
+
+    def fail_after_mutating_state(_data):
+        tab._ports = {}
+        tab._current_port = None
+        raise RuntimeError("synthetic parse failure")
+
+    with (
+        patch.object(tab, "confirm_save_changes", return_value=True),
+        patch.object(
+            tab,
+            "_load_decomposition_data",
+            side_effect=fail_after_mutating_state,
+        ),
+        patch.object(QMessageBox, "critical"),
+    ):
+        loaded = tab.load_from_path(replacement_path, trusted=True)
+
+    assert loaded is False
+    assert tab._ports is original_ports
+    assert tab._current_port == "Original"
+    assert tab._current_mu_idx == 0
+    assert tab._loaded_path == original_path
+    assert tab.is_dirty is True
+
+    tab._set_dirty(False)
+    tab.close()
+    app.processEvents()
 
 
 def test_cancelled_save_prevents_window_close():

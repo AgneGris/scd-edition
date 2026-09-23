@@ -7,7 +7,6 @@ is shown as a shaded band on the source plot.
 """
 
 import logging
-import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -75,7 +74,12 @@ from scd_app.gui.widgets.source_plot_widget import (
     SourcePlotWidget,
 )
 from scd_app.io.atomic_pickle import atomic_pickle_dump
-from scd_app.io.decomposition_loader import load_decomposition_file
+from scd_app.io.audit_report import write_audit_report
+from scd_app.io.decomposition_loader import (
+    CURRENT_SCHEMA_VERSION,
+    GUI_FORMAT,
+    load_decomposition_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1422,24 +1426,122 @@ class EditionTab(QWidget):
             "file_stem": self._loaded_path.stem if self._loaded_path else "",
         }
 
-    def load_from_path(self, path: Path) -> bool:
+    def _confirm_trusted_pickle(self, path: Path) -> bool:
+        reply = QMessageBox.warning(
+            self,
+            "Open Trusted Pickle?",
+            "Python pickle files can execute code when opened.\n\n"
+            f"Only open this file if you created it or trust its source:\n{path}",
+            QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return reply == QMessageBox.StandardButton.Open
+
+    def _capture_session_state(self) -> dict:
+        attributes = (
+            "_fsamp",
+            "_ports",
+            "_emg_data",
+            "_grid_info",
+            "_raw_port_channels",
+            "_rejected_ch_positions",
+            "_notes",
+            "_current_port",
+            "_current_mu_idx",
+            "_edit_mode",
+            "_sel_arm",
+            "_loaded_path",
+            "_dirty",
+            "_start_sample",
+            "_end_sample",
+            "_full_source_mode",
+            "_redetect_timestamps",
+            "_undo_stack",
+            "_redo_stack",
+            "_edit_history",
+            "_original_decomp_data",
+            "_filter_recalc_available",
+            "_last_action_msg",
+            "_pending_source_changed",
+            "_pending_props_key",
+        )
+        controls = (
+            "btn_recalc_filter",
+            "btn_remove_outliers",
+            "btn_flag_delete",
+            "btn_delete_flagged",
+            "btn_auto_edit_mu",
+            "btn_sel_add",
+            "btn_sel_delete",
+            "btn_flag_within_dups",
+            "btn_flag_cross_dups",
+            "btn_notes",
+        )
+        return {
+            "attributes": {name: getattr(self, name) for name in attributes},
+            "controls": {
+                name: (getattr(self, name).isEnabled(), getattr(self, name).toolTip())
+                for name in controls
+            },
+            "props_timer_remaining": (
+                self._props_timer.remainingTime()
+                if self._props_timer.isActive()
+                else -1
+            ),
+        }
+
+    def _restore_session_state(self, state: dict) -> None:
+        self._props_timer.stop()
+        for name, value in state["attributes"].items():
+            setattr(self, name, value)
+
+        self._refresh_port_combo()
+        self.port_combo.blockSignals(True)
+        self.port_combo.setCurrentText(self._current_port or "")
+        self.port_combo.blockSignals(False)
+        self._refresh_mu_combo()
+        self.mu_combo.blockSignals(True)
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        self.mu_combo.blockSignals(False)
+        if self._current_mu() is None:
+            self._clear_plots()
+        else:
+            self._update_plots(reset_view=True)
+        self._refresh_aux_controls()
+
+        self.source_plot.set_edit_mode(self._edit_mode)
+        self.source_plot.set_selection_arm(self._sel_arm)
+        self.btn_sel_add.blockSignals(True)
+        self.btn_sel_delete.blockSignals(True)
+        self.btn_sel_add.setChecked(self._sel_arm == SelectionArm.ADD)
+        self.btn_sel_delete.setChecked(self._sel_arm == SelectionArm.DELETE)
+        self.btn_sel_add.blockSignals(False)
+        self.btn_sel_delete.blockSignals(False)
+
+        for name, (enabled, tooltip) in state["controls"].items():
+            control = getattr(self, name)
+            control.setEnabled(enabled)
+            control.setToolTip(tooltip)
+        self._update_file_label()
+        self._update_status()
+
+        remaining = state["props_timer_remaining"]
+        if remaining >= 0 and self._pending_props_key is not None:
+            self._props_timer.start(max(1, remaining))
+
+    def load_from_path(self, path: Path, *, trusted: bool = False) -> bool:
         path = Path(path)
         if not path.exists():
             QMessageBox.critical(self, "Load Error", f"File not found:\n{path}")
+            return False
+        if not trusted and not self._confirm_trusted_pickle(path):
+            return False
+        if not self.confirm_save_changes("opening another file"):
             return False
         try:
             data = load_decomposition_file(path)
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to read file:\n{e}")
-            return False
-        if "ports" not in data or "discharge_times" not in data:
-            QMessageBox.warning(
-                self,
-                "Format Error",
-                "File does not contain 'ports' and 'discharge_times'.",
-            )
-            return False
-        if not self.confirm_save_changes("opening another file"):
             return False
         if data.get("skip_filter_recalc"):
             reply = QMessageBox.question(
@@ -1476,13 +1578,17 @@ class EditionTab(QWidget):
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
-                self._redetect_timestamps = reply == QMessageBox.StandardButton.Yes
+                redetect_timestamps = reply == QMessageBox.StandardButton.Yes
+            else:
+                redetect_timestamps = True
         else:
-            self._redetect_timestamps = True
+            redetect_timestamps = True
 
+        previous_session = self._capture_session_state()
         try:
             # Set this before loading so _refresh_aux_controls sees the correct stem.
             self._loaded_path = path
+            self._redetect_timestamps = redetect_timestamps
             self._load_decomposition_data(data)
             imported_format = data.get("import_provenance", {}).get("format")
             if imported_format:
@@ -1496,7 +1602,8 @@ class EditionTab(QWidget):
             self.file_loaded.emit()
             return True
         except Exception as e:
-            traceback.print_exc()
+            logger.exception("Failed to parse decomposition file %s", path)
+            self._restore_session_state(previous_session)
             QMessageBox.critical(self, "Load Error", f"Failed to parse:\n{e}")
             return False
 
@@ -1505,14 +1612,16 @@ class EditionTab(QWidget):
         self._pending_props_key = None
         self._pending_source_changed = False
         self._disarm_selection()
-        self._ports.clear()
-        self._emg_data.clear()
-        self._grid_info.clear()
-        self._notes.clear()
-        self._raw_port_channels.clear()
-        self._rejected_ch_positions.clear()
-        self._undo_stack.clear()  # clears all per-unit histories
-        self._redo_stack.clear()
+        # Allocate new containers so a failed load can restore the previous
+        # session by reference without retaining partially parsed data.
+        self._ports = {}
+        self._emg_data = {}
+        self._grid_info = {}
+        self._notes = []
+        self._raw_port_channels = {}
+        self._rejected_ch_positions = {}
+        self._undo_stack = {}
+        self._redo_stack = {}
         # Carry forward any edit history already stored in the file so the log
         # accumulates across multiple editing sessions.
         prior_history = decomp_data.get("edit_history", [])
@@ -1540,8 +1649,11 @@ class EditionTab(QWidget):
                 and 0 < float(mvc) < 1.0
             ):
                 corrected = float(mvc) * 1000.0
-                print(
-                    f"  [load] mvc unit fix: {ch.get('unit', '?')} {mvc} V → {corrected} mV"
+                logger.info(
+                    "Corrected legacy MVC unit for %s: %s V -> %s mV",
+                    ch.get("unit", "?"),
+                    mvc,
+                    corrected,
                 )
                 ch["mvc"] = corrected
 
@@ -1561,8 +1673,10 @@ class EditionTab(QWidget):
                 )
                 if match and match.get("mvc") is not None:
                     ch["mvc"] = match["mvc"]
-                    print(
-                        f"  [load] filled mvc from config: {ch.get('unit', '?')} = {ch['mvc']} mV"
+                    logger.info(
+                        "Filled MVC from configuration for %s: %s mV",
+                        ch.get("unit", "?"),
+                        ch["mvc"],
                     )
 
         self._original_decomp_data = decomp_data
@@ -1603,9 +1717,7 @@ class EditionTab(QWidget):
                     logger.warning("Full source warning: %s", err)
                     full_port_results = {}
             except Exception as e:
-                logger.error(
-                    "Full source computation failed: %s\n%s", e, traceback.format_exc()
-                )
+                logger.exception("Full source computation failed: %s", e)
                 full_port_results = {}
         else:
             sel_pts = decomp_data.get(
@@ -1968,9 +2080,23 @@ class EditionTab(QWidget):
             save_path = Path(chosen)
 
         try:
-            atomic_pickle_dump(self._build_save_dict(), save_path)
+            save_data = self._build_save_dict()
+            atomic_pickle_dump(save_data, save_path)
+            try:
+                audit_path = write_audit_report(
+                    save_path,
+                    save_data,
+                    operation="edition",
+                    derived_from=self._loaded_path,
+                )
+                status = f"Saved: {save_path.name} + {audit_path.name}"
+            except Exception:
+                logger.exception(
+                    "Edition was saved, but its audit report could not be written"
+                )
+                status = f"Saved: {save_path.name} (audit report not written)"
             self._set_dirty(False)
-            self._update_status(f"Saved: {save_path.name}")
+            self._update_status(status)
             self._update_file_label()
             if self._quit_after_save:
                 QApplication.quit()
@@ -2039,6 +2165,8 @@ class EditionTab(QWidget):
             mu_properties.append(port_props)
 
         save_data = {
+            "format": GUI_FORMAT,
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "ports": ports,
             "sampling_rate": self._fsamp,
             "discharge_times": discharge_times,
@@ -2068,6 +2196,10 @@ class EditionTab(QWidget):
                 "selected_points",
                 "import_provenance",
                 "scd_metadata",
+                "audit_provenance",
+                "decomposition_params",
+                "aux_configs",
+                "acquisition_metadata",
             ]:
                 val = self._original_decomp_data.get(key)
                 if val is not None and key not in save_data:
@@ -2428,7 +2560,7 @@ class EditionTab(QWidget):
             )
 
         except Exception as e:
-            traceback.print_exc()
+            logger.exception("Filter recalculation failed")
             QMessageBox.critical(self, "Recalculation Error", str(e))
             self._update_status("Filter recalculation failed")
 

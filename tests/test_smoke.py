@@ -21,6 +21,39 @@ def test_main_window_constructs_headlessly():
     app.processEvents()
 
 
+def test_help_menu_exposes_support_diagnostics(tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    from scd_app.gui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    help_menu = next(
+        action.menu()
+        for action in window.menuBar().actions()
+        if action.text() == "&Help"
+    )
+
+    assert help_menu is not None
+    assert "Open &Log Folder" in [action.text() for action in help_menu.actions()]
+    assert "&Copy Diagnostics" in [action.text() for action in help_menu.actions()]
+
+    log_path = tmp_path / "scd-edition.log"
+    with (
+        patch("scd_app.gui.main_window.configure_logging", return_value=log_path),
+        patch(
+            "scd_app.gui.main_window.runtime_diagnostics",
+            return_value="test diagnostics",
+        ),
+    ):
+        window._copy_diagnostics()
+
+    assert QApplication.clipboard().text() == "test diagnostics"
+
+    window.close()
+    app.processEvents()
+
+
 def test_config_cards_reemit_parameterless_change_signal():
     from PySide6.QtWidgets import QApplication
 

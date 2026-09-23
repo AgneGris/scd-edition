@@ -5,6 +5,7 @@ Configuration Tab - EMG data loading and electrode configuration.
 import contextlib
 import copy
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -52,6 +53,8 @@ from scd_app.io.data_loader import (
     load_layout,
     load_metadata,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ChannelAllocationBar(QFrame):
@@ -1209,7 +1212,7 @@ class ConfigTab(QWidget):
                     self._loader_layouts[name] = layout
                     self.loader_combo.addItem(name)
                 except Exception as e:
-                    print(f"Warning: Could not load preset {yaml_file.name}: {e}")
+                    logger.warning("Could not load preset %s: %s", yaml_file.name, e)
 
     def _auto_select_loader(self, file_path: Path):
         """

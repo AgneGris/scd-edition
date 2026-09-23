@@ -33,12 +33,29 @@ uv sync --extra cuda
 On Windows, add `--python 3.13 --managed-python` if the system Python comes
 from Conda or otherwise causes Qt DLL conflicts.
 
-Run the checks before opening a pull request:
+The `cpu` and `cuda` extras are mutually exclusive. `uv` does not remember the
+extra used by an earlier `uv sync`, and a bare `uv run` can therefore replace a
+CUDA-enabled PyTorch installation with the default CPU build. Always select the
+same backend when allowing `uv` to sync the environment.
+
+Run all checks through the backend-safe wrapper before opening a pull request:
 
 ```bash
-uv run ruff check src tests scripts docs
-uv run ruff format --check src tests scripts docs
-uv run pytest
+python scripts/dev_check.py --backend cpu
+```
+
+or:
+
+```bash
+python scripts/dev_check.py --backend cuda
+```
+
+The wrapper performs a locked sync with the selected extra, then runs Ruff and
+pytest with `uv run --no-sync`. For an individual command, include the backend
+explicitly, for example:
+
+```bash
+uv run --extra cuda pytest tests/test_otb4_loader.py
 ```
 
 The GUI smoke tests run headlessly by setting `QT_QPA_PLATFORM=offscreen`.

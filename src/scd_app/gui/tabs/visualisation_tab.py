@@ -6,6 +6,7 @@ X-axes are linked across all three inner tabs.
 AUX force channels can be overlaid on any plot and toggled via floating legend (top-right).
 """
 
+import logging
 import re
 
 import cmcrameri.cm as cmc
@@ -28,6 +29,8 @@ from scd_app._vendor.motor_unit_toolbox.props import get_inst_discharge_rate
 from scd_app.core.constants import SIL_THRESHOLD
 from scd_app.core.mu_model import MotorUnit
 from scd_app.gui.style.styling import COLORS, FONT_SIZES
+
+logger = logging.getLogger(__name__)
 
 # ── Filename → active-aux helpers ────────────────────────────────────────────
 
@@ -555,11 +558,11 @@ class VisualisationTab(QWidget):
         self._print_force_ranges()
 
     def _print_force_ranges(self):
-        """Print force channel amplitude ranges to console for MVC calibration."""
+        """Log force channel amplitude ranges for MVC calibration."""
         force_chs = [ch for ch in self._aux_channels if ch.get("type") == "force"]
         if not force_chs:
             return
-        print("\n── Force channel ranges (in acquisition units) ──")
+        logger.info("Force channel ranges (in acquisition units)")
         units = set()
         for ch in force_chs:
             raw = np.asarray(ch.get("data", [])).squeeze()
@@ -575,18 +578,23 @@ class VisualisationTab(QWidget):
             label = ch.get("unit") or ch.get("name", "?")
             physical_unit = ch.get("physical_unit") or "mV"
             units.add(physical_unit)
-            print(
-                f"  {label:20s}  peak={peak:.5f} {physical_unit}  "
-                f"baseline≈{baseline:.5f} {physical_unit}  "
-                f"net={peak - baseline:.5f} {physical_unit}{mvc_str}"
+            logger.info(
+                "%s: peak=%.5f %s, baseline=%.5f %s, net=%.5f %s%s",
+                label,
+                peak,
+                physical_unit,
+                baseline,
+                physical_unit,
+                peak - baseline,
+                physical_unit,
+                mvc_str,
             )
         if units == {"mV"}:
-            print(
-                "  → Use 'net' as MVC in the config (mV from the Quattrocento ADC conversion)"
+            logger.info(
+                "Use the net value as MVC (mV from the Quattrocento ADC conversion)"
             )
         else:
-            print("  → Enter MVC in the same acquisition unit shown above")
-        print()
+            logger.info("Enter MVC in the acquisition unit shown above")
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
