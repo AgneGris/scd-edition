@@ -1871,14 +1871,16 @@ class EditionTab(QWidget):
             if 0 <= idx < len(motor_units) and motor_units[idx].props is not None:
                 motor_units[idx].props.reliability_override = bool(value)
 
-        # Restore per-unit notes (absent in older files → default empty string), but append to general per-file notes
+        # Migrate non-empty per-unit notes from older files into the per-file log.
         port_notes = decomp_data.get("mu_notes", [])
         if port_idx < len(port_notes):
             # Saved notes may not cover every unit in older files; truncate.
             for mu, note in zip(motor_units, port_notes[port_idx], strict=False):
-                note = note.replace("\n", " ") if isinstance(note, str) and note else ""
+                if not isinstance(note, str) or not note.strip():
+                    continue
+                note = " ".join(note.splitlines()).strip()
                 full_note = f"0000-00-00 00:00:00 ({port_name}, MU {mu.id}): {note}"
-                if full_note and (full_note not in self._notes):
+                if full_note not in self._notes:
                     self._notes.append(full_note)
 
         self._grid_info[port_name] = grid_cfg
@@ -2097,11 +2099,12 @@ class EditionTab(QWidget):
         # the linked FR plot) feeds spike-marker bounds back through the X link
         # and re-clips the range to the plateau region, so we avoid it entirely.
         src_sq = np.nan_to_num(mu.source**2)
-        y_max = (
-            float(np.max(src_sq[self._start_sample : self._end_sample]))
-            if len(src_sq) > 0
-            else 1.0
+        window_sq = (
+            src_sq[self._start_sample : self._end_sample]
+            if self._full_source_mode
+            else src_sq
         )
+        y_max = float(np.max(window_sq)) if window_sq.size else 1.0
         y_pad = y_max * 0.05
         self.source_plot.getViewBox().setRange(
             xRange=(0, x_max), yRange=(-y_pad, y_max + y_pad), padding=0
