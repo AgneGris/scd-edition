@@ -392,7 +392,7 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
         flagged_mus_per_port[port_name] = [
             index
             for index, motor_unit in enumerate(motor_units)
-            if motor_unit.flagged_duplicate
+            if motor_unit.flagged_for_deletion
         ]
         reviewed_mus_per_port[port_name] = [
             index for index, motor_unit in enumerate(motor_units) if motor_unit.reviewed

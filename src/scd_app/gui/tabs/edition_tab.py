@@ -47,6 +47,7 @@ from scd_app.core.auto_editor import MIN_SPIKES, auto_edit
 from scd_app.core.constants import ROA_THRESHOLD
 from scd_app.core.duplicate_detection import (
     DUPLICATE_DETECTION_AVAILABLE,
+    clear_duplicate_roles,
     scan_cross_port_duplicates,
     scan_within_port_duplicates,
 )
@@ -527,34 +528,37 @@ class EditionTab(QWidget):
         session_header.setStyleSheet(get_section_header_style("warning", margin_top=0))
         lay.addWidget(session_header)
 
-        self.btn_flag_within_dups = QPushButton("⧉ Within-Port Duplicates")
+        self.btn_delete_flagged = QPushButton("🗑 Delete All Flagged Units")
+        self.btn_delete_flagged.setStyleSheet(base_btn_style)
+        self.btn_delete_flagged.setToolTip(
+            "Permanently remove all flagged units from every port.\n"
+            "The confirmation lists the number that will be removed per port."
+        )
+        self.btn_delete_flagged.clicked.connect(self._delete_all_flagged)
+        self.btn_delete_flagged.setEnabled(False)
+        lay.addWidget(self.btn_delete_flagged)
+
+        self.btn_flag_within_dups = QPushButton("⧉ Check Duplicates in Current Port")
         self.btn_flag_within_dups.setStyleSheet(base_btn_style)
         self.btn_flag_within_dups.setToolTip(
-            "Flag lower-quality duplicate MUs within each grid/probe for deletion.\n"
+            "Check every unit in the selected grid/probe, including flagged units,\n"
+            "and suggest lower-priority duplicates for deletion.\n"
             "Uses rate-of-agreement (threshold 0.3) to identify duplicates."
         )
         self.btn_flag_within_dups.clicked.connect(self._flag_within_duplicates)
         self.btn_flag_within_dups.setEnabled(False)
         lay.addWidget(self.btn_flag_within_dups)
 
-        self.btn_flag_cross_dups = QPushButton("⧉ Cross-Port Duplicates")
+        self.btn_flag_cross_dups = QPushButton("⧉ Check Duplicates Across Ports")
         self.btn_flag_cross_dups.setStyleSheet(base_btn_style)
         self.btn_flag_cross_dups.setToolTip(
-            "Flag lower-quality duplicate MUs across different grids/probes for deletion.\n"
+            "Optionally check every unit across different grids/probes, including\n"
+            "flagged units, and suggest lower-priority duplicates for deletion.\n"
             "Uses rate-of-agreement (threshold 0.3) to identify duplicates."
         )
         self.btn_flag_cross_dups.clicked.connect(self._flag_cross_duplicates)
         self.btn_flag_cross_dups.setEnabled(False)
         lay.addWidget(self.btn_flag_cross_dups)
-
-        self.btn_delete_flagged = QPushButton("🗑 Delete All Flagged MUs")
-        self.btn_delete_flagged.setStyleSheet(base_btn_style)
-        self.btn_delete_flagged.setToolTip(
-            "Permanently remove all MUs flagged for deletion from the current session"
-        )
-        self.btn_delete_flagged.clicked.connect(self._delete_all_flagged)
-        self.btn_delete_flagged.setEnabled(False)
-        lay.addWidget(self.btn_delete_flagged)
 
         self.muap_widget = pg.GraphicsLayoutWidget()
         self.muap_widget.setBackground(COLORS["background"])
@@ -1686,7 +1690,7 @@ class EditionTab(QWidget):
         mu = self._current_mu()
         if mu:
             self.btn_flag_delete.setText(
-                "Unflag Unit" if mu.flagged_duplicate else "⚑ Flag Unit"
+                "Unflag Unit" if mu.flagged_for_deletion else "⚑ Flag Unit"
             )
         self._update_review_controls()
         self._update_plots(reset_view=True)
@@ -1811,10 +1815,19 @@ class EditionTab(QWidget):
         mu = self._current_mu()
         if mu is None:
             return
-        mu.flagged_duplicate = not mu.flagged_duplicate
+        was_flagged = mu.flagged_for_deletion
+        if was_flagged:
+            mu.flagged_duplicate = False
+            if mu.within_duplicate_role == "delete":
+                mu.within_duplicate_role = "keep"
+            if mu.cross_duplicate_role == "delete":
+                mu.cross_duplicate_role = "keep"
+        else:
+            mu.flagged_duplicate = True
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
-        event = "flag" if mu.flagged_duplicate else "unflag"
+        self._update_quality_panel(mu)
+        event = "unflag" if was_flagged else "flag"
         self._log_event(
             event,
             f"{event} MU for deletion",
@@ -1822,7 +1835,7 @@ class EditionTab(QWidget):
             self._current_mu_idx,
         )
         self._update_status(
-            f"MU {mu.id} {'flagged' if mu.flagged_duplicate else 'unflagged'}"
+            f"MU {mu.id} {'flagged' if mu.flagged_for_deletion else 'unflagged'}"
         )
         self._mark_modified()
 
@@ -1890,15 +1903,30 @@ class EditionTab(QWidget):
 
     def _delete_all_flagged(self):
         ports = list(self._ports.keys())
-        total = sum(1 for p in ports for mu in self._ports[p] if mu.flagged_duplicate)
+        flagged_by_port = {
+            port_name: [
+                motor_unit.id
+                for motor_unit in self._ports[port_name]
+                if motor_unit.flagged_for_deletion
+            ]
+            for port_name in ports
+        }
+        total = sum(len(unit_ids) for unit_ids in flagged_by_port.values())
         if total == 0:
             self._update_status("No MUs are flagged for deletion")
             return
 
+        counts = "\n".join(
+            f"• {port_name}: {len(unit_ids)}"
+            for port_name, unit_ids in flagged_by_port.items()
+            if unit_ids
+        )
+
         reply = QMessageBox.question(
             self,
             "Delete Flagged MUs",
-            f"Permanently delete {total} flagged MU(s) from the current session?\n\nThis cannot be undone.",
+            f"Permanently delete {total} flagged MU(s) from the current session?\n\n"
+            f"{counts}\n\nThis cannot be undone and clears the undo/redo history.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1915,7 +1943,7 @@ class EditionTab(QWidget):
                     old_to_new = {}
                     new_idx = 0
                     for old_idx, mu in enumerate(self._ports[port_name]):
-                        if not mu.flagged_duplicate:
+                        if not mu.flagged_for_deletion:
                             old_to_new[old_idx] = new_idx
                             new_idx += 1
                     port_index_maps[port_name] = old_to_new
@@ -1936,14 +1964,23 @@ class EditionTab(QWidget):
                     new_peel.append(remapped)
                 self._original_decomp_data["peel_off_sequence"] = new_peel
 
-        deleted_by_port = {
-            p: [mu.id for mu in self._ports[p] if mu.flagged_duplicate] for p in ports
-        }
+        deleted_by_port = flagged_by_port
         for port_name in ports:
-            kept = [mu for mu in self._ports[port_name] if not mu.flagged_duplicate]
+            kept = [mu for mu in self._ports[port_name] if not mu.flagged_for_deletion]
             for i, mu in enumerate(kept):
                 mu.id = i
             self._ports[port_name] = kept
+
+        # Duplicate partner IDs and undo keys refer to the pre-deletion unit
+        # indices. Clear them after this irreversible operation so retained
+        # units cannot display or replay stale state.
+        clear_duplicate_roles(self._ports, "within")
+        clear_duplicate_roles(self._ports, "cross")
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._props_timer.stop()
+        self._pending_props_key = None
+        self._pending_source_changed = False
 
         self._log_event(
             "delete_flagged",
@@ -2100,7 +2137,7 @@ class EditionTab(QWidget):
 
         for mus in self._ports.values():
             for mu in mus:
-                if mu.flagged_duplicate:
+                if mu.flagged_for_deletion:
                     continue  # already flagged — leave it
                 if mu.props is None:
                     no_props_count += 1
@@ -2130,19 +2167,30 @@ class EditionTab(QWidget):
     # ------------------------------------------------------------------
 
     def _flag_within_duplicates(self):
-        """Detect and flag lower-quality within-port duplicate MUs for deletion."""
+        """Suggest lower-priority duplicate MUs in the current port."""
         if not DUPLICATE_DETECTION_AVAILABLE:
             self._update_status(
                 "motor_unit_toolbox not available — cannot detect duplicates"
             )
             return
 
-        result = scan_within_port_duplicates(self._ports, self._fsamp)
+        if self._current_port is None:
+            self._update_status("Select a port first")
+            return
+        motor_units = self._ports.get(self._current_port, [])
+        if len(motor_units) < 2:
+            self._update_status(
+                f"{self._current_port}: fewer than 2 MUs — nothing to compare"
+            )
+            return
+
+        current_port = self._current_port
+        result = scan_within_port_duplicates({current_port: motor_units}, self._fsamp)
         n_flagged = result.n_flagged
         self._log_event(
             "flag_within_duplicates",
-            f"flagged {n_flagged} within-port duplicate MU(s)",
-            "",
+            f"suggested {n_flagged} duplicate MU(s) in {current_port}",
+            current_port,
             -1,
             flagged_by_port=result.flagged_by_port,
         )
@@ -2150,11 +2198,11 @@ class EditionTab(QWidget):
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
         self._update_quality_panel(self._current_mu())
         self._update_status(
-            f"Within-port duplicates: flagged {n_flagged} MU(s) for deletion"
+            f"{current_port}: suggested {n_flagged} duplicate MU(s) for deletion"
         )
         self._show_duplicate_report(
-            title="Within-Port Duplicates",
-            scope="within each grid/probe",
+            title=f"Duplicates in {current_port}",
+            scope=f"within {current_port}",
             pairs=result.pairs,
             flagged_by_port=result.flagged_by_port,
             n_compared=result.n_compared,
@@ -2240,8 +2288,8 @@ class EditionTab(QWidget):
         else:
             summary = (
                 f"Found <b>{n_pairs}</b> duplicate pair(s) {scope} among "
-                f"{n_compared} MU(s), and flagged <b>{n_flagged}</b> "
-                f"lower-quality MU(s) for deletion.<br><br>"
+                f"{n_compared} MU(s), and suggested <b>{n_flagged}</b> "
+                f"lower-priority MU(s) for deletion.<br><br>"
                 f"Rate-of-agreement threshold: {ROA_THRESHOLD:.0%}."
             )
 
@@ -2294,7 +2342,7 @@ class EditionTab(QWidget):
         if n_flagged:
             box.setInformativeText(
                 "Flagged units are marked ⚠ in the MU list — review them, "
-                "then use “Delete All Flagged MUs” to remove them."
+                "then use “Delete All Flagged Units” to remove them."
             )
         detail = "\n".join(detail_lines).strip()
         if detail:
@@ -2329,7 +2377,7 @@ class EditionTab(QWidget):
         if self._current_port is not None:
             for mu in self._ports.get(self._current_port, []):
                 label = f"MU {mu.id}  ({len(mu.timestamps)} spikes)"
-                if mu.flagged_duplicate:
+                if mu.flagged_for_deletion:
                     label += "  ⚠"
                 if mu.props is not None:
                     label += "  ✓" if mu.props.is_reliable else "  ✗"
