@@ -99,6 +99,7 @@ def test_writes_audit_report_atomically_beside_decomposition(tmp_path):
 
 def test_stored_cross_platform_source_path_is_reduced_to_filename(tmp_path):
     data = _decomposition_data(tmp_path / "recording.mat")
+    # Synthetic text only: this path is never opened on the test machine.
     data["audit_provenance"]["input_recording"]["file_name"] = (
         r"C:\sensitive\participant-02.mat"
     )

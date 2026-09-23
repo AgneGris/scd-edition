@@ -202,7 +202,7 @@ class MainWindow(QMainWindow):
     def _on_decomposition_complete(self, decomp_path: Path):
         """Handle decomposition completion and auto-load into Edition tab."""
         try:
-            if self.edition_tab.load_from_path(decomp_path, trusted=True):
+            if self.edition_tab.load_from_path(decomp_path):
                 self.tabs.setCurrentWidget(self.edition_tab)
                 self.status_bar.showMessage(
                     "✓ Decomposition complete — loaded into Edition tab"

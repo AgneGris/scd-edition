@@ -463,7 +463,7 @@ Decomposition results are stored as `.pkl` (Python pickle) files. Each file cont
 
 > **Security:** Python pickle files can execute code while they are opened.
 > Only load decomposition files that you created yourself or received from a
-> source you trust. SCD Edition asks for confirmation before opening a pickle.
+> source you trust. Selected files are opened immediately.
 
 - Raw EMG data (all channels, full recording)
 - Spike timestamps for every motor unit

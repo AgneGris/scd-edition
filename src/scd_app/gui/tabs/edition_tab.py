@@ -843,17 +843,6 @@ class EditionTab(QWidget):
             "file_stem": self._loaded_path.stem if self._loaded_path else "",
         }
 
-    def _confirm_trusted_pickle(self, path: Path) -> bool:
-        reply = QMessageBox.warning(
-            self,
-            "Open Trusted Pickle?",
-            "Python pickle files can execute code when opened.\n\n"
-            f"Only open this file if you created it or trust its source:\n{path}",
-            QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        return reply == QMessageBox.StandardButton.Open
-
     def _capture_session_state(self) -> dict:
         attributes = (
             "_fsamp",
@@ -949,12 +938,10 @@ class EditionTab(QWidget):
         if remaining >= 0 and self._pending_props_key is not None:
             self._props_timer.start(max(1, remaining))
 
-    def load_from_path(self, path: Path, *, trusted: bool = False) -> bool:
+    def load_from_path(self, path: Path) -> bool:
         path = Path(path)
         if not path.exists():
             QMessageBox.critical(self, "Load Error", f"File not found:\n{path}")
-            return False
-        if not trusted and not self._confirm_trusted_pickle(path):
             return False
         if not self.confirm_save_changes("opening another file"):
             return False
