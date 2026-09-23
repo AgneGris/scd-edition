@@ -9,12 +9,14 @@ import torch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from scd_app.io.decomposition_loader import (
+    CURRENT_SCHEMA_VERSION,
     GUI_FORMAT,
     UPSTREAM_SCD_FORMAT,
     UnsupportedDecompositionFormat,
     convert_scd_output,
     detect_decomposition_format,
     load_decomposition_file,
+    migrate_and_validate_decomposition,
 )
 
 
@@ -49,6 +51,53 @@ def test_detects_native_and_upstream_formats():
         detect_decomposition_format({"unknown": []})
 
 
+def _native_result():
+    return {
+        "ports": ["Grid 1"],
+        "sampling_rate": 1000,
+        "discharge_times": [[np.array([2, 6])]],
+        "pulse_trains": [[np.arange(10, dtype=float)]],
+    }
+
+
+def test_migrates_legacy_native_session_to_versioned_schema():
+    legacy = _native_result()
+
+    migrated = migrate_and_validate_decomposition(legacy)
+
+    assert "schema_version" not in legacy
+    assert migrated["format"] == GUI_FORMAT
+    assert migrated["schema_version"] == CURRENT_SCHEMA_VERSION
+    assert migrated["sampling_rate"] == 1000.0
+    np.testing.assert_array_equal(migrated["discharge_times"][0][0], [2, 6])
+
+
+def test_rejects_native_session_with_misaligned_port_data():
+    malformed = _native_result()
+    malformed["ports"].append("Grid 2")
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="port entries"):
+        migrate_and_validate_decomposition(malformed)
+
+
+def test_rejects_session_from_a_newer_schema():
+    future = _native_result()
+    future["schema_version"] = CURRENT_SCHEMA_VERSION + 1
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="Please update"):
+        migrate_and_validate_decomposition(future)
+
+
+def test_migrates_legacy_absolute_timestamps_to_plateau_local():
+    legacy = _native_result()
+    legacy["plateau_coords"] = [100, 110]
+    legacy["discharge_times"] = [[np.array([102, 106])]]
+
+    migrated = migrate_and_validate_decomposition(legacy)
+
+    np.testing.assert_array_equal(migrated["discharge_times"][0][0], [2, 6])
+
+
 def test_converts_upstream_scd_output_and_preserves_provenance(tmp_path):
     source_path = tmp_path / "sub-05_task-pull10_muscle-FD_raw_run-00_scddict.pkl"
     commit = "910f36d1274f832e74992fae266cf91d46b2d94d"
@@ -68,6 +117,8 @@ def test_converts_upstream_scd_output_and_preserves_provenance(tmp_path):
     assert len(converted["pulse_trains"][0]) == 2
     assert converted["pulse_trains"][0][0].shape == (200,)
     assert converted["mu_filters"][0][0].shape == (6,)
+    assert converted["format"] == GUI_FORMAT
+    assert converted["schema_version"] == CURRENT_SCHEMA_VERSION
     assert converted["import_provenance"]["scd_commit"] == commit
     assert converted["scd_metadata"]["silhouettes"] == pytest.approx([0.91, 0.87])
 
@@ -113,7 +164,7 @@ def test_edition_loads_and_edits_upstream_scd_output(tmp_path):
 
     app = QApplication.instance() or QApplication([])
     tab = EditionTab()
-    tab.load_from_path(source_path)
+    tab.load_from_path(source_path, trusted=True)
 
     assert list(tab._ports) == ["FD"]
     assert len(tab._ports["FD"]) == 2
@@ -127,6 +178,8 @@ def test_edition_loads_and_edits_upstream_scd_output(tmp_path):
     np.testing.assert_array_equal(motor_unit.timestamps, original_timestamps)
 
     saved = tab._build_save_dict()
+    assert saved["format"] == GUI_FORMAT
+    assert saved["schema_version"] == CURRENT_SCHEMA_VERSION
     assert saved["import_provenance"]["format"] == UPSTREAM_SCD_FORMAT
     assert saved["skip_filter_recalc"] is True
 

@@ -3,6 +3,7 @@ Decomposition Tab - Manages EMG signal decomposition.
 """
 
 import contextlib
+import logging
 import re
 from pathlib import Path
 
@@ -44,6 +45,8 @@ from scd_app.gui.style.styling import (
     FONT_SIZES,
     get_section_header_style,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Filename → active-aux helpers ────────────────────────────────────────────
 _FINGER_ABBREV: dict[str, str] = {
@@ -175,8 +178,10 @@ class DecompositionTab(QWidget):
         ax.axis("off")
         self.canvas.draw()
 
-        print(
-            f"Decomposition Tab Ready: {len(self.grid_configs)} grids, {n_files} file(s)."
+        logger.info(
+            "Decomposition tab ready: %s grids, %s files",
+            len(self.grid_configs),
+            n_files,
         )
         return True
 
@@ -524,12 +529,12 @@ class DecompositionTab(QWidget):
             emg = load_field(self.emg_path, layout_full, "emg")
             # load_field returns (samples, channels) as torch.Tensor
             self.emg_data = emg
-            print(f"Loaded EMG data: {self.emg_data.shape}")
+            logger.info("Loaded EMG data with shape %s", self.emg_data.shape)
             return True
 
         except Exception as e:
+            logger.exception("Failed to load EMG data from %s", self.emg_path)
             QMessageBox.critical(self, "Load Error", f"Failed to load EMG data:\n{e!s}")
-            print(f"Error loading EMG data: {e}")
             return False
 
     def _load_grid_configs(self):
@@ -689,7 +694,7 @@ class DecompositionTab(QWidget):
                 params["peel_off"] = widgets["peel_off"].currentText() == "True"
                 params["muap_window_ms"] = widgets["muap_window_ms"].value()
             except (ValueError, KeyError) as e:
-                print(f"Warning: Could not sync parameter for {port_name}: {e}")
+                logger.warning("Could not sync parameters for %s: %s", port_name, e)
 
     def _copy_params_to_all(self, source_port: str):
         """Copy per-grid parameters from source_port to every other grid."""
@@ -781,7 +786,7 @@ class DecompositionTab(QWidget):
                     np.float32
                 )
         except Exception as e:
-            print(f"Warning: filter failed, showing raw: {e}")
+            logger.warning("Preview filter failed; showing raw data: %s", e)
         return data
 
     def _manual_channel_rejection(self):
@@ -823,7 +828,7 @@ class DecompositionTab(QWidget):
                     self.emg_path, self.config.data_layout, "aux"
                 ).numpy()
             except Exception as exc:
-                print(f"Warning: Could not load auxiliary preview: {exc}")
+                logger.warning("Could not load auxiliary preview: %s", exc)
 
         import time
 
@@ -1414,10 +1419,11 @@ class DecompositionTab(QWidget):
                 )
                 self.canvas.draw()
 
-                print("\nChannel Rejection Summary:")
+                summary = {}
                 for pidx, (pname, _) in enumerate(grid_list):
                     n = np.sum(self.rejected_channels[pidx])
-                    print(f"  {pname}: {n} channels rejected")
+                    summary[pname] = int(n)
+                logger.info("Channel rejection summary: %s", summary)
 
                 QTimer.singleShot(100, event_loop.quit)
 
@@ -2307,7 +2313,7 @@ class DecompositionTab(QWidget):
 
         try:
             results, _ = partial
-            self.worker._save_results(results)
+            self.worker._save_results(results, status="partial")
             decomp_path = Path(self.worker.save_path)
             self._last_decomp_path = decomp_path
             if emit_completion:

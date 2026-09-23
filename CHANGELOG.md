@@ -2,6 +2,13 @@
 
 All notable changes to SCD Edition are documented here.
 
+## Unreleased
+
+- Add reproducibility audit reports alongside new and edited decompositions.
+- Add rotating application logs and copyable runtime diagnostics for support.
+- Validate decomposition schemas and warn before loading pickle files.
+- Preserve an explicitly selected CPU or CUDA backend during development checks.
+
 ## 0.1.0 — 2026-09-19
 
 First public release.

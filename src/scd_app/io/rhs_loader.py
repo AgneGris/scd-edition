@@ -16,12 +16,15 @@ DC-amplifier and stimulation streams are skipped over but never decoded.
 
 from __future__ import annotations
 
+import logging
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 RHS_MAGIC = 0xD69127AC
 SAMPLES_PER_BLOCK = 128
@@ -318,9 +321,10 @@ def _count_blocks(file_path: Path, header: _Header) -> int:
     if remainder:
         # A recording stopped mid-block leaves a partial trailer; keep the
         # complete blocks rather than refusing the whole file.
-        print(
-            f"  [rhs] {file_path.name}: ignoring {remainder} trailing bytes "
-            f"(incomplete final data block)"
+        logger.warning(
+            "%s: ignoring %s trailing bytes from an incomplete final data block",
+            file_path.name,
+            remainder,
         )
     if n_blocks == 0:
         raise ValueError(f"{file_path.name} contains no data blocks")

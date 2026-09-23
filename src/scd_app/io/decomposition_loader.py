@@ -14,6 +14,7 @@ from scd_app.core.utils import to_numpy
 
 GUI_FORMAT = "scd-edition"
 UPSTREAM_SCD_FORMAT = "swarm-contrastive-decomposition"
+CURRENT_SCHEMA_VERSION = 1
 _GUI_REQUIRED_KEYS = {"ports", "discharge_times", "pulse_trains"}
 _SCD_TIMESTAMP_KEYS = ("timestamps", "MUPulses")
 _SCD_SOURCE_KEYS = ("source", "sources")
@@ -44,7 +45,7 @@ def detect_decomposition_format(data: Any) -> str:
 
 
 def load_decomposition_file(path: Path) -> dict:
-    """Load a trusted pickle and return the normalized SCD Edition structure.
+    """Load a trusted pickle and return a validated SCD Edition structure.
 
     Pickle files can execute code while loading. This function is intended only
     for decomposition files created by the user or another trusted source.
@@ -54,8 +55,220 @@ def load_decomposition_file(path: Path) -> dict:
         data = _CPUCompatibleUnpickler(handle).load()
     file_format = detect_decomposition_format(data)
     if file_format == GUI_FORMAT:
-        return data
-    return convert_scd_output(data, source_path=path)
+        return migrate_and_validate_decomposition(data)
+    return migrate_and_validate_decomposition(
+        convert_scd_output(data, source_path=path)
+    )
+
+
+def migrate_and_validate_decomposition(data: dict) -> dict:
+    """Upgrade a native session to the current schema and validate its shape."""
+    migrated = dict(data)
+    schema_version = migrated.get("schema_version")
+    if schema_version is None:
+        # Files written before a formal schema existed used the floating-point
+        # ``version`` field. Their in-memory structure is the basis of schema 1.
+        schema_version = CURRENT_SCHEMA_VERSION
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise UnsupportedDecompositionFormat(
+            "SCD Edition schema_version must be an integer."
+        )
+    if schema_version < 1:
+        raise UnsupportedDecompositionFormat(
+            f"Unsupported SCD Edition schema version {schema_version}."
+        )
+    if schema_version > CURRENT_SCHEMA_VERSION:
+        raise UnsupportedDecompositionFormat(
+            "This file uses SCD Edition schema version "
+            f"{schema_version}, but this application supports up to "
+            f"version {CURRENT_SCHEMA_VERSION}. Please update SCD Edition."
+        )
+
+    migrated["format"] = GUI_FORMAT
+    migrated["schema_version"] = CURRENT_SCHEMA_VERSION
+    return _validate_native_decomposition(migrated)
+
+
+def _validate_native_decomposition(data: dict) -> dict:
+    """Return normalized data or raise before the Edition UI changes state."""
+    ports = _outer_list(data.get("ports"), "ports")
+    if not ports:
+        raise UnsupportedDecompositionFormat("SCD Edition file contains no ports.")
+    if any(not isinstance(port, str) or not port.strip() for port in ports):
+        raise UnsupportedDecompositionFormat(
+            "SCD Edition ports must be non-empty strings."
+        )
+    if len(set(ports)) != len(ports):
+        raise UnsupportedDecompositionFormat("SCD Edition port names must be unique.")
+
+    discharge_ports = _outer_list(data.get("discharge_times"), "discharge_times")
+    source_ports = _outer_list(data.get("pulse_trains"), "pulse_trains")
+    for field_name, values in (
+        ("discharge_times", discharge_ports),
+        ("pulse_trains", source_ports),
+    ):
+        if len(values) != len(ports):
+            raise UnsupportedDecompositionFormat(
+                f"SCD Edition {field_name} has {len(values)} port entries, "
+                f"but ports has {len(ports)}."
+            )
+
+    sampling_rate = data.get("sampling_rate", data.get("fsamp"))
+    try:
+        sampling_rate = float(sampling_rate)
+    except (TypeError, ValueError) as exc:
+        raise UnsupportedDecompositionFormat(
+            "SCD Edition file does not contain a valid sampling rate."
+        ) from exc
+    if not np.isfinite(sampling_rate) or sampling_rate <= 0:
+        raise UnsupportedDecompositionFormat(
+            "SCD Edition sampling rate must be a positive finite number."
+        )
+
+    plateau_start = 0
+    plateau_coords = data.get("plateau_coords", data.get("selected_points"))
+    if plateau_coords is not None:
+        try:
+            plateau = np.asarray(plateau_coords, dtype=float).flatten()
+        except (TypeError, ValueError) as exc:
+            raise UnsupportedDecompositionFormat(
+                "SCD Edition plateau coordinates must be numeric."
+            ) from exc
+        if (
+            plateau.size != 2
+            or not np.all(np.isfinite(plateau))
+            or plateau[0] < 0
+            or plateau[1] <= plateau[0]
+        ):
+            raise UnsupportedDecompositionFormat(
+                "SCD Edition plateau coordinates must be [start, end] with "
+                "0 <= start < end."
+            )
+        plateau_start = int(plateau[0])
+        data["plateau_coords"] = [plateau_start, int(plateau[1])]
+
+    normalized_timestamps = []
+    normalized_sources = []
+    for port_index, port_name in enumerate(ports):
+        timestamp_items = _unit_items(
+            discharge_ports[port_index],
+            f"discharge_times[{port_index}]",
+        )
+        source_items = _unit_items(
+            source_ports[port_index],
+            f"pulse_trains[{port_index}]",
+        )
+        if len(timestamp_items) != len(source_items):
+            raise UnsupportedDecompositionFormat(
+                f"Port {port_name!r} has {len(timestamp_items)} timestamp sets "
+                f"but {len(source_items)} source signals."
+            )
+
+        port_timestamps = []
+        port_sources = []
+        for unit_index, (timestamps, source) in enumerate(
+            zip(timestamp_items, source_items, strict=True)
+        ):
+            source_array = _numeric_array(
+                source,
+                f"pulse_trains[{port_index}][{unit_index}]",
+            ).flatten()
+            if source_array.size == 0:
+                raise UnsupportedDecompositionFormat(
+                    f"Port {port_name!r}, unit {unit_index} has an empty source."
+                )
+
+            timestamp_values = _numeric_array(
+                timestamps,
+                f"discharge_times[{port_index}][{unit_index}]",
+            ).flatten()
+            if not np.all(np.isfinite(timestamp_values)):
+                raise UnsupportedDecompositionFormat(
+                    f"Port {port_name!r}, unit {unit_index} has non-finite timestamps."
+                )
+            if not np.allclose(timestamp_values, np.rint(timestamp_values)):
+                raise UnsupportedDecompositionFormat(
+                    f"Port {port_name!r}, unit {unit_index} has non-integer timestamps."
+                )
+            timestamp_array = np.rint(timestamp_values).astype(np.int64)
+            if timestamp_array.size and int(timestamp_array.min()) < 0:
+                raise UnsupportedDecompositionFormat(
+                    f"Port {port_name!r}, unit {unit_index} has negative timestamps."
+                )
+            if timestamp_array.size and int(timestamp_array.max()) >= source_array.size:
+                # Some early files stored absolute timestamps beside a
+                # plateau-local source. Migrate those coordinates explicitly.
+                local = timestamp_array - plateau_start
+                if (
+                    plateau_start > 0
+                    and int(local.min()) >= 0
+                    and int(local.max()) < source_array.size
+                ):
+                    timestamp_array = local
+                else:
+                    raise UnsupportedDecompositionFormat(
+                        f"Port {port_name!r}, unit {unit_index} has timestamps "
+                        "outside its source signal."
+                    )
+
+            port_timestamps.append(timestamp_array)
+            port_sources.append(source_array)
+
+        normalized_timestamps.append(port_timestamps)
+        normalized_sources.append(port_sources)
+
+    normalized = dict(data)
+    normalized["ports"] = ports
+    normalized["sampling_rate"] = sampling_rate
+    normalized["discharge_times"] = normalized_timestamps
+    normalized["pulse_trains"] = normalized_sources
+    if not isinstance(normalized.get("notes", []), list):
+        normalized["notes"] = []
+    if not isinstance(normalized.get("edit_history", []), list):
+        normalized["edit_history"] = []
+    return normalized
+
+
+def _outer_list(value: Any, field_name: str) -> list:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, np.ndarray) and value.ndim >= 1:
+        return list(value)
+    raise UnsupportedDecompositionFormat(f"SCD Edition {field_name} must be a list.")
+
+
+def _unit_items(value: Any, field_name: str) -> list:
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return []
+        if all(np.asarray(item).ndim == 0 for item in value):
+            return [np.asarray(value)]
+        return list(value)
+    try:
+        array = to_numpy(value)
+    except Exception as exc:
+        raise UnsupportedDecompositionFormat(
+            f"SCD Edition {field_name} is not an array or list."
+        ) from exc
+    if array.ndim == 0 or array.size == 0:
+        return []
+    if array.ndim == 1:
+        return [array]
+    return [array[index] for index in range(array.shape[0])]
+
+
+def _numeric_array(value: Any, field_name: str) -> np.ndarray:
+    try:
+        array = to_numpy(value)
+    except Exception as exc:
+        raise UnsupportedDecompositionFormat(
+            f"SCD Edition {field_name} is not an array."
+        ) from exc
+    if not np.issubdtype(array.dtype, np.number):
+        raise UnsupportedDecompositionFormat(
+            f"SCD Edition {field_name} must contain numeric values."
+        )
+    return array
 
 
 class _CPUCompatibleUnpickler(pickle.Unpickler):
@@ -173,6 +386,8 @@ def convert_scd_output(data: dict, source_path: Path | None = None) -> dict:
     }
 
     converted = {
+        "format": GUI_FORMAT,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "version": 1.1,
         "ports": [port_name],
         "sampling_rate": sampling_rate,

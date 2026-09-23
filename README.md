@@ -1,6 +1,7 @@
 # SCD Edition
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/scd-edition.svg)](https://pypi.org/project/scd-edition/)
 [![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)
 
 A graphical application for researchers and engineers to decompose high-density surface or intramuscular EMG recordings into individual motor unit spike trains, edit them manually, and visualise population-level discharge behaviour.
@@ -32,8 +33,9 @@ The desktop interface uses the official [Qt for Python (PySide6)](https://doc.qt
 9. [Importing an unfamiliar format](#importing-an-unfamiliar-format)
 10. [Force channel setup](#force-channel-setup)
 11. [Citation](#citation)
-12. [Contributing](#contributing)
-13. [License](#license)
+12. [Diagnostics and logs](#diagnostics-and-logs)
+13. [Contributing](#contributing)
+14. [License](#license)
 
 ---
 
@@ -103,6 +105,12 @@ On CPU-only Linux, install the same Qt runtime packages shown in the CUDA-enable
 uv sync --python 3.13 --managed-python --extra cpu
 .venv\Scripts\Activate.ps1
 ```
+
+The `cpu` and `cuda` extras are mutually exclusive, and `uv` does not remember
+which one was used by an earlier sync. When running project commands through
+`uv run`, repeat the selected extra. For CUDA, use
+`uv run --extra cuda scd-edition`. Alternatively, use `uv run --no-sync` after
+a successful sync. A bare `uv run` may replace the installed PyTorch variant.
 
 ### From source with pip
 
@@ -445,6 +453,10 @@ the decomposition algorithm used to accept the source — see
 
 Decomposition results are stored as `.pkl` (Python pickle) files. Each file contains:
 
+> **Security:** Python pickle files can execute code while they are opened.
+> Only load decomposition files that you created yourself or received from a
+> source you trust. SCD Edition asks for confirmation before opening a pickle.
+
 - Raw EMG data (all channels, full recording)
 - Spike timestamps for every motor unit
 - Spatial filters (original and edited)
@@ -452,6 +464,16 @@ Decomposition results are stored as `.pkl` (Python pickle) files. Each file cont
 - Channel layout, rejection mask, electrode geometry
 - Peel-off sequence (for filter recalculation)
 - Quality metrics
+
+Every new or edited decomposition is accompanied by a small
+`<output-name>.audit.json` reproducibility report. For example, `result.pkl`
+is accompanied by `result.audit.json`. The report records the software and
+compute environment, input filename, processing window, grid parameters,
+rejected channels, detected and retained motor-unit counts, and a summary of
+later edits. It does
+not contain signal samples, spike timestamps, note text, or absolute paths.
+Input and output filenames can still contain participant identifiers, so
+review an audit report before sharing it publicly.
 
 To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select the `.pkl` file. The app automatically recognises both SCD Edition files and raw `*_scddict.pkl` output from `swarm-contrastive-decomposition`. Raw SCD output is converted into a one-grid Edition session; the muscle label in the filename is used as the grid name, and any companion `*_scdcommit.txt` is retained as provenance.
 
@@ -531,6 +553,8 @@ file-supplied Python code.
 ### Output
 
 `.pkl` files are standard Python pickle files. They can be opened in Python with:
+
+Only do this with a file from a trusted source.
 
 ```python
 import pickle
@@ -644,6 +668,18 @@ The decomposition method is described in:
 ```
 
 Machine-readable citation metadata are available in [`CITATION.cff`](CITATION.cff).
+
+## Diagnostics and logs
+
+SCD Edition keeps a small set of rotating diagnostic logs on your computer.
+Use **Help > Open Log Folder** to find them, or **Help > Copy Diagnostics** to
+copy the software, Python, operating-system and compute-backend details needed
+for a useful bug report. Logs are limited to five 2 MB backups plus the active
+file.
+
+Diagnostic logs can contain local file names and paths. Review them before
+sharing and never include participant recordings or identifying metadata in a
+public issue.
 
 ## Contributing
 
