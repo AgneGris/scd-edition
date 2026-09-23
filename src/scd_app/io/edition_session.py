@@ -331,6 +331,10 @@ def load_edition_port(
         if 0 <= index < len(motor_units):
             motor_units[index].flagged_duplicate = True
 
+    for index in decomposition.get("reviewed_mus", {}).get(port_name, []):
+        if 0 <= index < len(motor_units):
+            motor_units[index].reviewed = True
+
     reliability_overrides = decomposition.get("reliability_overrides", {}).get(
         port_name, {}
     )
@@ -380,6 +384,7 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
     mu_filters = []
     mu_properties = []
     flagged_mus_per_port = {}
+    reviewed_mus_per_port = {}
     reliability_overrides_per_port = {}
 
     for port_name in port_names:
@@ -388,6 +393,9 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
             index
             for index, motor_unit in enumerate(motor_units)
             if motor_unit.flagged_duplicate
+        ]
+        reviewed_mus_per_port[port_name] = [
+            index for index, motor_unit in enumerate(motor_units) if motor_unit.reviewed
         ]
         reliability_overrides_per_port[port_name] = {
             index: motor_unit.props.reliability_override
@@ -441,6 +449,7 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
         "skip_filter_recalc": True,
         "mu_properties": mu_properties,
         "flagged_mus": flagged_mus_per_port,
+        "reviewed_mus": reviewed_mus_per_port,
         "reliability_overrides": reliability_overrides_per_port,
         "edit_history": state.edit_history,
         "notes": state.notes,

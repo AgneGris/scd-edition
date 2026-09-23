@@ -489,6 +489,39 @@ class EditionTab(QWidget):
                 border-color: {_border};
             }}"""
 
+        review_row = QHBoxLayout()
+        self.btn_reviewed = QPushButton("☐ Mark Reviewed")
+        self.btn_reviewed.setCheckable(True)
+        self.btn_reviewed.setEnabled(False)
+        self.btn_reviewed.setStyleSheet(
+            self._sel_btn_style(COLORS.get("success", "#a6e3a1"))
+        )
+        self.btn_reviewed.setToolTip(
+            "Mark or unmark the current motor unit as manually reviewed [M]"
+        )
+        self.btn_reviewed.clicked.connect(self._toggle_reviewed)
+        review_row.addWidget(self.btn_reviewed)
+
+        self.btn_next_unreviewed = QPushButton("Next Unreviewed →")
+        self.btn_next_unreviewed.setEnabled(False)
+        self.btn_next_unreviewed.setStyleSheet(base_btn_style)
+        self.btn_next_unreviewed.setToolTip(
+            "Jump to the next unreviewed motor unit, including other ports [N]"
+        )
+        self.btn_next_unreviewed.clicked.connect(self._select_next_unreviewed)
+        review_row.addWidget(self.btn_next_unreviewed)
+        lay.addLayout(review_row)
+
+        self.review_progress_label = QLabel("Reviewed 0/0")
+        self.review_progress_label.setStyleSheet(
+            f"color: {COLORS.get('text_dim', '#6c7086')}; "
+            f"font-size: {FONT_SIZES.get('small', '9pt')};"
+        )
+        self.review_progress_label.setToolTip(
+            "Manual review progress across all loaded motor units"
+        )
+        lay.addWidget(self.review_progress_label)
+
         # ── Session-level actions ────────────────────────────────────────
         session_header = QLabel("SESSION")
         session_header.setStyleSheet(get_section_header_style("warning", margin_top=0))
@@ -596,6 +629,8 @@ class EditionTab(QWidget):
         QShortcut(QKeySequence("D"), self, lambda: self.btn_sel_delete.setChecked(True))
         QShortcut(QKeySequence("Escape"), self, lambda: self._set_mode(EditMode.VIEW))
         QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
+        QShortcut(QKeySequence("M"), self, self.btn_reviewed.click)
+        QShortcut(QKeySequence("N"), self, self.btn_next_unreviewed.click)
         QShortcut(QKeySequence("T"), self, self._toggle_reliability)
         QShortcut(QKeySequence("Shift+T"), self, self._reset_reliability)
 
@@ -854,6 +889,8 @@ class EditionTab(QWidget):
             "btn_flag_within_dups",
             "btn_flag_cross_dups",
             "btn_notes",
+            "btn_reviewed",
+            "btn_next_unreviewed",
         )
         return {
             "attributes": {name: getattr(self, name) for name in attributes},
@@ -900,6 +937,7 @@ class EditionTab(QWidget):
             control = getattr(self, name)
             control.setEnabled(enabled)
             control.setToolTip(tooltip)
+        self._update_review_controls()
         self._update_file_label()
         self._update_status()
 
@@ -1650,6 +1688,7 @@ class EditionTab(QWidget):
             self.btn_flag_delete.setText(
                 "Unflag Unit" if mu.flagged_duplicate else "⚑ Flag Unit"
             )
+        self._update_review_controls()
         self._update_plots(reset_view=True)
         self._update_status()
 
@@ -1672,6 +1711,101 @@ class EditionTab(QWidget):
         idx = self.port_combo.currentIndex()
         if idx < self.port_combo.count() - 1:
             self.port_combo.setCurrentIndex(idx + 1)
+
+    def _review_counts(self) -> tuple[int, int]:
+        total = sum(len(motor_units) for motor_units in self._ports.values())
+        reviewed = sum(
+            1
+            for motor_units in self._ports.values()
+            for motor_unit in motor_units
+            if motor_unit.reviewed
+        )
+        return reviewed, total
+
+    def _update_review_controls(self) -> None:
+        motor_unit = self._current_mu()
+        reviewed, total = self._review_counts()
+        all_reviewed = total > 0 and reviewed == total
+
+        self.btn_reviewed.blockSignals(True)
+        self.btn_reviewed.setChecked(
+            motor_unit.reviewed if motor_unit is not None else False
+        )
+        self.btn_reviewed.setText(
+            "☑ Reviewed"
+            if motor_unit is not None and motor_unit.reviewed
+            else "☐ Mark Reviewed"
+        )
+        self.btn_reviewed.setEnabled(motor_unit is not None)
+        self.btn_reviewed.blockSignals(False)
+
+        self.btn_next_unreviewed.setEnabled(total > reviewed)
+        self.review_progress_label.setText(f"Reviewed {reviewed}/{total}")
+        progress_color = (
+            COLORS.get("success", "#a6e3a1")
+            if all_reviewed
+            else COLORS.get("text_dim", "#6c7086")
+        )
+        self.review_progress_label.setStyleSheet(
+            f"color: {progress_color}; font-size: {FONT_SIZES.get('small', '9pt')};"
+        )
+
+    def _toggle_reviewed(self) -> None:
+        motor_unit = self._current_mu()
+        if motor_unit is None:
+            return
+
+        motor_unit.reviewed = not motor_unit.reviewed
+        action = "reviewed" if motor_unit.reviewed else "unreviewed"
+        self._log_event(
+            "review_status",
+            f"marked MU {motor_unit.id} as {action}",
+            self._current_port or "",
+            self._current_mu_idx,
+        )
+        self._refresh_mu_combo()
+        self.mu_combo.setCurrentIndex(self._current_mu_idx)
+        self._update_review_controls()
+        self._update_status(f"MU {motor_unit.id} marked {action.upper()}")
+        self._mark_modified()
+
+    def _select_next_unreviewed(self) -> None:
+        positions = [
+            (port_name, unit_index)
+            for port_name, motor_units in self._ports.items()
+            for unit_index in range(len(motor_units))
+        ]
+        if not positions:
+            self._update_status("No motor units are loaded")
+            return
+
+        unreviewed = {
+            (port_name, unit_index)
+            for port_name, unit_index in positions
+            if not self._ports[port_name][unit_index].reviewed
+        }
+        if not unreviewed:
+            self._update_review_controls()
+            self._update_status("All motor units have been reviewed")
+            return
+
+        current = (self._current_port, self._current_mu_idx)
+        start_index = positions.index(current) if current in positions else -1
+        target = next(
+            positions[(start_index + step) % len(positions)]
+            for step in range(1, len(positions) + 1)
+            if positions[(start_index + step) % len(positions)] in unreviewed
+        )
+        target_port, target_index = target
+        if target == current:
+            self._update_status("Current MU is the only unreviewed unit")
+            return
+
+        if target_port != self._current_port:
+            self.port_combo.setCurrentText(target_port)
+        self.mu_combo.setCurrentIndex(target_index)
+        target_unit = self._ports[target_port][target_index]
+        self._update_status(f"Next unreviewed: {target_port}, MU {target_unit.id}")
 
     def _toggle_flag_delete(self):
         mu = self._current_mu()
@@ -2207,8 +2341,11 @@ class EditionTab(QWidget):
                 )
                 if is_dup_delete:
                     label += "  ⧉"
+                if mu.reviewed:
+                    label += "  ☑ reviewed"
                 self.mu_combo.addItem(label)
         self.mu_combo.blockSignals(False)
+        self._update_review_controls()
 
     # ------------------------------------------------------------------
     # AUX / force overlay
@@ -2264,7 +2401,10 @@ class EditionTab(QWidget):
     def _on_data_changed(self, msg: str = "Modified", source_changed: bool = False):
         """Immediate cheap updates; expensive recompute+render deferred 120 ms."""
         mu = self._current_mu()
+        review_reset = False
         if mu is not None:
+            review_reset = mu.reviewed
+            mu.reviewed = False
             key = (self._current_port or "", self._current_mu_idx)
             if self._pending_props_key is not None and self._pending_props_key != key:
                 self._props_timer.stop()
@@ -2287,6 +2427,8 @@ class EditionTab(QWidget):
         self.mu_combo.blockSignals(True)
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
         self.mu_combo.blockSignals(False)
+        if review_reset:
+            msg = f"{msg} — review reset"
         self._update_status(msg)
         self._mark_modified()
 

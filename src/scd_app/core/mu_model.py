@@ -21,6 +21,7 @@ class MotorUnit:
     mu_filter: np.ndarray | None = None
     enabled: bool = True
     flagged_duplicate: bool = False
+    reviewed: bool = False
     props: MUProperties | None = field(default=None, repr=False)
 
     notes: str = ""
