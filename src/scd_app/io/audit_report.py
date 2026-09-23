@@ -268,6 +268,7 @@ def _editing_summary(data: dict[str, Any]) -> dict[str, Any]:
     )
     notes = data.get("notes")
     flagged = data.get("flagged_mus")
+    reviewed = data.get("reviewed_mus")
     reliability_overrides = data.get("reliability_overrides")
     return {
         "history_events": len(history),
@@ -275,6 +276,7 @@ def _editing_summary(data: dict[str, Any]) -> dict[str, Any]:
         "last_event_at": _portable(last_event_at),
         "notes_count": len(notes) if isinstance(notes, list) else 0,
         "units_flagged_for_deletion": _nested_item_count(flagged),
+        "units_reviewed": _nested_item_count(reviewed),
         "reliability_overrides": _nested_item_count(reliability_overrides),
     }
 

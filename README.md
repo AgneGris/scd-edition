@@ -342,6 +342,12 @@ This is the main editing environment. It shows one motor unit at a time.
 
 - Use the **Port** dropdown to switch between electrode grids.
 - Use the **Unit** dropdown or the **Up/Down arrow keys** to switch between motor units within a port.
+- Click **Mark Reviewed** (or press `M`) after checking a unit. **Next
+  Unreviewed** (or `N`) advances through unfinished units across all ports, and
+  the progress label shows the reviewed total. Review status is separate from
+  the automatic reliability verdict and is saved with the session. Editing a
+  reviewed unit's spikes or source signal resets it to unreviewed so the change
+  is checked again.
 - The **properties panel** on the right updates automatically:
   - **Spike count, mean discharge rate, CoV ISI, minimum ISI**
   - **SIL and MUAP template stability** — complementary source-separation and
@@ -412,6 +418,8 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 | **Auto-edit** | — | Automatically removes obvious outlier spikes based on physiological firing rate limits. |
 | **Remove outliers** | — | Removes spikes with very short or very long ISIs. |
 | **Flag unit** | `X` | Marks the unit for deletion. Duplicates are auto-flagged. |
+| **Mark Reviewed** | `M` | Marks or unmarks the current unit as manually reviewed. |
+| **Next Unreviewed** | `N` | Moves to the next unreviewed unit, including across ports. |
 | **Flag within-port duplicates** | — | Compares all units in each port and flags the lower-quality unit of every pair whose rate of agreement is above threshold. A summary dialog reports the pairs found, their RoA scores and which units were flagged. |
 | **Flag cross-port duplicates** | — | Same, across all ports, with the same summary dialog. |
 | **Delete All Flagged MUs** | — | Permanently removes all flagged units from the session (cannot be undone). Afterwards the view jumps back to the first unit of the first port. |
@@ -507,6 +515,8 @@ Edition shortcuts (after a decomposition is loaded):
 | `O` | Remove instantaneous-firing-rate outlier spikes from the current unit |
 | `E` | Run rule-based auto-editing on the current unit |
 | `X` | Toggle the deletion flag on the current unit |
+| `M` | Toggle the manually reviewed status of the current unit |
+| `N` | Move to the next unreviewed unit across all ports |
 | `T` | Toggle the reliability verdict of the current unit |
 | `Shift+T` | Reset reliability to the automatic verdict |
 | `Ctrl+Z` | Undo (`Cmd+Z` on macOS) |

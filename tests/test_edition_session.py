@@ -25,6 +25,7 @@ def test_save_dict_preserves_full_source_and_provenance_contract():
         port_name="Grid 1",
         mu_filter=np.array([0.25, 0.75]),
         flagged_duplicate=True,
+        reviewed=True,
         props=properties,
     )
 
@@ -59,6 +60,7 @@ def test_save_dict_preserves_full_source_and_provenance_contract():
     np.testing.assert_array_equal(saved["pulse_trains"][0][0], np.arange(100, 150))
     np.testing.assert_array_equal(saved["mu_filters"][0][0], [0.25, 0.75])
     assert saved["flagged_mus"] == {"Grid 1": [0]}
+    assert saved["reviewed_mus"] == {"Grid 1": [0]}
     assert saved["reliability_overrides"] == {"Grid 1": {0: False}}
     assert "muap_grid" not in saved["mu_properties"][0][0]
     assert "duplicate_candidates" not in saved["mu_properties"][0][0]
@@ -132,6 +134,7 @@ def test_load_port_restores_channels_quality_flags_and_legacy_notes():
         "pulse_trains": [[np.arange(5, dtype=float)]],
         "mu_filters": [[np.array([0.2, 0.8])]],
         "flagged_mus": {"Grid 1": [0]},
+        "reviewed_mus": {"Grid 1": [0]},
         "reliability_overrides": {"Grid 1": {0: False}},
         "mu_notes": [["legacy\nnote"]],
     }
@@ -161,5 +164,28 @@ def test_load_port_restores_channels_quality_flags_and_legacy_notes():
     np.testing.assert_array_equal(motor_unit.source, np.arange(5))
     np.testing.assert_array_equal(motor_unit.mu_filter, [0.2, 0.8])
     assert motor_unit.flagged_duplicate is True
+    assert motor_unit.reviewed is True
     assert motor_unit.props.reliability_override is False
     assert loaded.migrated_notes == ["0000-00-00 00:00:00 (Grid 1, MU 0): legacy note"]
+
+
+def test_load_port_defaults_to_unreviewed_for_older_files():
+    loaded = load_edition_port(
+        port_index=0,
+        port_name="Grid 1",
+        decomposition={
+            "chans_per_electrode": [1],
+            "discharge_times": [[np.array([1, 4])]],
+            "pulse_trains": [[np.arange(5, dtype=float)]],
+        },
+        emg_full=None,
+        start_sample=0,
+        end_sample=5,
+        full_port_results={},
+        channel_offset=0,
+        full_source_mode=False,
+        sampling_rate=1000.0,
+        property_computer=lambda **_kwargs: [MUProperties(n_spikes=2)],
+    )
+
+    assert loaded.motor_units[0].reviewed is False

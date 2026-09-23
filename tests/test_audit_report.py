@@ -31,6 +31,7 @@ def _decomposition_data(source_path: Path) -> dict:
         "preprocessing_config": [{"extension_factor": 16}],
         "aux_configs": [{"name": "Force", "unit": "N", "source": "signal"}],
         "notes": ["participant-specific note text"],
+        "reviewed_mus": {"Grid 1": [0]},
         "edit_history": [
             {
                 "datetime": "2026-09-23T12:00:00",
@@ -70,6 +71,7 @@ def test_audit_report_summarises_run_without_signal_or_note_content(tmp_path):
     assert report["decomposition"]["ports"][0]["rejected_channel_positions"] == [1]
     assert report["editing"]["history_events"] == 1
     assert report["editing"]["notes_count"] == 1
+    assert report["editing"]["units_reviewed"] == 1
     assert str(tmp_path) not in encoded
     assert "participant-specific note text" not in encoded
     assert "987654.321" not in encoded
