@@ -160,6 +160,152 @@ def test_flag_change_marks_edition_dirty():
     app.processEvents()
 
 
+def test_reset_view_uses_local_source_in_plateau_only_mode():
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array([10, 20], dtype=np.int64),
+        source=np.array([1.0, 2.0, 3.0]),
+        port_name="Grid 1",
+    )
+    tab._ports = {"Grid 1": [unit]}
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._fsamp = 1000.0
+    tab._start_sample = 5000
+    tab._end_sample = 5003
+    tab._full_source_mode = False
+
+    view_box = tab.source_plot.getViewBox()
+    with (
+        patch.object(view_box, "setRange") as set_range,
+        patch.object(tab.fr_plot, "reset_y_range"),
+    ):
+        tab._reset_view_full()
+
+    assert set_range.call_args.kwargs["yRange"] == pytest.approx((-0.45, 9.45))
+
+    tab.close()
+    app.processEvents()
+
+
+def test_reset_view_uses_plateau_window_in_full_source_mode():
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array([2, 3], dtype=np.int64),
+        source=np.array([100.0, 1.0, 2.0, 3.0, 1.0]),
+        port_name="Grid 1",
+    )
+    tab._ports = {"Grid 1": [unit]}
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._fsamp = 1000.0
+    tab._start_sample = 1
+    tab._end_sample = 4
+    tab._full_source_mode = True
+
+    view_box = tab.source_plot.getViewBox()
+    with (
+        patch.object(view_box, "setRange") as set_range,
+        patch.object(tab.fr_plot, "reset_y_range"),
+    ):
+        tab._reset_view_full()
+
+    assert set_range.call_args.kwargs["yRange"] == pytest.approx((-0.45, 9.45))
+
+    tab.close()
+    app.processEvents()
+
+
+def test_reset_view_empty_full_source_window_uses_safe_fallback():
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array([], dtype=np.int64),
+        source=np.array([1.0, 2.0, 3.0]),
+        port_name="Grid 1",
+    )
+    tab._ports = {"Grid 1": [unit]}
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._fsamp = 1000.0
+    tab._start_sample = 10
+    tab._end_sample = 20
+    tab._full_source_mode = True
+
+    view_box = tab.source_plot.getViewBox()
+    with (
+        patch.object(view_box, "setRange") as set_range,
+        patch.object(tab.fr_plot, "reset_y_range"),
+    ):
+        tab._reset_view_full()
+
+    assert set_range.call_args.kwargs["yRange"] == pytest.approx((-0.05, 1.05))
+
+    tab.close()
+    app.processEvents()
+
+
+def test_file_note_normalisation_rejects_malformed_and_blank_entries():
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    assert EditionTab._normalise_notes(None) == []
+    assert EditionTab._normalise_notes("not a list") == []
+    assert EditionTab._normalise_notes([" first ", "", " \n ", 3, "second"]) == [
+        "first",
+        "second",
+    ]
+
+
+def test_legacy_note_migration_skips_blank_notes():
+    from scd_app.core.mu_model import MUProperties
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    tab._fsamp = 1000.0
+    tab._full_source_mode = False
+    decomp_data = {
+        "chans_per_electrode": [1],
+        "discharge_times": [[np.array([1]), np.array([2]), np.array([3])]],
+        "pulse_trains": [[np.zeros(5), np.zeros(5), np.zeros(5)]],
+        "mu_notes": [["", "legacy\nnote", " \n "]],
+    }
+
+    with patch(
+        "scd_app.gui.tabs.edition_tab.compute_port_properties",
+        return_value=[MUProperties(), MUProperties(), MUProperties()],
+    ):
+        tab._load_single_port(
+            port_idx=0,
+            port_name="Grid 1",
+            decomp_data=decomp_data,
+            emg_full=None,
+            start_sample=0,
+            end_sample=5,
+            full_port_results={},
+            ch_offset=0,
+        )
+
+    assert tab._notes == ["0000-00-00 00:00:00 (Grid 1, MU 1): legacy note"]
+
+    tab.close()
+    app.processEvents()
+
+
 def test_debounced_properties_update_the_edited_unit_after_selection_changes():
     from scd_app.core.mu_model import MotorUnit
     from scd_app.gui.tabs.edition_tab import EditionTab

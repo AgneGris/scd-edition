@@ -8,6 +8,7 @@ is shown as a shaded band on the source plot.
 
 import logging
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -27,10 +28,10 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -715,6 +716,7 @@ class EditionTab(QWidget):
         self._grid_info: dict[str, dict | None] = {}
         self._raw_port_channels: dict[str, np.ndarray] = {}
         self._rejected_ch_positions: dict[str, set] = {}
+        self._notes: list[str] = []
 
         self._current_port: str | None = None
         self._current_mu_idx: int = -1
@@ -765,6 +767,15 @@ class EditionTab(QWidget):
 
     def _ts_to_absolute(self, plateau_local: np.ndarray) -> np.ndarray:
         return plateau_local + self._start_sample
+
+    @staticmethod
+    def _normalise_notes(notes: object) -> list[str]:
+        """Return non-empty text entries from a persisted or edited note list."""
+        if not isinstance(notes, list):
+            return []
+        return [
+            note.strip() for note in notes if isinstance(note, str) and note.strip()
+        ]
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1019,7 +1030,9 @@ class EditionTab(QWidget):
         tb.addWidget(spacer)
 
         self.btn_notes = QPushButton("📝 Notes")
-        self.btn_notes.setToolTip("Open notes for the current unit")
+        self.btn_notes.setToolTip(
+            "Open file notes; new entries are tagged with the current port and unit"
+        )
         self.btn_notes.clicked.connect(self._open_notes_dialog)
         self.btn_notes.setEnabled(False)
         self.btn_notes.setStyleSheet(self._warn_toolbar_btn_style())
@@ -1495,6 +1508,7 @@ class EditionTab(QWidget):
         self._ports.clear()
         self._emg_data.clear()
         self._grid_info.clear()
+        self._notes.clear()
         self._raw_port_channels.clear()
         self._rejected_ch_positions.clear()
         self._undo_stack.clear()  # clears all per-unit histories
@@ -1506,6 +1520,8 @@ class EditionTab(QWidget):
             self._edit_history = prior_history
         else:
             self._edit_history = []
+
+        self._notes = self._normalise_notes(decomp_data.get("notes"))
         # Normalise aux channel structure: older saves nest metadata under "meta";
         # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
         acquisition_format = decomp_data.get("acquisition_metadata", {}).get("format")
@@ -1866,12 +1882,17 @@ class EditionTab(QWidget):
             if 0 <= idx < len(motor_units) and motor_units[idx].props is not None:
                 motor_units[idx].props.reliability_override = bool(value)
 
-        # Restore per-unit notes (absent in older files → default empty string)
+        # Migrate non-empty per-unit notes from older files into the per-file log.
         port_notes = decomp_data.get("mu_notes", [])
         if port_idx < len(port_notes):
             # Saved notes may not cover every unit in older files; truncate.
             for mu, note in zip(motor_units, port_notes[port_idx], strict=False):
-                mu.notes = note if isinstance(note, str) else ""
+                if not isinstance(note, str) or not note.strip():
+                    continue
+                note = " ".join(note.splitlines()).strip()
+                full_note = f"0000-00-00 00:00:00 ({port_name}, MU {mu.id}): {note}"
+                if full_note not in self._notes:
+                    self._notes.append(full_note)
 
         self._grid_info[port_name] = grid_cfg
         self._rejected_ch_positions[port_name] = rejected_pos_set
@@ -1962,8 +1983,7 @@ class EditionTab(QWidget):
         import dataclasses
 
         ports = list(self._ports.keys())
-        discharge_times, pulse_trains, mu_filters, mu_properties, mu_notes = (
-            [],
+        discharge_times, pulse_trains, mu_filters, mu_properties = (
             [],
             [],
             [],
@@ -2017,7 +2037,6 @@ class EditionTab(QWidget):
                 else:
                     port_props.append({})
             mu_properties.append(port_props)
-            mu_notes.append([mu.notes for mu in mus])
 
         save_data = {
             "ports": ports,
@@ -2027,10 +2046,10 @@ class EditionTab(QWidget):
             "mu_filters": mu_filters,
             "skip_filter_recalc": True,
             "mu_properties": mu_properties,
-            "mu_notes": mu_notes,
             "flagged_mus": flagged_mus_per_port,
             "reliability_overrides": reliability_overrides_per_port,
             "edit_history": self._edit_history,
+            "notes": self._notes,
         }
 
         if self._original_decomp_data is not None:
@@ -2091,7 +2110,12 @@ class EditionTab(QWidget):
         # the linked FR plot) feeds spike-marker bounds back through the X link
         # and re-clips the range to the plateau region, so we avoid it entirely.
         src_sq = np.nan_to_num(mu.source**2)
-        y_max = float(np.max(src_sq)) if len(src_sq) > 0 else 1.0
+        window_sq = (
+            src_sq[self._start_sample : self._end_sample]
+            if self._full_source_mode
+            else src_sq
+        )
+        y_max = float(np.max(window_sq)) if window_sq.size else 1.0
         y_pad = y_max * 0.05
         self.source_plot.getViewBox().setRange(
             xRange=(0, x_max), yRange=(-y_pad, y_max + y_pad), padding=0
@@ -2209,8 +2233,6 @@ class EditionTab(QWidget):
                     "flag_cross_duplicates" | "reliability_override"
         extra: any additional serialisable fields to include in the record.
         """
-        from datetime import datetime
-
         self._edit_history.append(
             {
                 "datetime": datetime.now().isoformat(),
@@ -3316,8 +3338,10 @@ class EditionTab(QWidget):
             return
 
         dlg = QDialog(self)
-        dlg.setWindowTitle(f"Notes — {self._current_port}  MU {mu.id}")
-        dlg.resize(420, 260)
+        file_name = self._loaded_path.name if self._loaded_path else "Current File"
+        window_title = f"File Notes — {file_name}"
+        dlg.setWindowTitle(window_title)
+        dlg.resize(860, 320)
         dlg.setStyleSheet(
             f"background-color: {COLORS['background']}; color: {COLORS['foreground']};"
         )
@@ -3326,11 +3350,36 @@ class EditionTab(QWidget):
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(8)
 
-        editor = QPlainTextEdit()
-        editor.setPlainText(mu.notes)
-        editor.setPlaceholderText("Notes for this unit…")
-        editor.setStyleSheet(
+        # History with previous notes
+        history = QPlainTextEdit()
+        history.setPlainText("\n".join(self._notes))
+        history.setToolTip(
+            f"Edit notes stored with this file and "
+            f"press {QKeySequence(QKeySequence.StandardKey.Save).toString()} to save changes. "
+            f"Press {QKeySequence(Qt.Key.Key_Escape).toString()} to quit."
+        )
+        history.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        history.verticalScrollBar().setValue(history.verticalScrollBar().maximum())
+        history.setTabChangesFocus(True)
+        history.setStyleSheet(
             f"QPlainTextEdit {{"
+            f" background-color: {COLORS.get('background', '#1a1f24')};"
+            f" color: {COLORS['foreground']};"
+            f" font-size: {FONT_SIZES.get('small', '9pt')};"
+            f" border: 0px;"
+            f" outline: none;"
+            f"}}"
+        )
+        lay.addWidget(history, stretch=1)
+
+        # Editor to add new notes
+        editor = QLineEdit()
+        editor.setPlaceholderText(f"Add note for {mu.port_name}, MU {mu.id}…")
+        editor.setToolTip(
+            "Add a file note tagged with the current port and unit, then press Enter"
+        )
+        editor.setStyleSheet(
+            f"QLineEdit {{"
             f" background-color: {COLORS.get('background_input', '#1a1f24')};"
             f" color: {COLORS['foreground']};"
             f" border: 1px solid {COLORS['border']};"
@@ -3338,25 +3387,52 @@ class EditionTab(QWidget):
             f" font-size: {FONT_SIZES.get('small', '9pt')};"
             f"}}"
         )
-        lay.addWidget(editor, stretch=1)
+        lay.addWidget(editor)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.setStyleSheet(f"color: {COLORS['foreground']};")
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        lay.addWidget(buttons)
+        # Connections:
+        def edited_notes() -> list[str]:
+            return self._normalise_notes(history.toPlainText().splitlines())
 
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            new_notes = editor.toPlainText()
-            if new_notes != mu.notes:
-                mu.notes = new_notes
-                self._log_event(
-                    "notes",
-                    f"updated notes for MU {mu.id}",
-                    self._current_port or "",
-                    self._current_mu_idx,
+        def mark_changes():
+            """Mark history was changed in window title."""
+            if self._notes != edited_notes():
+                dlg.setWindowTitle(window_title + " *")
+            else:
+                dlg.setWindowTitle(window_title)
+
+        def save_notes():
+            """Save history in self._notes and inform scd-edit that notes were modified."""
+            self._notes = edited_notes()
+            dlg.setWindowTitle(window_title)
+            self._log_event(
+                "notes",
+                f"updated notes for {self._current_mu().port_name} (MU {self._current_mu().id})",
+                self._current_port or "",
+                self._current_mu_idx,
+            )
+            self._mark_modified()
+
+        def append_note():
+            """Read new note, refresh window, and save history"""
+            note = editor.text().strip()
+            if note:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                full_note = f"{timestamp} ({self._current_mu().port_name}, MU {self._current_mu().id}): {note}"
+                history.appendPlainText(full_note)
+                editor.clear()  # clear text in editor
+                history.verticalScrollBar().setValue(
+                    history.verticalScrollBar().maximum()
                 )
-                self._mark_modified()
+                save_notes()
+
+        history.textChanged.connect(mark_changes)
+        editor.returnPressed.connect(append_note)
+        editor.setFocus()
+
+        save_shortcut = QShortcut(QKeySequence.StandardKey.Save, dlg)
+        save_shortcut.activated.connect(save_notes)
+
+        dlg.exec()
 
     def _update_status(self, msg: str | None = None):
         if msg:
