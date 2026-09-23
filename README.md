@@ -378,6 +378,15 @@ does not have the same interpretation for SCD's normalized source signals.
 
 The large plot on the left shows the squared source signal (the spatial filter output) with spike locations marked as orange circles. A shaded region shows the plateau used for decomposition; outside this region the signal is reconstructed by replaying the peel-off sequence over the full recording.
 
+Right-click an orange spike marker to inspect its raw multichannel MUAP. The
+MUAP panel overlays that discharge as a thin solid orange line on a thicker
+blue leave-one-out reference made from the unit's other valid discharges. The
+header reports normalized waveform similarity, amplitude ratio and the small
+alignment lag used for the comparison. This is a review aid rather than an
+automatic keep/remove rule;
+overlapping activity and noise can reduce the score of a genuine discharge.
+Press `Escape`, or select another unit or port, to clear the inspection.
+
 **Scrolling / zooming:**
 - **Scroll** — zoom in/out along the time axis
 - **Shift+Scroll** — scroll horizontally
@@ -395,8 +404,6 @@ If force channels are configured, a force trace is overlaid on the source plot. 
 | **Delete** | `D` or button | Click near an existing spike to remove the closest one. |
 | **Add in Selection** | `Ctrl+A` or button | Drag a box to add all peaks found within it. |
 | **Delete in Selection** | `Ctrl+D` or button | Drag a box to remove all spikes within it. |
-
-Every edit shows a **live preview**: before you commit, the candidate spike's waveform is overlaid on the spike-triggered average (MUAP) plot so you can judge whether it looks like the unit's template. Press **Enter** to confirm or **Escape** to cancel.
 
 Press `Ctrl+Z` to undo (up to 100 steps) and `Ctrl+Y` to redo.
 

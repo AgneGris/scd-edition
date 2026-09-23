@@ -15,13 +15,14 @@ import re
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtWidgets import QRubberBand
 
 from scd_app.core.mu_model import EditMode
 from scd_app.gui.style.styling import COLORS
 
 _MIN_RUBBERBAND_PX = 5  # drags smaller than this are ignored in selection-arm mode
+_SPIKE_CLICK_RADIUS_PX = 10
 
 # ── AUX colour palette ────────────────────────────────────────────────────────
 _AUX_COLORS_HEX = ["#FFD700", "#C0EFFF", "#FFB347"]
@@ -192,6 +193,7 @@ class SourcePlotWidget(pg.PlotWidget):
 
     spike_add_requested = Signal(int)
     spike_delete_requested = Signal(int)
+    spike_inspect_requested = Signal(int)
     region_selected = Signal(float, float, float, float)
 
     def __init__(self, parent=None):
@@ -215,6 +217,8 @@ class SourcePlotWidget(pg.PlotWidget):
 
         self._source: np.ndarray | None = None
         self._timestamps: np.ndarray | None = None
+        self._inspected_sample: int | None = None
+        self._spike_inspection_press = False
 
         self._signal_curve = self.plot([], pen=pg.mkPen("#2b6cb0", width=1))
         self._signal_curve.setDownsampling(auto=True, method="peak")
@@ -226,7 +230,19 @@ class SourcePlotWidget(pg.PlotWidget):
             symbol="o",
             hoverable=True,
         )
+        self._spike_scatter.setToolTip(
+            "Right-click a spike to compare its MUAP with the unit template"
+        )
+        self._spike_scatter.sigClicked.connect(self._on_spike_marker_clicked)
         self.addItem(self._spike_scatter)
+        self._inspected_spike_scatter = pg.ScatterPlotItem(
+            size=16,
+            pen=pg.mkPen("#f9e2af", width=2),
+            brush=pg.mkBrush(0, 0, 0, 0),
+            symbol="o",
+        )
+        self._inspected_spike_scatter.setZValue(20)
+        self.addItem(self._inspected_spike_scatter)
         self._plateau_region: pg.LinearRegionItem | None = None
 
         self._aux_curves: list = []
@@ -395,13 +411,20 @@ class SourcePlotWidget(pg.PlotWidget):
         self._timestamps = timestamps
         self._update_spike_markers()
 
+    def set_inspected_spike(self, sample: int | None):
+        """Highlight one spike marker, or clear the inspection highlight."""
+        self._inspected_sample = int(sample) if sample is not None else None
+        self._update_inspected_marker()
+
     def clear_data(self):
         self._signal_curve.setData([], [])
         self._spike_scatter.setData([], [])
+        self._inspected_spike_scatter.setData([], [])
         for curve in self._aux_curves:
             curve.setData([], [])
         self._source = None
         self._timestamps = None
+        self._inspected_sample = None
         if self._plateau_region is not None:
             self.removeItem(self._plateau_region)
             self._plateau_region = None
@@ -412,6 +435,13 @@ class SourcePlotWidget(pg.PlotWidget):
     # ------------------------------------------------------------------
 
     def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.RightButton:
+            sample = self._spike_sample_near_position(ev.pos())
+            if sample is not None:
+                self._spike_inspection_press = True
+                self.spike_inspect_requested.emit(sample)
+                ev.accept()
+                return
         if ev.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(ev)
             return
@@ -440,6 +470,10 @@ class SourcePlotWidget(pg.PlotWidget):
             super().mouseMoveEvent(ev)
 
     def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.RightButton and self._spike_inspection_press:
+            self._spike_inspection_press = False
+            ev.accept()
+            return
         if ev.button() != Qt.MouseButton.LeftButton or self._rb_origin is None:
             super().mouseReleaseEvent(ev)
             return
@@ -485,6 +519,46 @@ class SourcePlotWidget(pg.PlotWidget):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _on_spike_marker_clicked(self, _scatter, points, event):
+        if event.button() != Qt.MouseButton.RightButton or not points:
+            return
+        sample = points[0].data()
+        if sample is None:
+            return
+        event.accept()
+        self.spike_inspect_requested.emit(int(sample))
+
+    def _spike_sample_near_position(self, widget_pos: QPoint) -> int | None:
+        """Return the spike marker within the click radius, if any."""
+        if (
+            self._source is None
+            or self._timestamps is None
+            or len(self._timestamps) == 0
+        ):
+            return None
+        valid = self._timestamps[
+            (self._timestamps >= 0) & (self._timestamps < len(self._source))
+        ]
+        if len(valid) == 0:
+            return None
+
+        click_scene = self.mapToScene(widget_pos)
+        view_box = self.getViewBox()
+        closest_sample = None
+        closest_distance_sq = float(_SPIKE_CLICK_RADIUS_PX**2)
+        for raw_sample in valid:
+            sample = int(raw_sample)
+            marker_scene = view_box.mapViewToScene(
+                QPointF(sample / self._fsamp, float(self._source[sample]))
+            )
+            dx = marker_scene.x() - click_scene.x()
+            dy = marker_scene.y() - click_scene.y()
+            distance_sq = dx * dx + dy * dy
+            if distance_sq <= closest_distance_sq:
+                closest_sample = sample
+                closest_distance_sq = distance_sq
+        return closest_sample
+
     def _cancel_rubberband(self):
         self._rb_origin = None
         if self._rb_widget is not None:
@@ -497,12 +571,41 @@ class SourcePlotWidget(pg.PlotWidget):
             or len(self._timestamps) == 0
         ):
             self._spike_scatter.setData([], [])
+            self._update_inspected_marker()
             return
-        valid = self._timestamps[self._timestamps < len(self._source)]
+        valid = self._timestamps[
+            (self._timestamps >= 0) & (self._timestamps < len(self._source))
+        ]
         if len(valid) == 0:
             self._spike_scatter.setData([], [])
+            self._update_inspected_marker()
             return
-        self._spike_scatter.setData(valid / self._fsamp, self._source[valid])
+        self._spike_scatter.setData(
+            valid / self._fsamp,
+            self._source[valid],
+            data=valid.tolist(),
+        )
+        self._update_inspected_marker()
+
+    def _update_inspected_marker(self):
+        sample = self._inspected_sample
+        if (
+            sample is None
+            or self._source is None
+            or self._timestamps is None
+            or sample < 0
+            or sample >= len(self._source)
+            or sample not in self._timestamps
+        ):
+            self._inspected_spike_scatter.setData([], [])
+            if sample is not None and (
+                self._timestamps is None or sample not in self._timestamps
+            ):
+                self._inspected_sample = None
+            return
+        self._inspected_spike_scatter.setData(
+            [sample / self._fsamp], [self._source[sample]]
+        )
 
 
 class FiringRatePlotWidget(pg.PlotWidget):

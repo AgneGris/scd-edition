@@ -189,3 +189,37 @@ def test_load_port_defaults_to_unreviewed_for_older_files():
     )
 
     assert loaded.motor_units[0].reviewed is False
+
+
+def test_load_port_exposes_active_channel_grid_positions():
+    captured = {}
+
+    def property_computer(**kwargs):
+        captured.update(kwargs)
+        return [MUProperties(n_spikes=2)]
+
+    loaded = load_edition_port(
+        port_index=0,
+        port_name="Grid 1",
+        decomposition={
+            "chans_per_electrode": [16],
+            "emg_mask": [np.array([1] + [0] * 15)],
+            "electrodes": ["ULTRAHD 4X4"],
+            "discharge_times": [[np.array([5, 10])]],
+            "pulse_trains": [[np.arange(20, dtype=float)]],
+        },
+        emg_full=np.zeros((16, 20)),
+        start_sample=0,
+        end_sample=20,
+        full_port_results={},
+        channel_offset=0,
+        full_source_mode=False,
+        sampling_rate=1000.0,
+        property_computer=property_computer,
+    )
+
+    assert loaded.active_grid_positions == captured["grid_positions"]
+    assert len(loaded.active_grid_positions) == 15
+    assert 0 in loaded.active_grid_positions
+    assert loaded.active_grid_positions[0] != loaded.grid_config["positions"][1]
+    assert loaded.grid_config["positions"][1] in loaded.rejected_channel_positions
