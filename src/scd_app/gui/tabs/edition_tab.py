@@ -768,6 +768,15 @@ class EditionTab(QWidget):
     def _ts_to_absolute(self, plateau_local: np.ndarray) -> np.ndarray:
         return plateau_local + self._start_sample
 
+    @staticmethod
+    def _normalise_notes(notes: object) -> list[str]:
+        """Return non-empty text entries from a persisted or edited note list."""
+        if not isinstance(notes, list):
+            return []
+        return [
+            note.strip() for note in notes if isinstance(note, str) and note.strip()
+        ]
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -1021,7 +1030,9 @@ class EditionTab(QWidget):
         tb.addWidget(spacer)
 
         self.btn_notes = QPushButton("📝 Notes")
-        self.btn_notes.setToolTip("Open notes for the current file")
+        self.btn_notes.setToolTip(
+            "Open file notes; new entries are tagged with the current port and unit"
+        )
         self.btn_notes.clicked.connect(self._open_notes_dialog)
         self.btn_notes.setEnabled(False)
         self.btn_notes.setStyleSheet(self._warn_toolbar_btn_style())
@@ -1510,7 +1521,7 @@ class EditionTab(QWidget):
         else:
             self._edit_history = []
 
-        self._notes = decomp_data.get("notes", [])
+        self._notes = self._normalise_notes(decomp_data.get("notes"))
         # Normalise aux channel structure: older saves nest metadata under "meta";
         # flatten it so ch.get("mvc"), ch.get("unit") etc. work everywhere.
         acquisition_format = decomp_data.get("acquisition_metadata", {}).get("format")
@@ -2222,8 +2233,6 @@ class EditionTab(QWidget):
                     "flag_cross_duplicates" | "reliability_override"
         extra: any additional serialisable fields to include in the record.
         """
-        from datetime import datetime
-
         self._edit_history.append(
             {
                 "datetime": datetime.now().isoformat(),
@@ -3329,7 +3338,8 @@ class EditionTab(QWidget):
             return
 
         dlg = QDialog(self)
-        window_title = f"Notes — {self._current_port}  MU {mu.id}"
+        file_name = self._loaded_path.name if self._loaded_path else "Current File"
+        window_title = f"File Notes — {file_name}"
         dlg.setWindowTitle(window_title)
         dlg.resize(860, 320)
         dlg.setStyleSheet(
@@ -3344,7 +3354,7 @@ class EditionTab(QWidget):
         history = QPlainTextEdit()
         history.setPlainText("\n".join(self._notes))
         history.setToolTip(
-            f"Write or edit any note and "
+            f"Edit notes stored with this file and "
             f"press {QKeySequence(QKeySequence.StandardKey.Save).toString()} to save changes. "
             f"Press {QKeySequence(Qt.Key.Key_Escape).toString()} to quit."
         )
@@ -3364,8 +3374,10 @@ class EditionTab(QWidget):
 
         # Editor to add new notes
         editor = QLineEdit()
-        editor.setPlaceholderText("Notes for this unit…")
-        editor.setToolTip("Write a new note for this unit and press Enter to add it.")
+        editor.setPlaceholderText(f"Add note for {mu.port_name}, MU {mu.id}…")
+        editor.setToolTip(
+            "Add a file note tagged with the current port and unit, then press Enter"
+        )
         editor.setStyleSheet(
             f"QLineEdit {{"
             f" background-color: {COLORS.get('background_input', '#1a1f24')};"
@@ -3378,16 +3390,19 @@ class EditionTab(QWidget):
         lay.addWidget(editor)
 
         # Connections:
+        def edited_notes() -> list[str]:
+            return self._normalise_notes(history.toPlainText().splitlines())
+
         def mark_changes():
             """Mark history was changed in window title."""
-            if self._notes != history.toPlainText().split("\n"):
+            if self._notes != edited_notes():
                 dlg.setWindowTitle(window_title + " *")
             else:
                 dlg.setWindowTitle(window_title)
 
         def save_notes():
             """Save history in self._notes and inform scd-edit that notes were modified."""
-            self._notes = history.toPlainText().split("\n")
+            self._notes = edited_notes()
             dlg.setWindowTitle(window_title)
             self._log_event(
                 "notes",

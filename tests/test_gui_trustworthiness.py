@@ -226,6 +226,50 @@ def test_reset_view_uses_plateau_window_in_full_source_mode():
     app.processEvents()
 
 
+def test_reset_view_empty_full_source_window_uses_safe_fallback():
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array([], dtype=np.int64),
+        source=np.array([1.0, 2.0, 3.0]),
+        port_name="Grid 1",
+    )
+    tab._ports = {"Grid 1": [unit]}
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._fsamp = 1000.0
+    tab._start_sample = 10
+    tab._end_sample = 20
+    tab._full_source_mode = True
+
+    view_box = tab.source_plot.getViewBox()
+    with (
+        patch.object(view_box, "setRange") as set_range,
+        patch.object(tab.fr_plot, "reset_y_range"),
+    ):
+        tab._reset_view_full()
+
+    assert set_range.call_args.kwargs["yRange"] == pytest.approx((-0.05, 1.05))
+
+    tab.close()
+    app.processEvents()
+
+
+def test_file_note_normalisation_rejects_malformed_and_blank_entries():
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    assert EditionTab._normalise_notes(None) == []
+    assert EditionTab._normalise_notes("not a list") == []
+    assert EditionTab._normalise_notes([" first ", "", " \n ", 3, "second"]) == [
+        "first",
+        "second",
+    ]
+
+
 def test_legacy_note_migration_skips_blank_notes():
     from scd_app.core.mu_model import MUProperties
     from scd_app.gui.tabs.edition_tab import EditionTab
