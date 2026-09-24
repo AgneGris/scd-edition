@@ -409,19 +409,11 @@ If force channels are configured, a force trace is overlaid on the source plot. 
 
 | Mode | How to activate | What it does |
 |------|----------------|--------------|
-| **View** | `V` or button | Navigate without editing. Quick-edit with `Ctrl+Click` (add) or `Alt+Click` (delete). |
-| **Add** | `A` or button | Click near a peak to add a spike. Snaps to nearest local maximum. |
-| **Delete** | `D` or button | Click near an existing spike to remove the closest one. |
-| **Add in Selection** | `Ctrl+A` or button | Drag a box to add all peaks found within it. |
-| **Delete in Selection** | `Ctrl+D` or button | Drag a box to remove all spikes within it. |
+| **View** | Default; press `Esc` to return | Navigate, zoom and inspect spikes without editing. |
+| **Add in Selection** | `A` or button | Toggle on, then drag a box to add all enclosed peaks. Press `A` again to turn it off. |
+| **Delete in Selection** | `D` or button | Toggle on, then drag a box to remove all enclosed spikes. Press `D` again to turn it off. |
 
 Press `Ctrl+Z` to undo (up to 100 steps) and `Ctrl+Y` to redo.
-
-#### ROI (Region of Interest)
-
-Press `R` to toggle a draggable region on the signal. Then:
-- `Shift+A` — add spikes within the ROI
-- `Shift+D` — delete spikes within the ROI
 
 #### MUAP plot
 
@@ -525,8 +517,8 @@ Edition shortcuts (after a decomposition is loaded):
 
 | Key | Action |
 |-----|--------|
-| `A` | Arm **Add in Selection**; drag a rectangle to add enclosed peaks |
-| `D` | Arm **Del in Selection**; drag a rectangle to remove enclosed spikes |
+| `A` | Toggle **Add in Selection**; drag a rectangle to add enclosed peaks |
+| `D` | Toggle **Del in Selection**; drag a rectangle to remove enclosed spikes |
 | `Esc` | Disarm selection and return to normal view interaction |
 | `F` | Replay peel-off and recalculate the current unit's filter, source and timestamps |
 | `O` | Remove instantaneous-firing-rate outlier spikes from the current unit |

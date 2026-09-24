@@ -277,6 +277,51 @@ def test_flag_change_marks_edition_dirty():
     app.processEvents()
 
 
+def test_selection_shortcuts_toggle_switch_and_respect_disabled_buttons():
+    from PySide6.QtGui import QShortcut
+
+    from scd_app.gui.tabs.edition_tab import EditionTab
+    from scd_app.gui.widgets.source_plot_widget import SelectionArm
+
+    app = _application()
+    tab = EditionTab()
+    tab.btn_sel_add.setEnabled(True)
+    tab.btn_sel_delete.setEnabled(True)
+    shortcuts = {
+        shortcut.key().toString(): shortcut for shortcut in tab.findChildren(QShortcut)
+    }
+
+    shortcuts["A"].activated.emit()
+    assert tab.btn_sel_add.isChecked() is True
+    assert tab.btn_sel_delete.isChecked() is False
+    assert tab._sel_arm == SelectionArm.ADD
+    assert tab.source_plot._sel_arm == SelectionArm.ADD
+
+    shortcuts["D"].activated.emit()
+    assert tab.btn_sel_add.isChecked() is False
+    assert tab.btn_sel_delete.isChecked() is True
+    assert tab._sel_arm == SelectionArm.DELETE
+    assert tab.source_plot._sel_arm == SelectionArm.DELETE
+
+    shortcuts["A"].activated.emit()
+    assert tab.btn_sel_add.isChecked() is True
+    assert tab.btn_sel_delete.isChecked() is False
+    assert tab._sel_arm == SelectionArm.ADD
+
+    shortcuts["A"].activated.emit()
+    assert tab.btn_sel_add.isChecked() is False
+    assert tab._sel_arm == SelectionArm.NONE
+    assert tab.source_plot._sel_arm == SelectionArm.NONE
+
+    tab.btn_sel_delete.setEnabled(False)
+    shortcuts["D"].activated.emit()
+    assert tab.btn_sel_delete.isChecked() is False
+    assert tab._sel_arm == SelectionArm.NONE
+
+    tab.close()
+    app.processEvents()
+
+
 def test_reset_view_uses_local_source_in_plateau_only_mode():
     from scd_app.core.mu_model import MotorUnit
     from scd_app.gui.tabs.edition_tab import EditionTab
@@ -371,6 +416,72 @@ def test_reset_view_empty_full_source_window_uses_safe_fallback():
         tab._reset_view_full()
 
     assert set_range.call_args.kwargs["yRange"] == pytest.approx((-0.05, 1.05))
+
+    tab.close()
+    app.processEvents()
+
+
+def test_saved_plateau_session_reopens_with_same_muap_template():
+    from scd_app.core.mu_properties import MUProperties
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    full_emg = np.zeros((2, 200), dtype=float)
+    waveform = np.array([[1.0, 4.0, 1.0], [-2.0, 6.0, -2.0]])
+    for absolute_sample in (110, 130):
+        full_emg[:, absolute_sample - 1 : absolute_sample + 2] = waveform
+
+    source = np.zeros(50, dtype=float)
+    source[[10, 30]] = 1.0
+    original = {
+        "ports": ["Grid 1"],
+        "sampling_rate": 1000.0,
+        "plateau_coords": [100, 150],
+        "discharge_times": [[np.array([10, 30], dtype=np.int64)]],
+        "pulse_trains": [[source]],
+        "data": full_emg,
+        "chans_per_electrode": [2],
+        "channel_indices": [np.array([0, 1])],
+        "emg_mask": [np.zeros(2, dtype=np.int8)],
+        "electrodes": ["unsupported"],
+    }
+
+    def template_properties(**kwargs):
+        emg_port = kwargs["emg_port"]
+        properties = []
+        for timestamps in kwargs["all_timestamps"]:
+            snippets = np.stack(
+                [emg_port[:, sample - 1 : sample + 2] for sample in timestamps]
+            )
+            unit_properties = MUProperties(n_spikes=len(timestamps))
+            unit_properties.muap_grid = snippets.mean(axis=0)[:, np.newaxis, :]
+            properties.append(unit_properties)
+        return properties
+
+    tab = EditionTab()
+    with patch(
+        "scd_app.gui.tabs.edition_tab.compute_port_properties",
+        side_effect=template_properties,
+    ):
+        tab._load_decomposition_data(original)
+        template_before = tab._ports["Grid 1"][0].props.muap_grid.copy()
+        saved = tab._build_save_dict()
+
+        assert saved["skip_filter_recalc"] is True
+        assert saved["plateau_coords"] == [100, 150]
+
+        tab._load_decomposition_data(saved)
+
+    assert tab._start_sample == 100
+    assert tab._end_sample == 150
+    assert tab._full_source_mode is False
+    np.testing.assert_array_equal(tab._emg_data["Grid 1"], full_emg[:, 100:150])
+    np.testing.assert_array_equal(
+        tab._ports["Grid 1"][0].timestamps, np.array([10, 30])
+    )
+    np.testing.assert_array_equal(
+        tab._ports["Grid 1"][0].props.muap_grid, template_before
+    )
 
     tab.close()
     app.processEvents()
