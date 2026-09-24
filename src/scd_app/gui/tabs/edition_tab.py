@@ -77,7 +77,7 @@ from scd_app.gui.style.styling import (
 )
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
 from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
-from scd_app.gui.widgets.plot_tools import make_plot_item_safe
+from scd_app.gui.widgets.plot_tools import XZoomViewBox, make_plot_item_safe
 from scd_app.gui.widgets.source_plot_widget import (
     FiringRatePlotWidget,
     SelectionArm,
@@ -123,6 +123,7 @@ class EditionTab(QWidget):
         self._sel_arm = SelectionArm.NONE
         self._loaded_path: Path | None = None
         self._output_path: Path | None = None
+        self._output_path_is_fixed: bool = False
         self._quit_after_save: bool = False
         self._dirty: bool = False
         self._config_aux_channels: list = []  # from the last applied config, used to fill missing MVC on load
@@ -325,8 +326,14 @@ class EditionTab(QWidget):
 
         self.action_save = QAction("💾 Save", self)
         self.action_save.setShortcut(QKeySequence.StandardKey.Save)
-        self.action_save.triggered.connect(self._save_file)
+        self.action_save.triggered.connect(lambda _checked=False: self._save_file())
         tb.addAction(self.action_save)
+
+        self.action_save_as = QAction("Save &As…", self)
+        self.action_save_as.setShortcut(QKeySequence.StandardKey.SaveAs)
+        self.action_save_as.triggered.connect(
+            lambda _checked=False: self._save_file_as()
+        )
 
         self.action_reset = QAction("⟲ Reset View", self)
         self.action_reset.setShortcut(QKeySequence("Home"))
@@ -335,12 +342,11 @@ class EditionTab(QWidget):
 
         # ── Rubberband-drag selection toggles ─────────────────────────
         tb.addSeparator()
-        tb.addWidget(QLabel("  Select & "))
 
         success_color = COLORS.get("success", "#a6e3a1")
         error_color = COLORS.get("error", "#f38ba8")
 
-        self.btn_sel_add = QPushButton("✅ Add in Selection")
+        self.btn_sel_add = QPushButton("✅ Add spikes")
         self.btn_sel_add.setCheckable(True)
         self.btn_sel_add.setChecked(False)
         self.btn_sel_add.setStyleSheet(self._sel_btn_style(success_color))
@@ -354,7 +360,7 @@ class EditionTab(QWidget):
         self.btn_sel_add.setEnabled(False)
         tb.addWidget(self.btn_sel_add)
 
-        self.btn_sel_delete = QPushButton("🗑 Del in Selection")
+        self.btn_sel_delete = QPushButton("🗑 Delete spikes")
         self.btn_sel_delete.setCheckable(True)
         self.btn_sel_delete.setChecked(False)
         self.btn_sel_delete.setStyleSheet(self._sel_btn_style(error_color))
@@ -874,13 +880,19 @@ class EditionTab(QWidget):
     # ------------------------------------------------------------------
 
     def _update_file_label(self):
-        if self._loaded_path:
+        current_path = self._output_path or self._loaded_path
+        if current_path:
             dirty_marker = " *" if self._dirty else ""
             self._file_label.setText(
-                f"📄 Current File: {self._loaded_path.name}{dirty_marker}"
+                f"📄 Current File: {current_path.name}{dirty_marker}"
             )
         else:
             self._file_label.setText("")
+
+    @property
+    def has_loaded_data(self) -> bool:
+        """Whether a decomposition is available for downstream visualisation."""
+        return bool(self._ports)
 
     @property
     def is_dirty(self) -> bool:
@@ -1081,6 +1093,8 @@ class EditionTab(QWidget):
             self._loaded_path = path
             self._redetect_timestamps = redetect_timestamps
             self._load_decomposition_data(data)
+            if not self._output_path_is_fixed:
+                self._output_path = None
             imported_format = data.get("import_provenance", {}).get("format")
             if imported_format:
                 self._update_status(
@@ -1318,12 +1332,18 @@ class EditionTab(QWidget):
     def set_output_path(self, path: Path):
         """Set a fixed output path so Ctrl+S saves without a dialog."""
         self._output_path = Path(path)
+        self._output_path_is_fixed = True
+        self._update_file_label()
 
     def set_quit_after_save(self, enabled: bool):
         """Close the application after every successful save while enabled."""
         self._quit_after_save = enabled
 
-    def _save_file(self) -> bool:
+    def _save_file_as(self) -> bool:
+        """Prompt for a new destination and make it the active save path."""
+        return self._save_file(prompt_for_path=True)
+
+    def _save_file(self, *, prompt_for_path: bool = False) -> bool:
         if not self._ports:
             self._update_status("Nothing to save")
             return False
@@ -1334,11 +1354,13 @@ class EditionTab(QWidget):
             self._props_timer.stop()
             self._flush_props_update()
 
-        if self._output_path:
+        if self._output_path and not prompt_for_path:
             save_path = self._output_path
         else:
             default = ""
-            if self._loaded_path:
+            if self._output_path:
+                default = str(self._output_path)
+            elif self._loaded_path:
                 default = str(
                     self._loaded_path.with_name(self._loaded_path.stem + "_edited.pkl")
                 )
@@ -1365,6 +1387,9 @@ class EditionTab(QWidget):
                     "Edition was saved, but its audit report could not be written"
                 )
                 status = f"Saved: {save_path.name} (audit report not written)"
+            self._output_path = save_path
+            if prompt_for_path:
+                self._output_path_is_fixed = False
             self._set_dirty(False)
             self._update_status(status)
             self._update_file_label()
@@ -3220,7 +3245,7 @@ class EditionTab(QWidget):
     ):
         self.muap_widget.clear()
         self._muap_grid_key = None  # force grid rebuild on next _render_muap_grid call
-        plot = self.muap_widget.addPlot(row=0, col=0)
+        plot = self.muap_widget.addPlot(row=0, col=0, viewBox=XZoomViewBox())
         make_plot_item_safe(plot)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:

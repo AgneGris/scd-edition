@@ -388,14 +388,23 @@ does not have the same interpretation for SCD's normalized source signals.
 
 The large plot on the left shows the squared source signal (the spatial filter output) with spike locations marked as orange circles. A shaded region shows the plateau used for decomposition; outside this region the signal is reconstructed by replaying the peel-off sequence over the full recording.
 
-Right-click an orange spike marker to inspect its raw multichannel MUAP. The
-MUAP panel overlays that discharge as a thin solid orange line on a thicker
-blue leave-one-out reference made from the unit's other valid discharges. The
-header reports normalized waveform similarity, amplitude ratio and the small
-alignment lag used for the comparison. This is a review aid rather than an
-automatic keep/remove rule;
-overlapping activity and noise can reduce the score of a genuine discharge.
-Press `Escape`, or select another unit or port, to clear the inspection.
+Right-click an orange spike marker to inspect its multichannel MUAP. The MUAP
+panel overlays that discharge as a thin solid orange line on a thicker blue
+leave-one-out reference made from the unit's other valid discharges. The
+header reports normalized waveform similarity (`r`), amplitude ratio and the
+small alignment lag used for the comparison. This is a review aid rather than
+an automatic keep/remove rule: overlapping activity and noise can reduce the
+score of a genuine discharge.
+
+The selected orange waveform starts in **Raw EMG** mode. Switch to **Earlier
+units removed** to subtract only the units that came before the current unit
+in the original peel-off sequence; MU 0 therefore has nothing to subtract.
+This switch changes the orange waveform and its reported measurements, while
+the blue reference stays fixed. Use the **Selected spike** toggle to hide or
+show the orange overlay. While a spike is selected, `Left`/`Right`, `[`/`]`, or
+the previous/next buttons move through the unit's spikes. Right-click the same
+spike again, press `Escape`, or select another unit or port to finish the
+comparison.
 
 **Scrolling / zooming:**
 - **Scroll** — zoom in/out along the time axis
@@ -405,19 +414,24 @@ Press `Escape`, or select another unit or port, to clear the inspection.
 
 If force channels are configured, a force trace is overlaid on the source plot. The right y-axis shows % MVC, scaled automatically to the actual force range.
 
+The **...** menu on interactive plots provides **View all** and **Export
+plot**. Generic PyQtGraph transformations such as FFT, derivative, logarithmic
+axes and Y vs Y' are intentionally not exposed because they change the live
+plot state and can disrupt linked GUI views.
+
 #### Editing modes
 
 | Mode | How to activate | What it does |
 |------|----------------|--------------|
 | **View** | Default; press `Esc` to return | Navigate, zoom and inspect spikes without editing. |
-| **Add in Selection** | `A` or button | Toggle on, then drag a box to add all enclosed peaks. Press `A` again to turn it off. |
-| **Delete in Selection** | `D` or button | Toggle on, then drag a box to remove all enclosed spikes. Press `D` again to turn it off. |
+| **Add spikes** | `A` or button | Toggle on, then drag a box to add all enclosed peaks. Press `A` again to turn it off. |
+| **Delete spikes** | `D` or button | Toggle on, then drag a box to remove all enclosed spikes. Press `D` again to turn it off. |
 
 Press `Ctrl+Z` to undo (up to 100 steps) and `Ctrl+Y` to redo.
 
 #### MUAP plot
 
-Shows the spike-triggered average for every EMG channel. Toggle between **stacked** and **grid** layout (the grid layout reflects the physical electrode geometry). Click a channel to open a pop-out window with a larger view.
+Shows the spike-triggered average for every EMG channel. Toggle between **stacked** and **grid** layout (the grid layout reflects the physical electrode geometry). In the stacked view, scroll zooms the time axis, `Shift+Scroll` pans horizontally and `Ctrl+Scroll` zooms both axes. Click a channel to open a pop-out window with a larger view.
 
 #### Quality actions
 
@@ -435,7 +449,7 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 
 #### Saving
 
-`Ctrl+S` saves the current state to a `.pkl` file. The first save opens a dialog; subsequent saves to the same file happen silently. The saved file contains the edited spike trains, spatial filters, raw EMG, force data, and all metadata needed to reload and continue editing later.
+`Ctrl+S` saves the current state to a `.pkl` file. The first save opens a dialog and remembers the chosen destination; subsequent saves to the same file happen silently. Use **File → Save As…** (`Ctrl+Shift+S`) to choose a different destination. The saved file contains the edited spike trains, spatial filters, raw EMG, force data, and all metadata needed to reload and continue editing later.
 
 ---
 
@@ -517,9 +531,9 @@ Edition shortcuts (after a decomposition is loaded):
 
 | Key | Action |
 |-----|--------|
-| `A` | Toggle **Add in Selection**; drag a rectangle to add enclosed peaks |
-| `D` | Toggle **Del in Selection**; drag a rectangle to remove enclosed spikes |
-| `Esc` | Disarm selection and return to normal view interaction |
+| `A` | Toggle **Add spikes**; drag a rectangle to add enclosed peaks |
+| `D` | Toggle **Delete spikes**; drag a rectangle to remove enclosed spikes |
+| `Esc` | Disarm selection or close the current spike-MUAP comparison |
 | `F` | Replay peel-off and recalculate the current unit's filter, source and timestamps |
 | `O` | Remove instantaneous-firing-rate outlier spikes from the current unit |
 | `E` | Run rule-based auto-editing on the current unit |
@@ -531,9 +545,11 @@ Edition shortcuts (after a decomposition is loaded):
 | `Ctrl+Z` | Undo (`Cmd+Z` on macOS) |
 | `Ctrl+Y` | Redo (`Cmd+Shift+Z` on macOS) |
 | `Ctrl+S` | Save (`Cmd+S` on macOS) |
+| `Ctrl+Shift+S` | Save As… (`Cmd+Shift+S` on macOS) |
 | `Up` / `Down` | Previous / next motor unit |
 | `Ctrl+Up` / `Ctrl+Down` | Previous / next electrode grid or probe |
-| `Left` / `Right` | Pan the source plot left / right |
+| `Left` / `Right` | Previous / next spike during MUAP comparison; otherwise pan the source plot |
+| `[` / `]` | Previous / next spike during MUAP comparison |
 | `Home` | Reset the source and firing-rate view |
 | `Scroll` | Zoom time axis |
 | `Shift+Scroll` | Pan horizontally |

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 from scd_app.core.spike_muap import SpikeMUAPInspection
 from scd_app.gui.style.styling import COLORS, FONT_FAMILY
-from scd_app.gui.widgets.plot_tools import make_plot_item_safe
+from scd_app.gui.widgets.plot_tools import XZoomViewBox, make_plot_item_safe
 
 
 class MuapPopoutDialog(QDialog):
@@ -210,7 +210,7 @@ class MuapPopoutDialog(QDialog):
         remove_other_units: bool = False,
     ):
         self._plot.clear()
-        plot = self._plot.addPlot(row=0, col=0)
+        plot = self._plot.addPlot(row=0, col=0, viewBox=XZoomViewBox())
         make_plot_item_safe(plot)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:

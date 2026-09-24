@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
         self.edition_tab = EditionTab(fsamp=2048.0)
         self.tabs.addTab(self.edition_tab, "3. Edition")
 
-        # 4. Visualisation Tab (disabled until a file is loaded)
+        # 4. Visualisation Tab (available whenever Edition has loaded data)
         self.vis_tab = VisualisationTab(edition_tab=self.edition_tab)
         self.tabs.addTab(self.vis_tab, "4. Visualisation")
 
@@ -104,6 +104,11 @@ class MainWindow(QMainWindow):
 
         # File Menu
         file_menu = menubar.addMenu("&File")
+
+        file_menu.addAction(self.edition_tab.action_load)
+        file_menu.addAction(self.edition_tab.action_save)
+        file_menu.addAction(self.edition_tab.action_save_as)
+        file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -161,13 +166,13 @@ class MainWindow(QMainWindow):
         self.config = None
         self._set_tabs_enabled(False)
 
-    def _set_tabs_enabled(self, enabled: bool):
-        # Only control Decomposition tab (index 1)
-        self.tabs.setTabEnabled(1, enabled)
+    def _set_tabs_enabled(self, decomposition_enabled: bool):
+        # Configuration controls whether Decomposition is ready.
+        self.tabs.setTabEnabled(1, decomposition_enabled)
         # Always allow Edition (index 2)
         self.tabs.setTabEnabled(2, True)
-        # Visualisation tab (index 3) starts disabled; enabled on first file load
-        self.tabs.setTabEnabled(3, False)
+        # Visualisation depends only on Edition data, not Configuration state.
+        self.tabs.setTabEnabled(3, self.edition_tab.has_loaded_data)
 
     def _on_config_applied(self, config: SessionConfig, emg_paths: list):
         """Handle the 'Apply' event from the Configuration tab."""
@@ -196,7 +201,7 @@ class MainWindow(QMainWindow):
 
     def _on_file_loaded_into_edition(self):
         """Enable the Visualisation tab and mark it stale after a file load."""
-        self.tabs.setTabEnabled(3, True)
+        self.tabs.setTabEnabled(3, self.edition_tab.has_loaded_data)
         self.vis_tab.on_data_modified()
 
     def _on_decomposition_complete(self, decomp_path: Path):

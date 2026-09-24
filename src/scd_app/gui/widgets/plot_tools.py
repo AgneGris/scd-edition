@@ -3,9 +3,25 @@
 from __future__ import annotations
 
 import pyqtgraph as pg
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu, QToolButton
 
 from scd_app.gui.style.styling import COLORS
+
+
+class XZoomViewBox(pg.ViewBox):
+    """ViewBox whose default wheel interaction changes only the time axis."""
+
+    def wheelEvent(self, ev, axis=None):
+        mods = ev.modifiers()
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            delta = ev.delta()
+            self.translateBy(x=-delta / 200.0, y=0)
+            ev.accept()
+        elif mods & Qt.KeyboardModifier.ControlModifier:
+            super().wheelEvent(ev, axis=None)
+        else:
+            super().wheelEvent(ev, axis=0)
 
 
 def make_plot_item_safe(plot_item: pg.PlotItem) -> None:
