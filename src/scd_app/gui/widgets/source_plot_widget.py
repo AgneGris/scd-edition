@@ -3,7 +3,6 @@ source_plot_widget.py — EMG source signal plot and related widgets.
 
 Contains:
     SelectionArm         — rubberband selection state constants
-    XZoomViewBox         — Shift+scroll pans, plain scroll zooms X only
     _AuxLegend           — click-to-toggle floating AUX force legend
     SourcePlotWidget     — main source/IPT plot with point-click and rubberband editing
     FiringRatePlotWidget — instantaneous firing rate plot
@@ -20,7 +19,7 @@ from PySide6.QtWidgets import QRubberBand
 
 from scd_app.core.mu_model import EditMode
 from scd_app.gui.style.styling import COLORS
-from scd_app.gui.widgets.plot_tools import SafePlotWidget
+from scd_app.gui.widgets.plot_tools import SafePlotWidget, XZoomViewBox
 
 _MIN_RUBBERBAND_PX = 5  # drags smaller than this are ignored in selection-arm mode
 _SPIKE_CLICK_RADIUS_PX = 10
@@ -90,19 +89,6 @@ class SelectionArm:
     NONE = "none"
     ADD = "add"
     DELETE = "delete"
-
-
-class XZoomViewBox(pg.ViewBox):
-    def wheelEvent(self, ev, axis=None):
-        mods = ev.modifiers()
-        if mods & Qt.KeyboardModifier.ShiftModifier:
-            delta = ev.delta()
-            self.translateBy(x=-delta / 200.0, y=0)
-            ev.accept()
-        elif mods & Qt.KeyboardModifier.ControlModifier:
-            super().wheelEvent(ev, axis=None)
-        else:
-            super().wheelEvent(ev, axis=0)
 
 
 class _AuxLegend(pg.LegendItem):

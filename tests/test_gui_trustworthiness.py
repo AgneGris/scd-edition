@@ -107,6 +107,83 @@ def test_edition_save_writes_reproducibility_report(tmp_path):
     app.processEvents()
 
 
+def test_edition_remembers_first_save_destination(tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab(fsamp=1000.0)
+    tab._ports = {
+        "Grid 1": [
+            MotorUnit(
+                id=0,
+                timestamps=np.array([2, 6], dtype=np.int64),
+                source=np.arange(10, dtype=float),
+                port_name="Grid 1",
+            )
+        ]
+    }
+    tab._loaded_path = tmp_path / "original.pkl"
+    destination = tmp_path / "renamed-edition.pkl"
+
+    with patch.object(
+        QFileDialog,
+        "getSaveFileName",
+        return_value=(str(destination), "Pickle (*.pkl)"),
+    ) as save_dialog:
+        assert tab._save_file() is True
+        tab.action_save.trigger()
+
+    save_dialog.assert_called_once()
+    assert tab._output_path == destination
+    assert destination.exists()
+    assert destination.name in tab._file_label.text()
+
+    save_as_destination = tmp_path / "renamed-again.pkl"
+    with patch.object(
+        QFileDialog,
+        "getSaveFileName",
+        return_value=(str(save_as_destination), "Pickle (*.pkl)"),
+    ) as save_as_dialog:
+        tab.action_save_as.trigger()
+
+    save_as_dialog.assert_called_once()
+    assert tab._output_path == save_as_destination
+    assert save_as_destination.exists()
+    assert save_as_destination.name in tab._file_label.text()
+
+    tab.close()
+    app.processEvents()
+
+
+def test_loading_another_edition_resets_remembered_save_destination(tmp_path):
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    previous_destination = tmp_path / "previous-edition.pkl"
+    replacement = tmp_path / "replacement.pkl"
+    replacement.write_bytes(b"placeholder")
+    tab._output_path = previous_destination
+
+    with (
+        patch(
+            "scd_app.gui.tabs.edition_tab.load_decomposition_file",
+            return_value={},
+        ),
+        patch.object(tab, "_load_decomposition_data"),
+    ):
+        assert tab.load_from_path(replacement) is True
+
+    assert tab._loaded_path == replacement
+    assert tab._output_path is None
+
+    tab.close()
+    app.processEvents()
+
+
 def test_invalid_pickle_reports_a_load_error(tmp_path):
     from PySide6.QtWidgets import QMessageBox
 
@@ -218,6 +295,30 @@ def test_cancelled_save_prevents_window_close():
     app.processEvents()
 
 
+def test_configuration_state_does_not_disable_loaded_edition_visualisation():
+    from scd_app.gui.main_window import MainWindow
+
+    app = _application()
+    window = MainWindow()
+
+    assert not window.tabs.isTabEnabled(1)
+    assert not window.tabs.isTabEnabled(3)
+
+    # Reproduce loading an Edition file before applying Configuration.
+    window.edition_tab._ports = {"IN1": []}
+    window._on_file_loaded_into_edition()
+    assert window.tabs.isTabEnabled(3)
+
+    # Applying Configuration enables Decomposition but must leave the loaded
+    # Edition's Visualisation available.
+    window._set_tabs_enabled(True)
+    assert window.tabs.isTabEnabled(1)
+    assert window.tabs.isTabEnabled(3)
+
+    window.close()
+    app.processEvents()
+
+
 def test_window_close_requests_a_safe_worker_shutdown():
     from PySide6.QtWidgets import QMessageBox
 
@@ -287,6 +388,8 @@ def test_selection_shortcuts_toggle_switch_and_respect_disabled_buttons():
     tab = EditionTab()
     tab.btn_sel_add.setEnabled(True)
     tab.btn_sel_delete.setEnabled(True)
+    assert "Add spikes" in tab.btn_sel_add.text()
+    assert "Delete spikes" in tab.btn_sel_delete.text()
     shortcuts = {
         shortcut.key().toString(): shortcut for shortcut in tab.findChildren(QShortcut)
     }

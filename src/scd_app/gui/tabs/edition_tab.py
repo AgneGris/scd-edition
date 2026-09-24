@@ -77,7 +77,7 @@ from scd_app.gui.style.styling import (
 )
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
 from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
-from scd_app.gui.widgets.plot_tools import make_plot_item_safe
+from scd_app.gui.widgets.plot_tools import XZoomViewBox, make_plot_item_safe
 from scd_app.gui.widgets.source_plot_widget import (
     FiringRatePlotWidget,
     SelectionArm,
@@ -125,6 +125,7 @@ class EditionTab(QWidget):
         self._sel_arm = SelectionArm.NONE
         self._loaded_path: Path | None = None
         self._output_path: Path | None = None
+        self._output_path_is_fixed: bool = False
         self._quit_after_save: bool = False
         self._dirty: bool = False
         self._config_aux_channels: list = []  # from the last applied config, used to fill missing MVC on load
@@ -349,8 +350,14 @@ class EditionTab(QWidget):
 
         self.action_save = QAction("💾 Save", self)
         self.action_save.setShortcut(QKeySequence.StandardKey.Save)
-        self.action_save.triggered.connect(self._save_file)
+        self.action_save.triggered.connect(lambda _checked=False: self._save_file())
         tb.addAction(self.action_save)
+
+        self.action_save_as = QAction("Save &As…", self)
+        self.action_save_as.setShortcut(QKeySequence.StandardKey.SaveAs)
+        self.action_save_as.triggered.connect(
+            lambda _checked=False: self._save_file_as()
+        )
 
         self.action_reset = QAction("⟲ Reset View", self)
         self.action_reset.setShortcut(QKeySequence("Home"))
@@ -359,12 +366,11 @@ class EditionTab(QWidget):
 
         # ── Rubberband-drag selection toggles ─────────────────────────
         tb.addSeparator()
-        tb.addWidget(QLabel("  Select & "))
 
         success_color = COLORS.get("success", "#a6e3a1")
         error_color = COLORS.get("error", "#f38ba8")
 
-        self.btn_sel_add = QPushButton("✅ Add in Selection")
+        self.btn_sel_add = QPushButton("✅ Add spikes")
         self.btn_sel_add.setCheckable(True)
         self.btn_sel_add.setChecked(False)
         self.btn_sel_add.setStyleSheet(self._sel_btn_style(success_color))
@@ -378,7 +384,7 @@ class EditionTab(QWidget):
         self.btn_sel_add.setEnabled(False)
         tb.addWidget(self.btn_sel_add)
 
-        self.btn_sel_delete = QPushButton("🗑 Del in Selection")
+        self.btn_sel_delete = QPushButton("🗑 Delete spikes")
         self.btn_sel_delete.setCheckable(True)
         self.btn_sel_delete.setChecked(False)
         self.btn_sel_delete.setStyleSheet(self._sel_btn_style(error_color))
@@ -898,13 +904,19 @@ class EditionTab(QWidget):
     # ------------------------------------------------------------------
 
     def _update_file_label(self):
-        if self._loaded_path:
+        current_path = self._output_path or self._loaded_path
+        if current_path:
             dirty_marker = " *" if self._dirty else ""
             self._file_label.setText(
-                f"📄 Current File: {self._loaded_path.name}{dirty_marker}"
+                f"📄 Current File: {current_path.name}{dirty_marker}"
             )
         else:
             self._file_label.setText("")
+
+    @property
+    def has_loaded_data(self) -> bool:
+        """Whether a decomposition is available for downstream visualisation."""
+        return bool(self._ports)
 
     @property
     def is_dirty(self) -> bool:
@@ -1105,6 +1117,8 @@ class EditionTab(QWidget):
             self._loaded_path = path
             self._redetect_timestamps = redetect_timestamps
             self._load_decomposition_data(data)
+            if not self._output_path_is_fixed:
+                self._output_path = None
             imported_format = data.get("import_provenance", {}).get("format")
             if imported_format:
                 self._update_status(
@@ -1342,12 +1356,18 @@ class EditionTab(QWidget):
     def set_output_path(self, path: Path):
         """Set a fixed output path so Ctrl+S saves without a dialog."""
         self._output_path = Path(path)
+        self._output_path_is_fixed = True
+        self._update_file_label()
 
     def set_quit_after_save(self, enabled: bool):
         """Close the application after every successful save while enabled."""
         self._quit_after_save = enabled
 
-    def _save_file(self) -> bool:
+    def _save_file_as(self) -> bool:
+        """Prompt for a new destination and make it the active save path."""
+        return self._save_file(prompt_for_path=True)
+
+    def _save_file(self, *, prompt_for_path: bool = False) -> bool:
         if not self._ports:
             self._update_status("Nothing to save")
             return False
@@ -1358,11 +1378,13 @@ class EditionTab(QWidget):
             self._props_timer.stop()
             self._flush_props_update()
 
-        if self._output_path:
+        if self._output_path and not prompt_for_path:
             save_path = self._output_path
         else:
             default = ""
-            if self._loaded_path:
+            if self._output_path:
+                default = str(self._output_path)
+            elif self._loaded_path:
                 default = str(
                     self._loaded_path.with_name(self._loaded_path.stem + "_edited.pkl")
                 )
@@ -1389,6 +1411,9 @@ class EditionTab(QWidget):
                     "Edition was saved, but its audit report could not be written"
                 )
                 status = f"Saved: {save_path.name} (audit report not written)"
+            self._output_path = save_path
+            if prompt_for_path:
+                self._output_path_is_fixed = False
             self._set_dirty(False)
             self._update_status(status)
             self._update_file_label()
@@ -1710,17 +1735,20 @@ class EditionTab(QWidget):
                     "flag_cross_duplicates" | "reliability_override"
         extra: any additional serialisable fields to include in the record.
         """
-        self._edit_history.append(
-            {
-                "datetime": datetime.now().isoformat(),
-                "event_type": event_type,
-                "action": action,
-                "port_name": port_name,
-                "mu_idx": mu_idx,
-                "fsamp": self._fsamp,
-                **extra,
-            }
-        )
+        motor_unit = self._get_mu(port_name, mu_idx)
+        record = {
+            "datetime": datetime.now().isoformat(),
+            "event_type": event_type,
+            "action": action,
+            "port_name": port_name,
+            # ``mu_idx`` remains the compact position used to replay edits.
+            "mu_idx": mu_idx,
+            "fsamp": self._fsamp,
+            **extra,
+        }
+        if motor_unit is not None:
+            record["mu_id"] = motor_unit.id
+        self._edit_history.append(record)
 
     def _log_edit(self, event_type: str, action: UndoAction):
         """Append one entry to _edit_history for an undo-tracked spike edit.
@@ -1923,6 +1951,10 @@ class EditionTab(QWidget):
 
     def _current_mu(self) -> MotorUnit | None:
         return self._get_mu(self._current_port, self._current_mu_idx)
+
+    def _current_mu_id(self) -> int:
+        motor_unit = self._current_mu()
+        return motor_unit.id if motor_unit is not None else self._current_mu_idx
 
     def _get_mu(self, port, idx) -> MotorUnit | None:
         if port is None or idx < 0:
@@ -2224,12 +2256,11 @@ class EditionTab(QWidget):
         id_maps = {}
         for port_name in ports:
             kept = [mu for mu in self._ports[port_name] if not mu.flagged_for_deletion]
-            id_maps[port_name] = {mu.id: i for i, mu in enumerate(kept)}
-            for i, mu in enumerate(kept):
-                mu.id = i
+            id_maps[port_name] = {mu.id: mu.id for mu in kept}
             self._ports[port_name] = kept
 
-        # Note tags refer to unit ids, so follow the renumbering.
+        # Retained units preserve their stable ids; notes for removed units are
+        # marked as deleted instead of being silently reassigned.
         self._notes = remap_note_tags(self._notes, id_maps)
 
         # Duplicate partner IDs and undo keys refer to the pre-deletion unit
@@ -2940,7 +2971,7 @@ class EditionTab(QWidget):
         if n > 0:
             parts.append(f"{n} MUs")
         if self._current_mu_idx >= 0:
-            parts.append(f"MU: {self._current_mu_idx}")
+            parts.append(f"MU: {self._current_mu_id()}")
 
         if self._sel_arm == SelectionArm.ADD:
             parts.append("⬜ Drag to ADD  (armed)")
@@ -2999,7 +3030,7 @@ class EditionTab(QWidget):
                     muap_grid,
                     grid_cfg,
                     rejected_pos,
-                    self._current_mu_idx,
+                    mu.id,
                     inspection=inspection,
                     fsamp=self._fsamp,
                     show_selected=self._show_selected_spike,
@@ -3031,7 +3062,7 @@ class EditionTab(QWidget):
                 self._muap_popout.render_stacked(
                     waveforms,
                     list(range(n_ch)),
-                    self._current_mu_idx,
+                    mu.id,
                     selected_waveforms=selected_waveforms,
                     inspection=inspection,
                     fsamp=self._fsamp,
@@ -3044,7 +3075,7 @@ class EditionTab(QWidget):
         if inspection is None:
             return (
                 f"<span style='color:{COLORS['foreground']};font-size:{font_size};'>"
-                f"MU {self._current_mu_idx}</span>"
+                f"MU {self._current_mu_id()}</span>"
             )
         spike_time = inspection.selected_sample / self._fsamp
         _, similarity, amplitude_ratio, lag_ms = self._selected_spike_view(inspection)
@@ -3054,7 +3085,7 @@ class EditionTab(QWidget):
         selected_mode = self._selected_spike_mode_label()
         return (
             f"<span style='color:{COLORS['foreground']};font-size:{font_size};'>"
-            f"MU {self._current_mu_idx} | spike {spike_time:.3f} s | "
+            f"MU {self._current_mu_id()} | spike {spike_time:.3f} s | "
             f"r {similarity:.3f} | "
             f"amplitude {amplitude_ratio:.2f}x | "
             f"lag {lag_ms:+.2f} ms</span><br>"
@@ -3268,7 +3299,7 @@ class EditionTab(QWidget):
     ):
         self.muap_widget.clear()
         self._muap_grid_key = None  # force grid rebuild on next _render_muap_grid call
-        plot = self.muap_widget.addPlot(row=0, col=0)
+        plot = self.muap_widget.addPlot(row=0, col=0, viewBox=XZoomViewBox())
         make_plot_item_safe(plot)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:
@@ -3302,7 +3333,7 @@ class EditionTab(QWidget):
         plot.getAxis("left").setVisible(False)
         if inspection is None:
             plot.setTitle(
-                f"MU {self._current_mu_idx} — Stacked",
+                f"MU {self._current_mu_id()} — Stacked",
                 color=COLORS["foreground"],
                 size="10pt",
             )

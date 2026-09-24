@@ -217,11 +217,65 @@ def _validate_native_decomposition(data: dict) -> dict:
         normalized_timestamps.append(port_timestamps)
         normalized_sources.append(port_sources)
 
+    raw_motor_unit_ids = data.get("motor_unit_ids")
+    if raw_motor_unit_ids is None:
+        normalized_motor_unit_ids = [
+            list(range(len(port_timestamps)))
+            for port_timestamps in normalized_timestamps
+        ]
+    else:
+        motor_unit_id_ports = _outer_list(raw_motor_unit_ids, "motor_unit_ids")
+        if len(motor_unit_id_ports) != len(ports):
+            raise UnsupportedDecompositionFormat(
+                "SCD Edition motor_unit_ids has "
+                f"{len(motor_unit_id_ports)} port entries, but ports has "
+                f"{len(ports)}."
+            )
+
+        normalized_motor_unit_ids = []
+        for port_index, port_name in enumerate(ports):
+            port_ids = _outer_list(
+                motor_unit_id_ports[port_index],
+                f"motor_unit_ids[{port_index}]",
+            )
+            expected_count = len(normalized_timestamps[port_index])
+            if len(port_ids) != expected_count:
+                raise UnsupportedDecompositionFormat(
+                    f"Port {port_name!r} has {expected_count} motor units but "
+                    f"{len(port_ids)} motor_unit_ids entries."
+                )
+
+            normalized_port_ids = []
+            for unit_index, unit_id in enumerate(port_ids):
+                if isinstance(unit_id, (bool, np.bool_)) or not isinstance(
+                    unit_id, (int, np.integer)
+                ):
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition "
+                        f"motor_unit_ids[{port_index}][{unit_index}] must be "
+                        "a non-negative integer."
+                    )
+                normalized_id = int(unit_id)
+                if normalized_id < 0:
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition "
+                        f"motor_unit_ids[{port_index}][{unit_index}] must be "
+                        "a non-negative integer."
+                    )
+                normalized_port_ids.append(normalized_id)
+
+            if len(set(normalized_port_ids)) != len(normalized_port_ids):
+                raise UnsupportedDecompositionFormat(
+                    f"SCD Edition motor_unit_ids for port {port_name!r} must be unique."
+                )
+            normalized_motor_unit_ids.append(normalized_port_ids)
+
     normalized = dict(data)
     normalized["ports"] = ports
     normalized["sampling_rate"] = sampling_rate
     normalized["discharge_times"] = normalized_timestamps
     normalized["pulse_trains"] = normalized_sources
+    normalized["motor_unit_ids"] = normalized_motor_unit_ids
     if not isinstance(normalized.get("notes", []), list):
         normalized["notes"] = []
     if not isinstance(normalized.get("edit_history", []), list):

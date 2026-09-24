@@ -69,7 +69,45 @@ def test_migrates_legacy_native_session_to_versioned_schema():
     assert migrated["format"] == GUI_FORMAT
     assert migrated["schema_version"] == CURRENT_SCHEMA_VERSION
     assert migrated["sampling_rate"] == 1000.0
+    assert migrated["motor_unit_ids"] == [[0]]
     np.testing.assert_array_equal(migrated["discharge_times"][0][0], [2, 6])
+
+
+def test_preserves_sparse_motor_unit_ids_per_port():
+    native = _native_result()
+    native["discharge_times"][0].append(np.array([1, 8]))
+    native["pulse_trains"][0].append(np.arange(10, dtype=float))
+    native["motor_unit_ids"] = [[0, 3]]
+
+    migrated = migrate_and_validate_decomposition(native)
+
+    assert migrated["motor_unit_ids"] == [[0, 3]]
+
+
+@pytest.mark.parametrize(
+    ("motor_unit_ids", "message"),
+    [
+        ([[0, 1]], "motor units but 2 motor_unit_ids"),
+        ([[2.0]], "non-negative integer"),
+        ([[-1]], "non-negative integer"),
+    ],
+)
+def test_rejects_invalid_motor_unit_ids(motor_unit_ids, message):
+    malformed = _native_result()
+    malformed["motor_unit_ids"] = motor_unit_ids
+
+    with pytest.raises(UnsupportedDecompositionFormat, match=message):
+        migrate_and_validate_decomposition(malformed)
+
+
+def test_rejects_duplicate_motor_unit_ids_within_a_port():
+    malformed = _native_result()
+    malformed["discharge_times"][0].append(np.array([1, 8]))
+    malformed["pulse_trains"][0].append(np.arange(10, dtype=float))
+    malformed["motor_unit_ids"] = [[1, 1]]
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="must be unique"):
+        migrate_and_validate_decomposition(malformed)
 
 
 def test_rejects_native_session_with_misaligned_port_data():
