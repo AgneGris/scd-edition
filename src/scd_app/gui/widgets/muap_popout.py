@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout
 
 from scd_app.core.spike_muap import SpikeMUAPInspection
 from scd_app.gui.style.styling import COLORS, FONT_FAMILY
+from scd_app.gui.widgets.plot_tools import make_plot_item_safe
 
 
 class MuapPopoutDialog(QDialog):
@@ -42,6 +43,8 @@ class MuapPopoutDialog(QDialog):
         *,
         inspection: SpikeMUAPInspection | None = None,
         fsamp: float = 1.0,
+        show_selected: bool = True,
+        remove_other_units: bool = False,
     ):
         self._plot.clear()
         rows, cols = grid_cfg["grid_shape"]
@@ -50,7 +53,11 @@ class MuapPopoutDialog(QDialog):
         reference_grid = (
             inspection.reference_grid if inspection is not None else muap_grid
         )
-        selected_grid = inspection.selected_grid if inspection is not None else None
+        selected_grid = (
+            inspection.selected_view(remove_other_units)[0]
+            if inspection is not None and show_selected
+            else None
+        )
 
         valid_wavs = [
             grid[r, c]
@@ -78,15 +85,23 @@ class MuapPopoutDialog(QDialog):
             )
         else:
             spike_time = inspection.selected_sample / fsamp
+            _, similarity, amplitude_ratio, lag_ms = inspection.selected_view(
+                remove_other_units
+            )
+            selected_label = (
+                "selected spike" if show_selected else "selected spike hidden"
+            )
+            selected_mode = "earlier units removed" if remove_other_units else "raw EMG"
             label = (
                 f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
                 f"MU {mu_idx} · spike {spike_time:.3f} s · "
-                f"similarity {inspection.similarity:.3f} · "
-                f"amplitude {inspection.amplitude_ratio:.2f}× · "
-                f"lag {inspection.lag_ms:+.2f} ms</span><br>"
+                f"r {similarity:.3f} · "
+                f"amplitude {amplitude_ratio:.2f}× · "
+                f"lag {lag_ms:+.2f} ms</span><br>"
                 f"<span style='color:{COLORS['info']};font-size:9pt;'>"
                 f"reference (other {inspection.n_reference_spikes})</span> · "
-                f"<span style='color:#ed8936;font-size:9pt;'>selected spike</span>"
+                f"<span style='color:#ed8936;font-size:9pt;'>"
+                f"{selected_label} ({selected_mode})</span>"
             )
         self._plot.addLabel(label, row=0, col=0, colspan=cols + 1, justify="center")
 
@@ -122,6 +137,7 @@ class MuapPopoutDialog(QDialog):
         for r in range(rows):
             for c in range(cols):
                 p = self._plot.addPlot(row=r + 2, col=c + 1)
+                make_plot_item_safe(p)
                 p.hideAxis("left")
                 p.hideAxis("bottom")
                 p.setMouseEnabled(x=False, y=False)
@@ -191,9 +207,11 @@ class MuapPopoutDialog(QDialog):
         selected_waveforms=None,
         inspection: SpikeMUAPInspection | None = None,
         fsamp: float = 1.0,
+        remove_other_units: bool = False,
     ):
         self._plot.clear()
         plot = self._plot.addPlot(row=0, col=0)
+        make_plot_item_safe(plot)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:
             return
@@ -228,11 +246,15 @@ class MuapPopoutDialog(QDialog):
             title = f"MU {mu_idx} — Stacked"
         else:
             spike_time = inspection.selected_sample / fsamp
+            _, similarity, amplitude_ratio, lag_ms = inspection.selected_view(
+                remove_other_units
+            )
+            selected_mode = "earlier units removed" if remove_other_units else "raw EMG"
             title = (
                 f"MU {mu_idx} · spike {spike_time:.3f} s · "
-                f"similarity {inspection.similarity:.3f} · "
-                f"amplitude {inspection.amplitude_ratio:.2f}× · "
-                f"lag {inspection.lag_ms:+.2f} ms"
+                f"r {similarity:.3f} · "
+                f"amplitude {amplitude_ratio:.2f}× · "
+                f"lag {lag_ms:+.2f} ms · {selected_mode}"
             )
         plot.setTitle(title, color=COLORS["foreground"], size="11pt")
         self.setWindowTitle(f"MUAP Shapes — MU {mu_idx} (Stacked)")
@@ -240,6 +262,7 @@ class MuapPopoutDialog(QDialog):
     def clear(self, message="Select a Motor Unit"):
         self._plot.clear()
         p = self._plot.addPlot(row=0, col=0)
+        make_plot_item_safe(p)
         p.hideAxis("left")
         p.hideAxis("bottom")
         p.setMouseEnabled(x=False, y=False)

@@ -102,6 +102,54 @@ def test_small_timing_jitter_is_aligned_and_reported():
     assert result.lag_ms == pytest.approx(2.0)
 
 
+def test_other_unit_contribution_is_removed_before_comparison():
+    target = np.array([[0.0, -1.0, 0.5, 3.0, 1.0, -0.5, -2.0, -1.0, 0.0, 0.0]])
+    interfering = np.array([[0.0, 2.0, 1.0, -1.0, -3.0, -1.0, 0.0, 1.0, 1.0, 0.0]])
+    target_timestamps = np.array([40, 80, 120])
+    other_timestamps = np.array([20, 80, 160])
+    emg = np.zeros((1, 190), dtype=float)
+    half_window = target.shape[1] // 2
+    for timestamp in target_timestamps:
+        emg[:, timestamp - half_window : timestamp + half_window] += target
+    for timestamp in other_timestamps:
+        emg[:, timestamp - half_window : timestamp + half_window] += interfering
+
+    raw_result = inspect_spike_muap(
+        emg,
+        target_timestamps,
+        selected_sample=80,
+        fsamp=1000.0,
+        win_ms=10,
+        max_lag_ms=0,
+    )
+    reduced_result = inspect_spike_muap(
+        emg,
+        target_timestamps,
+        selected_sample=80,
+        fsamp=1000.0,
+        other_unit_timestamps=[other_timestamps],
+        win_ms=10,
+        max_lag_ms=0,
+    )
+
+    assert raw_result.similarity < 0.9
+    assert reduced_result.similarity == pytest.approx(1.0)
+    assert reduced_result.amplitude_ratio == pytest.approx(1.0)
+    assert reduced_result.raw_similarity == pytest.approx(raw_result.similarity)
+    assert reduced_result.raw_amplitude_ratio == pytest.approx(
+        raw_result.amplitude_ratio
+    )
+    assert reduced_result.n_subtracted_units == 1
+    assert reduced_result.n_subtracted_events == 1
+    np.testing.assert_allclose(
+        reduced_result.reference_grid, raw_result.reference_grid, equal_nan=True
+    )
+    reference = reduced_result.reference_grid[0, 0]
+    selected = reduced_result.selected_view(remove_other_units=True)[0][0, 0]
+    finite = np.isfinite(reference) & np.isfinite(selected)
+    np.testing.assert_allclose(selected[finite], reference[finite])
+
+
 def test_active_channel_mapping_is_preserved_in_grid_output():
     template = np.array(
         [
@@ -211,6 +259,14 @@ def test_edition_inspection_does_not_modify_the_motor_unit():
         port_name="Grid 1",
         props=MUProperties(muap_grid=np.ones((1, 1, 10))),
     )
+    other_timestamps = np.array([30, 50, 70], dtype=np.int64)
+    other_unit = MotorUnit(
+        id=1,
+        timestamps=other_timestamps,
+        source=np.zeros(100),
+        port_name="Grid 1",
+        props=MUProperties(muap_grid=np.ones((1, 1, 10))),
+    )
     result = SpikeMUAPInspection(
         selected_sample=60,
         reference_grid=np.ones((1, 1, 10)),
@@ -221,13 +277,15 @@ def test_edition_inspection_does_not_modify_the_motor_unit():
         n_reference_spikes=2,
         n_informative_channels=1,
     )
-    tab._ports = {"Grid 1": [unit]}
+    tab._ports = {"Grid 1": [unit, other_unit]}
     tab._emg_data = {"Grid 1": np.zeros((1, 100))}
     tab._current_port = "Grid 1"
     tab._current_mu_idx = 0
 
     with (
-        patch("scd_app.gui.tabs.edition_tab.inspect_spike_muap", return_value=result),
+        patch(
+            "scd_app.gui.tabs.edition_tab.inspect_spike_muap", return_value=result
+        ) as inspect,
         patch.object(tab, "_plot_muap") as plot_muap,
     ):
         tab._inspect_spike_muap(60)
@@ -236,7 +294,117 @@ def test_edition_inspection_does_not_modify_the_motor_unit():
     assert tab.is_dirty is False
     assert tab._spike_muap_inspection is result
     assert tab._spike_muap_inspection_key == ("Grid 1", 0)
+    passed_other_units = inspect.call_args.kwargs["other_unit_timestamps"]
+    assert passed_other_units == []
     plot_muap.assert_called_once_with()
+
+    # The next unit sees MU 0's current timestamps, matching accepted-unit
+    # peel-off order; later units are never subtracted from earlier ones.
+    tab._spike_muap_inspection = None
+    tab._spike_muap_inspection_key = None
+    tab._current_mu_idx = 1
+    with (
+        patch(
+            "scd_app.gui.tabs.edition_tab.inspect_spike_muap", return_value=result
+        ) as inspect,
+        patch.object(tab, "_plot_muap"),
+    ):
+        tab._inspect_spike_muap(70)
+    passed_other_units = inspect.call_args.kwargs["other_unit_timestamps"]
+    assert len(passed_other_units) == 1
+    np.testing.assert_array_equal(passed_other_units[0], timestamps)
+
+    tab.close()
+    app.processEvents()
+
+
+def test_inspected_spike_can_be_hidden_and_navigated():
+    from PySide6.QtWidgets import QApplication
+
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.core.mu_properties import MUProperties
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = QApplication.instance() or QApplication([])
+    tab = EditionTab(fsamp=1000.0)
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array([20, 40, 60], dtype=np.int64),
+        source=np.zeros(100),
+        port_name="Grid 1",
+        props=MUProperties(muap_grid=np.ones((1, 1, 10))),
+    )
+    tab._ports = {"Grid 1": [unit]}
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._spike_muap_inspection = SpikeMUAPInspection(
+        selected_sample=40,
+        reference_grid=np.ones((1, 1, 10)),
+        selected_grid=np.ones((1, 1, 10)),
+        similarity=1.0,
+        amplitude_ratio=1.0,
+        lag_ms=0.0,
+        n_reference_spikes=2,
+        n_informative_channels=1,
+        raw_selected_grid=np.full((1, 1, 10), 2.0),
+        raw_similarity=0.25,
+        raw_amplitude_ratio=2.0,
+        raw_lag_ms=1.0,
+    )
+    tab._spike_muap_inspection_key = ("Grid 1", 0)
+    tab._update_muap_inspection_controls()
+
+    assert tab.muap_spike_position_label.text() == "Spike 2/3"
+    assert tab.btn_prev_inspected_spike.isEnabled()
+    assert tab.btn_next_inspected_spike.isEnabled()
+    assert tab.spike_signal_combo.currentText() == "Raw EMG"
+    assert tab._selected_spike_view(tab._spike_muap_inspection)[1:] == (
+        0.25,
+        2.0,
+        1.0,
+    )
+
+    with patch.object(tab, "_inspect_spike_muap") as inspect:
+        tab._navigate_inspected_spike(1)
+    inspect.assert_called_once_with(60)
+
+    with patch.object(tab, "_navigate_inspected_spike") as navigate:
+        tab._handle_horizontal_arrow(-1)
+    navigate.assert_called_once_with(-1)
+
+    with patch.object(tab, "_plot_muap") as plot_muap:
+        tab.btn_show_selected_spike.setChecked(False)
+    assert tab._show_selected_spike is False
+    plot_muap.assert_called_once_with()
+
+    with (
+        patch.object(tab, "_plot_muap") as plot_muap,
+        patch.object(tab, "_update_status"),
+    ):
+        tab.spike_signal_combo.setCurrentIndex(1)
+    assert tab._remove_other_units_from_selected_spike is True
+    assert tab._selected_spike_view(tab._spike_muap_inspection)[1:] == (
+        1.0,
+        1.0,
+        0.0,
+    )
+    plot_muap.assert_called_once_with()
+
+    with (
+        patch("scd_app.gui.tabs.edition_tab.inspect_spike_muap") as inspect,
+        patch.object(tab, "_plot_muap") as plot_muap,
+        patch.object(tab, "_update_status") as update_status,
+    ):
+        tab._inspect_spike_muap(40)
+    inspect.assert_not_called()
+    assert tab._spike_muap_inspection is None
+    assert tab._spike_muap_inspection_key is None
+    plot_muap.assert_called_once_with()
+    assert update_status.call_args_list[-1].args == ("Spike MUAP inspection cleared",)
+
+    with patch.object(tab, "_pan_source") as pan_source:
+        tab._handle_horizontal_arrow(1)
+    pan_source.assert_called_once_with(0.02)
 
     tab.close()
     app.processEvents()
@@ -279,6 +447,11 @@ def test_muap_grid_renders_and_clears_selected_spike_overlay():
     assert selected_pen.widthF() == pytest.approx(1.5)
     assert selected_pen.style() == Qt.PenStyle.SolidLine
     assert selected_pen.color().alpha() == 210
+
+    tab._show_selected_spike = False
+    tab._render_muap_grid(ordinary, grid_config, inspection=result)
+    _, hidden_y = tab._muap_inspection_items[(0, 0)].getData()
+    assert hidden_y is None or hidden_y.size == 0
 
     tab._render_muap_grid(ordinary, grid_config)
 

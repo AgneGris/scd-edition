@@ -77,6 +77,7 @@ from scd_app.gui.style.styling import (
 )
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
 from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
+from scd_app.gui.widgets.plot_tools import make_plot_item_safe
 from scd_app.gui.widgets.source_plot_widget import (
     FiringRatePlotWidget,
     SelectionArm,
@@ -140,6 +141,8 @@ class EditionTab(QWidget):
         self._last_action_msg: str | None = None
         self._spike_muap_inspection: SpikeMUAPInspection | None = None
         self._spike_muap_inspection_key: tuple[str, int] | None = None
+        self._show_selected_spike: bool = True
+        self._remove_other_units_from_selected_spike: bool = False
 
         # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
         self._props_timer = QTimer(self)
@@ -342,9 +345,10 @@ class EditionTab(QWidget):
         self.btn_sel_add.setChecked(False)
         self.btn_sel_add.setStyleSheet(self._sel_btn_style(success_color))
         self.btn_sel_add.setToolTip(
-            "Toggle ON: drag a rectangle on the plot to add all peaks inside it.\n"
+            "Toggle selection-add mode [A]: drag a rectangle on the plot to add "
+            "all peaks inside it.\n"
             "Stays armed — drag as many times as needed.\n"
-            "Click again to turn off."
+            "Click or press A again to turn off."
         )
         self.btn_sel_add.toggled.connect(self._on_sel_add_toggled)
         self.btn_sel_add.setEnabled(False)
@@ -355,9 +359,10 @@ class EditionTab(QWidget):
         self.btn_sel_delete.setChecked(False)
         self.btn_sel_delete.setStyleSheet(self._sel_btn_style(error_color))
         self.btn_sel_delete.setToolTip(
-            "Toggle ON: drag a rectangle on the plot to delete all spikes inside it.\n"
+            "Toggle selection-delete mode [D]: drag a rectangle on the plot to "
+            "delete all spikes inside it.\n"
             "Stays armed — drag as many times as needed.\n"
-            "Click again to turn off."
+            "Click or press D again to turn off."
         )
         self.btn_sel_delete.toggled.connect(self._on_sel_delete_toggled)
         self.btn_sel_delete.setEnabled(False)
@@ -569,6 +574,62 @@ class EditionTab(QWidget):
         self.btn_flag_cross_dups.setEnabled(False)
         lay.addWidget(self.btn_flag_cross_dups)
 
+        inspection_row = QHBoxLayout()
+        self.btn_prev_inspected_spike = QPushButton("◀")
+        self.btn_prev_inspected_spike.setFixedWidth(32)
+        self.btn_prev_inspected_spike.setStyleSheet(base_btn_style)
+        self.btn_prev_inspected_spike.setToolTip("Inspect the previous spike [")
+        self.btn_prev_inspected_spike.clicked.connect(
+            lambda: self._navigate_inspected_spike(-1)
+        )
+        inspection_row.addWidget(self.btn_prev_inspected_spike)
+
+        self.muap_spike_position_label = QLabel("Spike —")
+        self.muap_spike_position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.muap_spike_position_label.setStyleSheet(
+            f"color: {COLORS.get('text_dim', '#6c7086')}; font-size: {_fs};"
+        )
+        inspection_row.addWidget(self.muap_spike_position_label, stretch=1)
+
+        self.btn_next_inspected_spike = QPushButton("▶")
+        self.btn_next_inspected_spike.setFixedWidth(32)
+        self.btn_next_inspected_spike.setStyleSheet(base_btn_style)
+        self.btn_next_inspected_spike.setToolTip("Inspect the next spike ]")
+        self.btn_next_inspected_spike.clicked.connect(
+            lambda: self._navigate_inspected_spike(1)
+        )
+        inspection_row.addWidget(self.btn_next_inspected_spike)
+
+        self.btn_show_selected_spike = QPushButton("Selected spike")
+        self.btn_show_selected_spike.setCheckable(True)
+        self.btn_show_selected_spike.setChecked(True)
+        self.btn_show_selected_spike.setStyleSheet(self._sel_btn_style("#ed8936"))
+        self.btn_show_selected_spike.setToolTip(
+            "Show or hide the selected spike over the reference MUAP"
+        )
+        self.btn_show_selected_spike.toggled.connect(
+            self._toggle_selected_spike_visibility
+        )
+        inspection_row.addWidget(self.btn_show_selected_spike)
+        lay.addLayout(inspection_row)
+
+        signal_row = QHBoxLayout()
+        signal_label = QLabel("Selected waveform:")
+        signal_label.setStyleSheet(f"color: {COLORS['foreground']}; font-size: {_fs};")
+        signal_row.addWidget(signal_label)
+        self.spike_signal_combo = QComboBox()
+        self.spike_signal_combo.addItems(["Raw EMG", "Earlier units removed"])
+        self.spike_signal_combo.setCurrentIndex(0)
+        self.spike_signal_combo.setStyleSheet(self._combo_style())
+        self.spike_signal_combo.setToolTip(
+            "Switch only the selected orange waveform; the blue reference stays fixed"
+        )
+        self.spike_signal_combo.currentIndexChanged.connect(
+            self._on_spike_signal_mode_changed
+        )
+        signal_row.addWidget(self.spike_signal_combo, stretch=1)
+        lay.addLayout(signal_row)
+
         self.muap_widget = pg.GraphicsLayoutWidget()
         self.muap_widget.setBackground(COLORS["background"])
         self.muap_widget.setStyleSheet(
@@ -590,6 +651,7 @@ class EditionTab(QWidget):
         self.btn_muap_popout.clicked.connect(self._open_muap_popout)
         self.btn_muap_popout.raise_()
         self.muap_widget.installEventFilter(self)
+        self._update_muap_inspection_controls()
 
         return panel
 
@@ -637,22 +699,31 @@ class EditionTab(QWidget):
         QShortcut(QKeySequence("Down"), self, self._select_next_mu)
         QShortcut(QKeySequence("Ctrl+Up"), self, self._select_prev_port)
         QShortcut(QKeySequence("Ctrl+Down"), self, self._select_next_port)
-        QShortcut(QKeySequence("Left"), self, lambda: self._pan_source(-0.02))
-        QShortcut(QKeySequence("Right"), self, lambda: self._pan_source(0.02))
-        QShortcut(QKeySequence("A"), self, lambda: self.btn_sel_add.setChecked(True))
-        QShortcut(QKeySequence("D"), self, lambda: self.btn_sel_delete.setChecked(True))
+        QShortcut(QKeySequence("Left"), self, lambda: self._handle_horizontal_arrow(-1))
+        QShortcut(QKeySequence("Right"), self, lambda: self._handle_horizontal_arrow(1))
+        QShortcut(QKeySequence("A"), self, self.btn_sel_add.click)
+        QShortcut(QKeySequence("D"), self, self.btn_sel_delete.click)
         QShortcut(QKeySequence("Escape"), self, self._handle_escape)
         QShortcut(QKeySequence("X"), self, self.btn_flag_delete.click)
         QShortcut(QKeySequence("M"), self, self.btn_reviewed.click)
         QShortcut(QKeySequence("N"), self, self.btn_next_unreviewed.click)
         QShortcut(QKeySequence("T"), self, self._toggle_reliability)
         QShortcut(QKeySequence("Shift+T"), self, self._reset_reliability)
+        QShortcut(QKeySequence("["), self, lambda: self._navigate_inspected_spike(-1))
+        QShortcut(QKeySequence("]"), self, lambda: self._navigate_inspected_spike(1))
 
     def _pan_source(self, fraction: float):
         """Pan the source plot by `fraction` of the current visible width."""
         vb = self.source_plot.getViewBox()
         (x_min, x_max), _ = vb.viewRange()
         vb.translateBy(x=(x_max - x_min) * fraction, y=0)
+
+    def _handle_horizontal_arrow(self, direction: int):
+        """Navigate inspected spikes, otherwise preserve normal signal panning."""
+        if self._current_spike_muap_inspection() is not None:
+            self._navigate_inspected_spike(direction)
+        else:
+            self._pan_source(0.02 * direction)
 
     # ------------------------------------------------------------------
     # Sampling rate
@@ -1079,6 +1150,20 @@ class EditionTab(QWidget):
         start_sample = 0
         end_sample = emg_full.shape[1] if emg_full is not None else 0
 
+        # Stored sources and discharge times are plateau-local, including in
+        # edited files that set skip_filter_recalc=True.  Resolve the plateau
+        # before choosing the recalculation path so a saved edition does not
+        # pair local timestamps with EMG from the start of the recording.
+        sel_pts = decomp_data.get("plateau_coords", decomp_data.get("selected_points"))
+        if sel_pts is not None:
+            try:
+                pts = to_numpy(np.asarray(sel_pts)).flatten()
+                start_sample, end_sample = int(pts[0]), int(pts[1])
+            except (IndexError, TypeError, ValueError):
+                pass
+        if end_sample <= start_sample and emg_full is not None:
+            end_sample = emg_full.shape[1]
+
         if skip_recalc:
             logger.info(
                 "skip_filter_recalc=True — using stored sources/timestamps as-is"
@@ -1101,18 +1186,6 @@ class EditionTab(QWidget):
             except Exception as e:
                 logger.exception("Full source computation failed: %s", e)
                 full_port_results = {}
-        else:
-            sel_pts = decomp_data.get(
-                "plateau_coords", decomp_data.get("selected_points")
-            )
-            if sel_pts is not None:
-                try:
-                    pts = to_numpy(np.asarray(sel_pts)).flatten()
-                    start_sample, end_sample = int(pts[0]), int(pts[1])
-                except (IndexError, TypeError, ValueError):
-                    pass
-            if end_sample <= start_sample and emg_full is not None:
-                end_sample = emg_full.shape[1]
 
         self._start_sample = start_sample
         self._end_sample = end_sample
@@ -1377,11 +1450,95 @@ class EditionTab(QWidget):
         self._spike_muap_inspection = None
         self._spike_muap_inspection_key = None
         self.source_plot.set_inspected_spike(None)
+        self._update_muap_inspection_controls()
         if render and had_inspection and self._current_mu() is not None:
             self._plot_muap()
 
+    def _update_muap_inspection_controls(self):
+        """Keep spike navigation and overlay controls in sync with selection."""
+        if not hasattr(self, "btn_prev_inspected_spike"):
+            return
+        inspection = self._current_spike_muap_inspection()
+        mu = self._current_mu()
+        timestamps = (
+            np.unique(np.asarray(mu.timestamps, dtype=np.int64))
+            if mu is not None
+            else np.array([], dtype=np.int64)
+        )
+        selected_index = -1
+        if inspection is not None:
+            matches = np.flatnonzero(timestamps == inspection.selected_sample)
+            if matches.size:
+                selected_index = int(matches[0])
+
+        active = selected_index >= 0
+        self.btn_prev_inspected_spike.setEnabled(active and selected_index > 0)
+        self.btn_next_inspected_spike.setEnabled(
+            active and selected_index < len(timestamps) - 1
+        )
+        self.btn_show_selected_spike.setEnabled(active)
+        self.spike_signal_combo.setEnabled(active)
+        self.muap_spike_position_label.setText(
+            f"Spike {selected_index + 1}/{len(timestamps)}" if active else "Spike —"
+        )
+
+    def _navigate_inspected_spike(self, step: int):
+        """Inspect the adjacent discharge without wrapping at the unit's ends."""
+        inspection = self._current_spike_muap_inspection()
+        mu = self._current_mu()
+        if inspection is None or mu is None:
+            return
+        timestamps = np.unique(np.asarray(mu.timestamps, dtype=np.int64))
+        matches = np.flatnonzero(timestamps == inspection.selected_sample)
+        if matches.size == 0:
+            self._clear_spike_muap_inspection()
+            return
+        next_index = int(matches[0]) + int(step)
+        if 0 <= next_index < len(timestamps):
+            self._inspect_spike_muap(int(timestamps[next_index]))
+
+    def _toggle_selected_spike_visibility(self, checked: bool):
+        self._show_selected_spike = bool(checked)
+        if self._current_spike_muap_inspection() is not None:
+            self._plot_muap()
+
+    def _on_spike_signal_mode_changed(self, index: int):
+        """Switch the orange waveform while leaving its blue reference fixed."""
+        self._remove_other_units_from_selected_spike = index == 1
+        inspection = self._current_spike_muap_inspection()
+        if inspection is not None:
+            self._plot_muap()
+            self._update_spike_muap_status(inspection)
+
+    def _selected_spike_view(
+        self, inspection: SpikeMUAPInspection
+    ) -> tuple[np.ndarray, float, float, float]:
+        return inspection.selected_view(self._remove_other_units_from_selected_spike)
+
+    def _selected_spike_mode_label(self) -> str:
+        return (
+            "earlier units removed"
+            if self._remove_other_units_from_selected_spike
+            else "raw EMG"
+        )
+
+    def _update_spike_muap_status(self, inspection: SpikeMUAPInspection):
+        _, similarity, amplitude_ratio, lag_ms = self._selected_spike_view(inspection)
+        self._update_status(
+            f"Spike {inspection.selected_sample / self._fsamp:.3f}s "
+            f"({self._selected_spike_mode_label()}): r {similarity:.3f}, "
+            f"amplitude {amplitude_ratio:.2f}x, lag {lag_ms:+.2f} ms"
+        )
+
     def _inspect_spike_muap(self, sample: int):
-        """Show a single discharge against a leave-one-out MUAP template."""
+        """Show raw/cleaned views of one discharge against a fixed reference."""
+        current_inspection = self._current_spike_muap_inspection()
+        if current_inspection is not None and current_inspection.selected_sample == int(
+            sample
+        ):
+            self._handle_escape()
+            return
+
         had_inspection = self._spike_muap_inspection is not None
         self._clear_spike_muap_inspection(render=False)
         mu = self._current_mu()
@@ -1396,6 +1553,14 @@ class EditionTab(QWidget):
             return
 
         grid_cfg = self._grid_info.get(port_name)
+        # Match the accepted-unit peel-off order used by filter recalculation:
+        # only units extracted before the current unit contribute to its
+        # residual. In particular, MU 0 has nothing to remove.
+        other_unit_timestamps = [
+            earlier.timestamps
+            for earlier in self._ports.get(port_name, [])[: self._current_mu_idx]
+            if earlier.enabled
+        ]
         try:
             inspection = inspect_spike_muap(
                 emg_port=emg_port,
@@ -1404,6 +1569,7 @@ class EditionTab(QWidget):
                 fsamp=self._fsamp,
                 grid_positions=self._active_grid_positions.get(port_name),
                 grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
+                other_unit_timestamps=other_unit_timestamps,
             )
         except SpikeMUAPUnavailable as exc:
             if had_inspection:
@@ -1414,12 +1580,9 @@ class EditionTab(QWidget):
         self._spike_muap_inspection = inspection
         self._spike_muap_inspection_key = (port_name, self._current_mu_idx)
         self.source_plot.set_inspected_spike(sample)
+        self._update_muap_inspection_controls()
         self._plot_muap()
-        self._update_status(
-            f"Spike {sample / self._fsamp:.3f}s: similarity "
-            f"{inspection.similarity:.3f}, amplitude "
-            f"{inspection.amplitude_ratio:.2f}x, lag {inspection.lag_ms:+.2f} ms"
-        )
+        self._update_spike_muap_status(inspection)
 
     def _handle_add_click(self, sample: int):
         if self._edit_mode != EditMode.ADD:
@@ -2517,6 +2680,7 @@ class EditionTab(QWidget):
     def _clear_plots(self):
         self._spike_muap_inspection = None
         self._spike_muap_inspection_key = None
+        self._update_muap_inspection_controls()
         self.source_plot.clear_data()
         self.fr_plot.clear_data()
         self._clear_muap_plot()
@@ -2790,6 +2954,8 @@ class EditionTab(QWidget):
                     self._current_mu_idx,
                     inspection=inspection,
                     fsamp=self._fsamp,
+                    show_selected=self._show_selected_spike,
+                    remove_other_units=self._remove_other_units_from_selected_spike,
                 )
         else:
             display_grid = (
@@ -2797,9 +2963,14 @@ class EditionTab(QWidget):
             )
             n_ch = display_grid.shape[0]
             waveforms = [display_grid[i, 0] for i in range(n_ch)]
-            selected_waveforms = (
-                [inspection.selected_grid[i, 0] for i in range(n_ch)]
+            selected_grid = (
+                self._selected_spike_view(inspection)[0]
                 if inspection is not None
+                else None
+            )
+            selected_waveforms = (
+                [selected_grid[i, 0] for i in range(n_ch)]
+                if selected_grid is not None and self._show_selected_spike
                 else None
             )
             self._render_muap_stacked(
@@ -2816,6 +2987,7 @@ class EditionTab(QWidget):
                     selected_waveforms=selected_waveforms,
                     inspection=inspection,
                     fsamp=self._fsamp,
+                    remove_other_units=self._remove_other_units_from_selected_spike,
                 )
 
     def _muap_title_html(
@@ -2827,15 +2999,21 @@ class EditionTab(QWidget):
                 f"MU {self._current_mu_idx}</span>"
             )
         spike_time = inspection.selected_sample / self._fsamp
+        _, similarity, amplitude_ratio, lag_ms = self._selected_spike_view(inspection)
+        selected_label = (
+            "selected spike" if self._show_selected_spike else "selected spike hidden"
+        )
+        selected_mode = self._selected_spike_mode_label()
         return (
             f"<span style='color:{COLORS['foreground']};font-size:{font_size};'>"
             f"MU {self._current_mu_idx} | spike {spike_time:.3f} s | "
-            f"similarity {inspection.similarity:.3f} | "
-            f"amplitude {inspection.amplitude_ratio:.2f}x | "
-            f"lag {inspection.lag_ms:+.2f} ms</span><br>"
+            f"r {similarity:.3f} | "
+            f"amplitude {amplitude_ratio:.2f}x | "
+            f"lag {lag_ms:+.2f} ms</span><br>"
             f"<span style='color:{COLORS['info']};font-size:8pt;'>"
             f"reference (other {inspection.n_reference_spikes})</span> | "
-            f"<span style='color:#ed8936;font-size:8pt;'>selected spike</span>"
+            f"<span style='color:#ed8936;font-size:8pt;'>"
+            f"{selected_label} ({selected_mode})</span>"
         )
 
     def _render_muap_grid(
@@ -2858,7 +3036,11 @@ class EditionTab(QWidget):
         reference_grid = (
             inspection.reference_grid if inspection is not None else muap_grid
         )
-        selected_grid = inspection.selected_grid if inspection is not None else None
+        selected_grid = (
+            self._selected_spike_view(inspection)[0]
+            if inspection is not None and self._show_selected_spike
+            else None
+        )
         rows, cols = grid_cfg["grid_shape"]
         electrode_positions = set(grid_cfg["positions"].values())
         n_samples = reference_grid.shape[2] if reference_grid.ndim == 3 else 409
@@ -2963,6 +3145,7 @@ class EditionTab(QWidget):
         for r in range(rows):
             for c in range(cols):
                 p = self.muap_widget.addPlot(row=r + 2, col=c + 1)
+                make_plot_item_safe(p)
                 p.hideAxis("left")
                 p.hideAxis("bottom")
                 p.setMouseEnabled(x=False, y=False)
@@ -3038,6 +3221,7 @@ class EditionTab(QWidget):
         self.muap_widget.clear()
         self._muap_grid_key = None  # force grid rebuild on next _render_muap_grid call
         plot = self.muap_widget.addPlot(row=0, col=0)
+        make_plot_item_safe(plot)
         valid = [(i, w) for i, w in enumerate(waveforms) if len(w) > 0]
         if not valid:
             return
@@ -3082,6 +3266,7 @@ class EditionTab(QWidget):
         self._muap_grid_key = None
         self._muap_inspection_items = {}
         p = self.muap_widget.addPlot(row=0, col=0)
+        make_plot_item_safe(p)
         p.hideAxis("left")
         p.hideAxis("bottom")
         p.setMouseEnabled(x=False, y=False)

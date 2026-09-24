@@ -29,6 +29,7 @@ from scd_app._vendor.motor_unit_toolbox.props import get_inst_discharge_rate
 from scd_app.core.constants import SIL_THRESHOLD
 from scd_app.core.mu_model import MotorUnit
 from scd_app.gui.style.styling import COLORS, FONT_SIZES
+from scd_app.gui.widgets.plot_tools import SafePlotWidget
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,8 @@ class _VisAuxLegend(pg.LegendItem):
     """
 
     def __init__(self, on_states: list[bool], on_toggle_callback):
-        super().__init__(offset=(-10, 10))  # top-right
+        # Top-right, below the plot-actions button.
+        super().__init__(offset=(-10, 38))
         self._on_states = on_states  # shared mutable reference
         self._on_toggle = on_toggle_callback
         self._names: list[str] = []
@@ -271,7 +273,6 @@ class VisualisationTab(QWidget):
         self._raster_plot = self._make_plot_widget("Motor Unit", "Time (s)")
         self._idr_plot = self._make_plot_widget("Discharge Rate (pps)", "Time (s)")
         self._cst_plot = self._make_plot_widget("CST (pps)", "Time (s)")
-
         self._idr_plot.setXLink(self._raster_plot)
         self._cst_plot.setXLink(self._raster_plot)
 
@@ -362,8 +363,8 @@ class VisualisationTab(QWidget):
 
         return sidebar
 
-    def _make_plot_widget(self, ylabel: str, xlabel: str) -> pg.PlotWidget:
-        pw = pg.PlotWidget()
+    def _make_plot_widget(self, ylabel: str, xlabel: str) -> SafePlotWidget:
+        pw = SafePlotWidget()
         pw.setBackground(COLORS["background"])
         for axis in ("left", "bottom"):
             pw.getAxis(axis).setTextPen(pg.mkPen(color=COLORS["foreground"]))
@@ -751,7 +752,6 @@ class VisualisationTab(QWidget):
                 pen=pg.mkPen(color=(r, g, b, 220), width=1.5),
                 name=f"MU {mu.id} ({port_name})",
             )
-
         self._draw_aux_overlay(pw, y_min=0.0, y_max=y_max)
 
     def _render_cst(
@@ -779,7 +779,6 @@ class VisualisationTab(QWidget):
             y_d,
             pen=pg.mkPen(color=(r_info, g_info, b_info), width=2),
         )
-
         self._draw_aux_overlay(pw, y_min=0.0, y_max=y_max)
 
     def _show_no_data(self, pw: pg.PlotWidget, msg: str):

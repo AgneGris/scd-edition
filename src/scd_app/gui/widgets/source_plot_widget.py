@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QRubberBand
 
 from scd_app.core.mu_model import EditMode
 from scd_app.gui.style.styling import COLORS
+from scd_app.gui.widgets.plot_tools import SafePlotWidget
 
 _MIN_RUBBERBAND_PX = 5  # drags smaller than this are ignored in selection-arm mode
 _SPIKE_CLICK_RADIUS_PX = 10
@@ -113,7 +114,8 @@ class _AuxLegend(pg.LegendItem):
     """
 
     def __init__(self):
-        super().__init__(offset=(-10, 10))
+        # Leave room for the plot-actions button in the top-right corner.
+        super().__init__(offset=(-10, 38))
         self._curves: list = []
         self._names: list = []
         self._colors: list = []
@@ -179,7 +181,7 @@ class _AuxLegend(pg.LegendItem):
         self.update()
 
 
-class SourcePlotWidget(pg.PlotWidget):
+class SourcePlotWidget(SafePlotWidget):
     """
     Source-signal plot with two independent interaction modes:
 
@@ -608,7 +610,7 @@ class SourcePlotWidget(pg.PlotWidget):
         )
 
 
-class FiringRatePlotWidget(pg.PlotWidget):
+class FiringRatePlotWidget(SafePlotWidget):
     def __init__(self, parent=None):
         super().__init__(
             parent, background=COLORS["background"], viewBox=XZoomViewBox()
