@@ -286,7 +286,7 @@ def capture(output: Path, screenshots_dir: Path) -> None:
         _add_caption(
             inspection_image,
             "04",
-            "Compare one discharge with its leave-one-out MUAP",
+            "Compare each discharge with or without earlier units",
         )
     )
 
