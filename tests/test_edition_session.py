@@ -11,6 +11,9 @@ from scd_app.io.edition_session import (
     ensure_list_of_arrays,
     load_edition_port,
     normalise_aux_channels,
+    note_tag,
+    notes_for_unit,
+    remap_note_tags,
 )
 
 
@@ -223,3 +226,45 @@ def test_load_port_exposes_active_channel_grid_positions():
     assert 0 in loaded.active_grid_positions
     assert loaded.active_grid_positions[0] != loaded.grid_config["positions"][1]
     assert loaded.grid_config["positions"][1] in loaded.rejected_channel_positions
+
+
+def test_note_tag_reads_port_and_unit():
+    assert note_tag("2026-01-02 03:04:05 (Grid 1, MU 7): check bursts") == ("Grid 1", 7)
+    assert note_tag("2026-01-02 03:04:05 (Grid, left, MU 2): x") == ("Grid, left", 2)
+    assert note_tag("0000-00-00 00:00:00 (Grid 1, MU 0): legacy") == ("Grid 1", 0)
+    assert note_tag("free text (Grid 1, MU 7): not a tag") is None
+    assert note_tag("2026-01-02 03:04:05 (Grid 1, MU 7, deleted): gone") is None
+
+
+def test_notes_for_unit_ignores_other_units_and_quoted_tags():
+    notes = [
+        "2026-01-02 03:04:05 (Grid 1, MU 1): first",
+        "2026-01-02 03:04:06 (Grid 1, MU 10): other unit",
+        "2026-01-02 03:04:07 (Grid 2, MU 1): other port",
+        "2026-01-02 03:04:08 (Grid 1, MU 2): see (Grid 1, MU 1): too",
+        "2026-01-02 03:04:09 (Grid 1, MU 1): second",
+    ]
+
+    assert notes_for_unit(notes, "Grid 1", 1) == [notes[0], notes[4]]
+
+
+def test_remap_note_tags_follows_renumbering_and_marks_deleted_units():
+    notes = [
+        "2026-01-02 03:04:05 (Grid 1, MU 0): kept first",
+        "2026-01-02 03:04:06 (Grid 1, MU 1): deleted",
+        "2026-01-02 03:04:07 (Grid 1, MU 2): kept second",
+        "2026-01-02 03:04:08 (Grid 2, MU 2): untouched port",
+        "hand-written line",
+    ]
+
+    remapped = remap_note_tags(notes, {"Grid 1": {0: 0, 2: 1}})
+
+    assert remapped == [
+        "2026-01-02 03:04:05 (Grid 1, MU 0): kept first",
+        "2026-01-02 03:04:06 (Grid 1, MU 1, deleted): deleted",
+        "2026-01-02 03:04:07 (Grid 1, MU 1): kept second",
+        "2026-01-02 03:04:08 (Grid 2, MU 2): untouched port",
+        "hand-written line",
+    ]
+    assert notes_for_unit(remapped, "Grid 1", 1) == [remapped[2]]
+    assert remap_note_tags(remapped, {"Grid 1": {0: 0, 1: 1}}) == remapped

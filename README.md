@@ -350,7 +350,7 @@ This is the main editing environment. It shows one motor unit at a time.
 
 #### Navigating between units
 
-- Use the **Port** dropdown to switch between electrode grids.
+- Use the **Port** dropdown or the **Ctrl+Up/Down arrow keys** to switch between electrode grids.
 - Use the **Unit** dropdown or the **Up/Down arrow keys** to switch between motor units within a port.
 - Click **Mark Reviewed** (or press `M`) after checking a unit. **Next
   Unreviewed** (or `N`) advances through unfinished units across all ports, and
@@ -438,8 +438,8 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 | Button | Shortcut | Effect |
 |--------|----------|--------|
 | **Recalculate Filter** | `F` | Re-estimates the spatial filter from your edited spike train, then re-computes the source signal and re-detects timestamps. Requires ≥2 spikes in the plateau region. |
-| **Auto-edit** | — | Automatically removes obvious outlier spikes based on physiological firing rate limits. |
-| **Remove outliers** | — | Removes spikes with very short or very long ISIs. |
+| **Auto-edit** | `E` | Automatically removes obvious outlier spikes based on physiological firing rate limits. |
+| **Remove outliers** | `O` | Removes spikes with very short or very long ISIs. |
 | **Flag unit** | `X` | Manually marks the unit for deletion. |
 | **Mark Reviewed** | `M` | Marks or unmarks the current unit as manually reviewed. |
 | **Next Unreviewed** | `N` | Moves to the next unreviewed unit, including across ports. |
