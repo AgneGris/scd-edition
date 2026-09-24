@@ -92,6 +92,8 @@ from scd_app.io.edition_session import (
     load_edition_port,
     normalise_aux_channels,
     normalise_notes,
+    notes_for_unit,
+    remap_note_tags,
 )
 
 logger = logging.getLogger(__name__)
@@ -280,6 +282,28 @@ class EditionTab(QWidget):
             f"  background-color: {bg_hover};"
             f"  border-color: {COLORS['border']};"
             f"}}"
+        )
+
+    @staticmethod
+    def _notes_btn_style(has_notes: bool) -> str:
+        """Toolbar button style, shaded and outlined when the unit has notes."""
+        if not has_notes:
+            return EditionTab._warn_toolbar_btn_style()
+        info = COLORS["info"]
+        # Qt reads 8-digit hex as #AARRGGBB, so give the tint as rgba().
+        c = QColor(info)
+        rgb = f"{c.red()}, {c.green()}, {c.blue()}"
+        return (
+            f"QPushButton {{"
+            f"  color: {COLORS['foreground']};"
+            f"  background-color: rgba({rgb}, 0.19);"
+            f"  border: 1px solid {info};"
+            f"  border-radius: 4px;"
+            f"  padding: 4px 10px;"
+            f"  font-size: {FONT_SIZES.get('small', '9pt')};"
+            f"  font-weight: bold;"
+            f"}}"
+            f"QPushButton:hover {{ background-color: rgba({rgb}, 0.31); }}"
         )
 
     # ── Toolbar ──────────────────────────────────────────────────────────
@@ -2197,11 +2221,16 @@ class EditionTab(QWidget):
                 self._original_decomp_data["peel_off_sequence"] = new_peel
 
         deleted_by_port = flagged_by_port
+        id_maps = {}
         for port_name in ports:
             kept = [mu for mu in self._ports[port_name] if not mu.flagged_for_deletion]
+            id_maps[port_name] = {mu.id: i for i, mu in enumerate(kept)}
             for i, mu in enumerate(kept):
                 mu.id = i
             self._ports[port_name] = kept
+
+        # Note tags refer to unit ids, so follow the renumbering.
+        self._notes = remap_note_tags(self._notes, id_maps)
 
         # Duplicate partner IDs and undo keys refer to the pre-deletion unit
         # indices. Clear them after this irreversible operation so retained
@@ -2765,6 +2794,7 @@ class EditionTab(QWidget):
         if mu is None:
             self.quality_bar.clear_properties()
             self.btn_notes.setEnabled(False)
+            self._update_notes_button(None)
             return
         if mu.props is not None:
             self.quality_bar.set_properties(
@@ -2777,6 +2807,23 @@ class EditionTab(QWidget):
         else:
             self.quality_bar.clear_properties()
         self.btn_notes.setEnabled(True)
+        self._update_notes_button(mu)
+
+    def _update_notes_button(self, mu: MotorUnit | None):
+        unit_notes = (
+            notes_for_unit(self._notes, mu.port_name, mu.id) if mu is not None else []
+        )
+        if unit_notes:
+            self.btn_notes.setText(f"📝 Notes ({len(unit_notes)})")
+            self.btn_notes.setToolTip(
+                f"Notes for {mu.port_name}, MU {mu.id}:\n" + "\n".join(unit_notes)
+            )
+        else:
+            self.btn_notes.setText("📝 Notes")
+            self.btn_notes.setToolTip(
+                "Open file notes; new entries are tagged with the current port and unit"
+            )
+        self.btn_notes.setStyleSheet(self._notes_btn_style(bool(unit_notes)))
 
     def _open_notes_dialog(self):
         mu = self._current_mu()
@@ -2857,6 +2904,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
             )
             self._mark_modified()
+            self._update_notes_button(self._current_mu())
 
         def append_note():
             """Read new note, refresh window, and save history"""

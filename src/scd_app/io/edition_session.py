@@ -8,6 +8,7 @@ so the data contract can be tested without constructing the GUI.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -78,6 +79,47 @@ def normalise_notes(notes: object) -> list[str]:
     if not isinstance(notes, list):
         return []
     return [note.strip() for note in notes if isinstance(note, str) and note.strip()]
+
+
+_NOTE_TAG = re.compile(
+    r"^(?P<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) "
+    r"\((?P<port>.+?), MU (?P<mu_id>\d+)\): "
+)
+
+
+def note_tag(note: str) -> tuple[str, int] | None:
+    """Return the (port, MU id) a note is tagged with, or None if untagged."""
+    match = _NOTE_TAG.match(note)
+    if match is None:
+        return None
+    return match["port"], int(match["mu_id"])
+
+
+def notes_for_unit(notes: Sequence[str], port_name: str, mu_id: int) -> list[str]:
+    """Return the notes tagged with one motor unit."""
+    return [note for note in notes if note_tag(note) == (port_name, mu_id)]
+
+
+def remap_note_tags(
+    notes: Sequence[str], id_maps: Mapping[str, Mapping[int, int]]
+) -> list[str]:
+    """Rewrite MU tags after deleted units are removed and the rest renumbered.
+
+    ``id_maps`` maps each affected port's old unit ids to their new ids. Notes
+    for units missing from their port's map are kept but tagged as deleted, so
+    they no longer match any remaining unit.
+    """
+    remapped = []
+    for note in notes:
+        match = _NOTE_TAG.match(note)
+        if match is None or match["port"] not in id_maps:
+            remapped.append(note)
+            continue
+        port, old_id = match["port"], int(match["mu_id"])
+        new_id = id_maps[port].get(old_id)
+        tag = f"MU {old_id}, deleted" if new_id is None else f"MU {new_id}"
+        remapped.append(f"{match['stamp']} ({port}, {tag}): {note[match.end() :]}")
+    return remapped
 
 
 def ensure_list_of_arrays(data: object) -> list[np.ndarray]:
