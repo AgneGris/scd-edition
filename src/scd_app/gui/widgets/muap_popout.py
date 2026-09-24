@@ -39,7 +39,7 @@ class MuapPopoutDialog(QDialog):
         muap_grid: np.ndarray,
         grid_cfg: dict,
         rejected_positions: set,
-        mu_idx: int,
+        mu_id: int,
         *,
         inspection: SpikeMUAPInspection | None = None,
         fsamp: float = 1.0,
@@ -81,7 +81,7 @@ class MuapPopoutDialog(QDialog):
         if inspection is None:
             label = (
                 f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
-                f"MU {mu_idx}</span>"
+                f"MU {mu_id}</span>"
             )
         else:
             spike_time = inspection.selected_sample / fsamp
@@ -94,7 +94,7 @@ class MuapPopoutDialog(QDialog):
             selected_mode = "earlier units removed" if remove_other_units else "raw EMG"
             label = (
                 f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
-                f"MU {mu_idx} · spike {spike_time:.3f} s · "
+                f"MU {mu_id} · spike {spike_time:.3f} s · "
                 f"r {similarity:.3f} · "
                 f"amplitude {amplitude_ratio:.2f}× · "
                 f"lag {lag_ms:+.2f} ms</span><br>"
@@ -196,13 +196,13 @@ class MuapPopoutDialog(QDialog):
                                 ),
                             )
 
-        self.setWindowTitle(f"MUAP Shapes — MU {mu_idx}")
+        self.setWindowTitle(f"MUAP Shapes — MU {mu_id}")
 
     def render_stacked(
         self,
         waveforms,
         ch_indices,
-        mu_idx,
+        mu_id,
         *,
         selected_waveforms=None,
         inspection: SpikeMUAPInspection | None = None,
@@ -243,7 +243,7 @@ class MuapPopoutDialog(QDialog):
             plot.addItem(txt)
         plot.getAxis("left").setVisible(False)
         if inspection is None:
-            title = f"MU {mu_idx} — Stacked"
+            title = f"MU {mu_id} — Stacked"
         else:
             spike_time = inspection.selected_sample / fsamp
             _, similarity, amplitude_ratio, lag_ms = inspection.selected_view(
@@ -251,13 +251,13 @@ class MuapPopoutDialog(QDialog):
             )
             selected_mode = "earlier units removed" if remove_other_units else "raw EMG"
             title = (
-                f"MU {mu_idx} · spike {spike_time:.3f} s · "
+                f"MU {mu_id} · spike {spike_time:.3f} s · "
                 f"r {similarity:.3f} · "
                 f"amplitude {amplitude_ratio:.2f}× · "
                 f"lag {lag_ms:+.2f} ms · {selected_mode}"
             )
         plot.setTitle(title, color=COLORS["foreground"], size="11pt")
-        self.setWindowTitle(f"MUAP Shapes — MU {mu_idx} (Stacked)")
+        self.setWindowTitle(f"MUAP Shapes — MU {mu_id} (Stacked)")
 
     def clear(self, message="Select a Motor Unit"):
         self._plot.clear()

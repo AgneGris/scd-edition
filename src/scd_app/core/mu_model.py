@@ -14,6 +14,8 @@ class EditMode(Enum):
 
 @dataclass
 class MotorUnit:
+    # Stable within ``port_name``. It is deliberately separate from the
+    # unit's current position in the compact per-port list.
     id: int
     timestamps: np.ndarray
     source: np.ndarray

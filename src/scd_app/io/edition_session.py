@@ -277,6 +277,12 @@ def load_edition_port(
 
     timestamp_arrays = ensure_list_of_arrays(port_discharge)
     source_arrays = ensure_list_of_arrays(port_sources)
+    all_motor_unit_ids = decomposition.get("motor_unit_ids", [])
+    motor_unit_ids = (
+        list(all_motor_unit_ids[port_index])
+        if port_index < len(all_motor_unit_ids)
+        else list(range(len(timestamp_arrays)))
+    )
     filter_arrays = (
         ensure_list_of_arrays(port_filters)
         if port_filters is not None
@@ -320,7 +326,7 @@ def load_edition_port(
 
         motor_units.append(
             MotorUnit(
-                id=motor_unit_index,
+                id=int(motor_unit_ids[motor_unit_index]),
                 timestamps=absolute_timestamps,
                 source=source,
                 port_name=port_name,
@@ -427,12 +433,14 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
     pulse_trains = []
     mu_filters = []
     mu_properties = []
+    motor_unit_ids = []
     flagged_mus_per_port = {}
     reviewed_mus_per_port = {}
     reliability_overrides_per_port = {}
 
     for port_name in port_names:
         motor_units = state.ports[port_name]
+        motor_unit_ids.append([motor_unit.id for motor_unit in motor_units])
         flagged_mus_per_port[port_name] = [
             index
             for index, motor_unit in enumerate(motor_units)
@@ -489,6 +497,7 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
         "sampling_rate": state.sampling_rate,
         "discharge_times": discharge_times,
         "pulse_trains": pulse_trains,
+        "motor_unit_ids": motor_unit_ids,
         "mu_filters": mu_filters,
         "skip_filter_recalc": True,
         "mu_properties": mu_properties,

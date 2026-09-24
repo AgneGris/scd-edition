@@ -57,6 +57,7 @@ def test_save_dict_preserves_full_source_and_provenance_contract():
     assert saved["format"] == GUI_FORMAT
     assert saved["schema_version"] == CURRENT_SCHEMA_VERSION
     assert saved["ports"] == ["Grid 1"]
+    assert saved["motor_unit_ids"] == [[0]]
     assert saved["sampling_rate"] == 2048.0
     assert saved["skip_filter_recalc"] is True
     np.testing.assert_array_equal(saved["discharge_times"][0][0], [10, 25])
@@ -192,6 +193,54 @@ def test_load_port_defaults_to_unreviewed_for_older_files():
     )
 
     assert loaded.motor_units[0].reviewed is False
+
+
+def test_stable_motor_unit_ids_survive_save_and_reload():
+    units = [
+        MotorUnit(
+            id=0,
+            timestamps=np.array([1], dtype=np.int64),
+            source=np.arange(5, dtype=float),
+            port_name="Grid 1",
+        ),
+        MotorUnit(
+            id=2,
+            timestamps=np.array([3], dtype=np.int64),
+            source=np.arange(5, dtype=float),
+            port_name="Grid 1",
+        ),
+    ]
+    saved = build_edition_save_data(
+        EditionSaveState(
+            ports={"Grid 1": units},
+            sampling_rate=1000.0,
+            start_sample=0,
+            end_sample=5,
+            full_source_mode=False,
+            edit_history=[],
+            notes=[],
+        )
+    )
+
+    loaded = load_edition_port(
+        port_index=0,
+        port_name="Grid 1",
+        decomposition=saved,
+        emg_full=None,
+        start_sample=0,
+        end_sample=5,
+        full_port_results={},
+        channel_offset=0,
+        full_source_mode=False,
+        sampling_rate=1000.0,
+        property_computer=lambda **_kwargs: [
+            MUProperties(n_spikes=1),
+            MUProperties(n_spikes=1),
+        ],
+    )
+
+    assert saved["motor_unit_ids"] == [[0, 2]]
+    assert [motor_unit.id for motor_unit in loaded.motor_units] == [0, 2]
 
 
 def test_load_port_exposes_active_channel_grid_positions():

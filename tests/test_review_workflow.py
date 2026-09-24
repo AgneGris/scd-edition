@@ -124,6 +124,10 @@ def test_deleting_flagged_units_preserves_review_state_of_retained_units():
     tab._undo_stack = {("Grid A", 1): [object()]}
     tab._redo_stack = {("Grid A", 1): [object()]}
     tab._pending_props_key = ("Grid A", 1)
+    tab._notes = [
+        "2026-01-02 03:04:05 (Grid A, MU 0): remove this unit",
+        "2026-01-02 03:04:06 (Grid A, MU 1): keep this unit",
+    ]
     tab._original_decomp_data = {
         "peel_off_sequence": [
             [
@@ -146,7 +150,7 @@ def test_deleting_flagged_units_preserves_review_state_of_retained_units():
         tab._delete_all_flagged()
 
     assert tab._ports == {"Grid A": [retained]}
-    assert retained.id == 0
+    assert retained.id == 1
     assert retained.reviewed is True
     assert retained.within_duplicate_role is None
     assert retained.within_duplicate_partners == []
@@ -160,6 +164,13 @@ def test_deleting_flagged_units_preserves_review_state_of_retained_units():
         ]
     ]
     assert tab.review_progress_label.text() == "Reviewed 1/1"
+    assert tab.mu_combo.itemText(0).startswith("MU 1 ")
+    tab._update_status()
+    assert "MU: 1" in tab.status_bar.currentMessage()
+    assert tab._notes == [
+        "2026-01-02 03:04:05 (Grid A, MU 0, deleted): remove this unit",
+        "2026-01-02 03:04:06 (Grid A, MU 1): keep this unit",
+    ]
 
     tab._set_dirty(False)
     tab.close()
