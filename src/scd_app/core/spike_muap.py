@@ -76,6 +76,29 @@ def _shift_without_wrap(values: np.ndarray, samples: int) -> np.ndarray:
     return shifted
 
 
+def _shift_onto_padded_canvas(
+    values: np.ndarray, samples: int, padding: int
+) -> np.ndarray:
+    """Shift a waveform for display without discarding either edge.
+
+    The numerical alignment uses a fixed-size array so that only overlapping
+    samples contribute to its metrics. For display, a shared wider canvas lets
+    the complete reference and selected windows move by the same shifts
+    without wrapping or replacing real samples with NaN.
+    """
+    if padding < abs(samples):
+        raise ValueError("Display padding must cover the requested shift")
+    n_samples = values.shape[-1]
+    canvas = np.full(
+        (*values.shape[:-1], n_samples + 2 * padding),
+        np.nan,
+        dtype=np.float64,
+    )
+    start = padding + samples
+    canvas[..., start : start + n_samples] = values
+    return canvas
+
+
 def _demean_channels(values: np.ndarray) -> np.ndarray:
     """Remove each channel's temporal mean while preserving invalid samples."""
     finite_counts = np.sum(np.isfinite(values), axis=-1, keepdims=True)
@@ -362,10 +385,10 @@ def inspect_spike_muap(
 
     max_lag = max(0, int(round(float(max_lag_ms) / 1000.0 * sampling_rate)))
     max_lag = min(max_lag, max(0, reference.shape[1] - 2))
-    best_selected, best_similarity, best_ratio, best_shift = _align_to_reference(
+    _, best_similarity, best_ratio, best_shift = _align_to_reference(
         reference, selected, informative, max_lag
     )
-    raw_best_selected, raw_similarity, raw_ratio, raw_best_shift = _align_to_reference(
+    _, raw_similarity, raw_ratio, raw_best_shift = _align_to_reference(
         reference, raw_selected, informative, max_lag
     )
 
@@ -375,9 +398,21 @@ def inspect_spike_muap(
         raise SpikeMUAPUnavailable("The reference MUAP has no finite waveform")
     peak_sample = int(np.nanargmax(np.abs(dominant_waveform)))
     center_shift = reference.shape[1] // 2 - peak_sample
-    reference_display = _shift_without_wrap(reference, center_shift)
-    selected_display = _shift_without_wrap(best_selected, center_shift)
-    raw_selected_display = _shift_without_wrap(raw_best_selected, center_shift)
+    reference_shift = center_shift
+    selected_shift = center_shift + best_shift
+    raw_selected_shift = center_shift + raw_best_shift
+    display_padding = max(
+        abs(reference_shift), abs(selected_shift), abs(raw_selected_shift)
+    )
+    reference_display = _shift_onto_padded_canvas(
+        reference, reference_shift, display_padding
+    )
+    selected_display = _shift_onto_padded_canvas(
+        selected, selected_shift, display_padding
+    )
+    raw_selected_display = _shift_onto_padded_canvas(
+        raw_selected, raw_selected_shift, display_padding
+    )
 
     return SpikeMUAPInspection(
         selected_sample=sample,
