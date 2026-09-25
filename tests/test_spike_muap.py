@@ -51,8 +51,8 @@ def test_identical_scaled_discharge_has_unit_similarity_and_separate_amplitude()
     assert result.amplitude_ratio == pytest.approx(2.0)
     assert result.n_reference_spikes == 2
     assert result.n_informative_channels == 2
-    assert result.reference_grid.shape == (2, 1, 10)
-    assert result.selected_grid.shape == (2, 1, 10)
+    assert result.reference_grid.shape[:2] == (2, 1)
+    assert result.selected_grid.shape == result.reference_grid.shape
 
 
 def test_selected_discharge_is_excluded_from_reference_template():
@@ -100,6 +100,25 @@ def test_small_timing_jitter_is_aligned_and_reported():
 
     assert result.similarity == pytest.approx(1.0)
     assert result.lag_ms == pytest.approx(2.0)
+    assert result.reference_grid.shape[-1] > template.shape[-1]
+    reference_display = result.reference_grid[0, 0]
+    selected_display = result.selected_grid[0, 0]
+    raw_selected_display = result.raw_selected_grid[0, 0]
+    assert np.count_nonzero(np.isfinite(reference_display)) == 10
+    assert np.count_nonzero(np.isfinite(selected_display)) == 10
+    assert np.count_nonzero(np.isfinite(raw_selected_display)) == 10
+    np.testing.assert_allclose(
+        reference_display[np.isfinite(reference_display)],
+        (template - np.mean(template, axis=1, keepdims=True)).ravel(),
+    )
+    expected_selected = delayed - np.mean(delayed, axis=1, keepdims=True)
+    np.testing.assert_allclose(
+        selected_display[np.isfinite(selected_display)], expected_selected.ravel()
+    )
+    np.testing.assert_allclose(
+        raw_selected_display[np.isfinite(raw_selected_display)],
+        expected_selected.ravel(),
+    )
 
 
 def test_other_unit_contribution_is_removed_before_comparison():
@@ -171,7 +190,8 @@ def test_active_channel_mapping_is_preserved_in_grid_output():
         grid_shape=(2, 2),
     )
 
-    assert result.reference_grid.shape == (2, 2, 4)
+    assert result.reference_grid.shape[:2] == (2, 2)
+    assert result.reference_grid.shape[-1] >= 4
     assert np.any(result.reference_grid[0, 1] != 0)
     assert np.any(result.reference_grid[1, 0] != 0)
     assert np.all(result.reference_grid[0, 0] == 0)
