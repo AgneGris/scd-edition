@@ -4,6 +4,9 @@ All notable changes to SCD Edition are documented here.
 
 ## Unreleased
 
+- Add an editable automatic preview for splitting merged motor units into
+  high-amplitude A and low-amplitude B children, with persistent lineage and
+  split-aware filter recalculation through sequential peel-off replay.
 - Add reproducibility audit reports alongside new and edited decompositions.
 - Add rotating application logs and copyable runtime diagnostics for support.
 - Validate decomposition schemas and warn before loading pickle files.

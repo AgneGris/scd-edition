@@ -70,6 +70,9 @@ def test_migrates_legacy_native_session_to_versioned_schema():
     assert migrated["schema_version"] == CURRENT_SCHEMA_VERSION
     assert migrated["sampling_rate"] == 1000.0
     assert migrated["motor_unit_ids"] == [[0]]
+    assert migrated["unit_lineage"] == [
+        [{"peel_group_id": 0, "split_parent_id": None, "split_label": None}]
+    ]
     np.testing.assert_array_equal(migrated["discharge_times"][0][0], [2, 6])
 
 

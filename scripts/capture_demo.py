@@ -3,8 +3,8 @@
 The decomposition-progress frame uses deterministic illustrative sources so
 the capture does not run a costly scientific decomposition. Edition and
 Visualisation are populated through the same application data path used for a
-saved session, with deterministic multichannel waveforms keeping the displayed
-MUAP comparisons coherent and reproducible.
+saved session, with a deliberately merged first unit demonstrating the split
+preview and deterministic multichannel waveforms keeping all plots coherent.
 """
 
 from __future__ import annotations
@@ -118,11 +118,20 @@ def _illustrative_sources(
         interval = max(1, int(sampling_rate / rate))
         nominal_timestamps = np.arange(start, n_samples - 300, interval, dtype=np.int64)
         width = np.arange(-18, 19)
-        pulse = (1.2 + unit * 0.035) * np.exp(-0.5 * (width / 5.0) ** 2)
-        for timestamp in nominal_timestamps:
+        base_amplitude = 1.2 + unit * 0.035
+        for spike_index, timestamp in enumerate(nominal_timestamps):
             left = timestamp - 18
             right = timestamp + 19
             if left >= 0 and right <= n_samples:
+                # Unit 0 intentionally contains two clean peak-height modes,
+                # mimicking two motor units merged by decomposition. The
+                # taller alternating train becomes split A in the demo.
+                amplitude = (
+                    1.45 if unit == 0 and spike_index % 2 == 0 else base_amplitude
+                )
+                if unit == 0 and spike_index % 2 == 1:
+                    amplitude = 0.62
+                pulse = amplitude * np.exp(-0.5 * (width / 5.0) ** 2)
                 source[left:right] += pulse
         if unit == 0:
             missed_pulse = 1.32 * np.exp(-0.5 * (width / 5.0) ** 2)
@@ -206,7 +215,25 @@ def _demo_session() -> tuple[dict, int]:
             "sampling_rate": sampling_rate,
             "discharge_times": [timestamps],
             "pulse_trains": [sources],
-            "mu_filters": [None],
+            "mu_filters": [[None for _source in sources]],
+            "peel_off_sequence": [
+                [
+                    {
+                        "accepted_unit_idx": unit_index,
+                        "timestamps": unit_timestamps.copy(),
+                    }
+                    for unit_index, unit_timestamps in enumerate(timestamps)
+                ]
+            ],
+            "preprocessing_config": [
+                {
+                    "sampling_frequency": sampling_rate,
+                    "extension_factor": 1,
+                    "peel_off_window_size": 256,
+                    "min_peak_separation": 20,
+                    "square_sources_spike_det": True,
+                }
+            ],
             "skip_filter_recalc": True,
             "plateau_coords": [0, n_samples],
             "data": emg,
@@ -281,7 +308,6 @@ def capture(output: Path, screenshots_dir: Path) -> None:
     inspection_sample = int(session["discharge_times"][0][0][4])
     window.edition_tab._inspect_spike_muap(inspection_sample)
     inspection_image = _grab_window(window)
-    _save_screenshot(inspection_image, screenshots_dir / "edition.png")
     stills.append(
         _add_caption(
             inspection_image,
@@ -290,12 +316,32 @@ def capture(output: Path, screenshots_dir: Path) -> None:
         )
     )
 
+    window.edition_tab.btn_split_unit.click()
+    split_preview_image = _grab_window(window)
+    _save_screenshot(split_preview_image, screenshots_dir / "edition.png")
+    stills.append(
+        _add_caption(
+            split_preview_image,
+            "05",
+            "Preview and adjust high-amplitude A versus low-amplitude B",
+        )
+    )
+
+    window.edition_tab.btn_confirm_split.click()
+    stills.append(
+        _add_caption(
+            _grab_window(window),
+            "06",
+            "Confirm two labelled units for independent manual cleaning",
+        )
+    )
+
     window.edition_tab._set_mode(EditMode.ADD)
     window.edition_tab._handle_add_click(missed_peak)
     stills.append(
         _add_caption(
             _grab_window(window),
-            "05",
+            "07",
             "Add a missed spike and update quality instantly",
         )
     )
@@ -308,7 +354,7 @@ def capture(output: Path, screenshots_dir: Path) -> None:
     stills.append(
         _add_caption(
             visualisation_image,
-            "06",
+            "08",
             "Inspect population-level discharge behaviour",
         )
     )

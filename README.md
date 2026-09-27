@@ -18,8 +18,8 @@ NumPy and CSV recordings on Windows, Linux and macOS.
 | [![Configuration tab with the bundled example loaded](docs/screenshots/configuration.png)](docs/screenshots/configuration.png) | [![Decomposition tab showing live source feedback](docs/screenshots/decomposition.png)](docs/screenshots/decomposition.png) |
 | Load recordings, define grids and auxiliary channels, and review the channel map. | Configure and monitor decomposition with live source and quality feedback. |
 | **Edition** | **Visualisation** |
-| [![Edition tab comparing one spike MUAP with its unit template](docs/screenshots/edition.png)](docs/screenshots/edition.png) | [![Visualisation tab showing population-level motor-unit plots](docs/screenshots/visualisation.png)](docs/screenshots/visualisation.png) |
-| Review quality, edit spike trains, inspect individual MUAPs and manage duplicate units. | Explore raster, discharge-rate, recruitment, force and quality summaries. |
+| [![Edition tab previewing an automatic motor-unit split](docs/screenshots/edition.png)](docs/screenshots/edition.png) | [![Visualisation tab showing population-level motor-unit plots](docs/screenshots/visualisation.png)](docs/screenshots/visualisation.png) |
+| Review quality, edit spike trains, split merged units, inspect individual MUAPs and manage duplicates. | Explore raster, discharge-rate, recruitment, force and quality summaries. |
 
 Built on the [Swarm Contrastive Decomposition (SCD)](https://github.com/AgneGris/swarm-contrastive-decomposition) algorithm.
 The desktop interface uses the official [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/) bindings.
@@ -429,6 +429,25 @@ plot state and can disrupt linked GUI views.
 
 Press `Ctrl+Z` to undo (up to 100 steps) and `Ctrl+Y` to redo.
 
+#### Splitting a merged unit
+
+Click **Split Unit** when one source appears to contain two motor units. The
+preview partitions every spike from its squared source-peak height: the taller
+population is orange **A**, and the lower population is cyan **B**. Click an
+individual marker or drag a rectangle to move spikes between groups. Each group
+must retain at least two spikes.
+
+Click **Confirm Split** to create `[split A]` and `[split B]`, or click the
+now-labelled **Cancel Split** button (or press `Escape`) to discard the preview
+without changing the unit. After confirmation each child displays only its own
+orange markers and can be edited like any other unit.
+
+For the cleanest sequential separation, finish cleaning the high-amplitude A
+train first. Then select split B and click **Recalculate Filter**. The app peels
+A from the multichannel residual only at A's current curated timestamps before
+estimating B; it does not directly subtract one normalized source trace from
+another. Recalculate B again if A is edited later.
+
 #### MUAP plot
 
 Shows the spike-triggered average for every EMG channel. Toggle between **stacked** and **grid** layout (the grid layout reflects the physical electrode geometry). In the stacked view, scroll zooms the time axis, `Shift+Scroll` pans horizontally and `Ctrl+Scroll` zooms both axes. Click a channel to open a pop-out window with a larger view.
@@ -437,7 +456,8 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 
 | Button | Shortcut | Effect |
 |--------|----------|--------|
-| **Recalculate Filter** | `F` | Re-estimates the spatial filter from your edited spike train, then re-computes the source signal and re-detects timestamps. Requires ≥2 spikes in the plateau region. |
+| **Recalculate Filter** | `F` | Re-estimates the spatial filter from the edited spike train, recomputes the source, and snaps the retained timestamps to nearby peaks. For split B, curated split A is peeled first. Requires ≥2 spikes. |
+| **Split Unit** | — | Suggests high-amplitude A and low-amplitude B groups, opens an editable preview, and creates two independently editable units only after confirmation. |
 | **Auto-edit** | `E` | Automatically removes obvious outlier spikes based on physiological firing rate limits. |
 | **Remove outliers** | `O` | Removes spikes with very short or very long ISIs. |
 | **Flag unit** | `X` | Manually marks the unit for deletion. |

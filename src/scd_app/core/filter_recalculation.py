@@ -13,7 +13,8 @@ On load (compute_all_full_sources):
 
 On recalculate (recalculate_unit_filter):
     1. Preprocess FULL raw EMG.
-    2. Replay peel-off for entries before target unit (same as load).
+    2. Replay peel-off for entries before the target using their current,
+       manually edited timestamp trains.
     3. STA(peeled_emg, edited_timestamps) → new filter.
     4. Apply new filter to peeled EMG → new source.
     5. Snap the edited timestamps onto the peaks of the new source.
@@ -466,6 +467,7 @@ def _replay_peel_off_for_port(
     recalculate_filters: bool = False,
     redetect_timestamps: bool = True,
     edge_mask: int = 0,
+    current_timestamps_abs: list[np.ndarray] | None = None,
 ) -> tuple[torch.Tensor, dict[int, tuple[np.ndarray, np.ndarray]]]:
     """Replay peel-off for one port, optionally stopping before a given unit.
 
@@ -476,6 +478,10 @@ def _replay_peel_off_for_port(
             recompute each unit's filter via STA on the peeled EMG.
         edge_mask: Samples zeroed at each end of a source before spikes are
             re-detected (preprocessing_config["edge_mask_size"]).
+        current_timestamps_abs: When supplied during an editor recalculation,
+            accepted units before the target are peeled at their current,
+            manually edited timestamps. This keeps replay consistent with the
+            visible discharge trains and supports independent split children.
 
     Returns:
         emg_running:  peeled EMG tensor (modified clone)
@@ -521,6 +527,18 @@ def _replay_peel_off_for_port(
                 edge_mask,
             )
             results_dict[local_idx] = (source_np, ts_display, new_filt_np)
+        elif (
+            current_timestamps_abs is not None
+            and 0 <= local_idx < len(current_timestamps_abs)
+        ):
+            ts_abs = np.asarray(
+                current_timestamps_abs[local_idx], dtype=np.int64
+            ).reshape(-1)
+            ts_abs = ts_abs[(ts_abs >= 0) & (ts_abs < emg_running.shape[0])]
+            if len(ts_abs) > 0:
+                ts_t = torch.from_numpy(ts_abs).to(device)
+                fn["peel_off_source"](emg_running, ts_t, window_size)
+            results_dict[local_idx] = (None, ts_abs, None)
         elif filt is not None:
             source_np, ts_abs = _process_recalc_entry(
                 emg_running,
@@ -709,12 +727,17 @@ def recalculate_unit_filter(
     start_sample: int,
     end_sample: int,
     current_port_filters: list[np.ndarray | None],
+    current_units_per_port: list[int] | None = None,
+    current_port_timestamps_abs: list[np.ndarray] | None = None,
+    replay_stop_before_local_idx: int | None = None,
     device: torch.device | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Recalculate filter + source for one MU after edits.
 
     Returns (filter, full-length source, timestamps).  The timestamps are the
     edited ones re-aligned to the peaks of the new source, never re-detected.
+    Split A is evaluated at the start of its split stage. Split B stops at its
+    own step, after A has been peeled at A's current curated timestamps.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -753,13 +776,14 @@ def recalculate_unit_filter(
         global_offset = 0
     else:
         discharge_times = decomp_data.get("discharge_times", [])
-        units_per_port = []
-        for pidx in range(len(decomp_data["ports"])):
-            if pidx < len(discharge_times):
-                dt = discharge_times[pidx]
-                units_per_port.append(len(dt) if isinstance(dt, list) else 1)
-            else:
-                units_per_port.append(0)
+        units_per_port = list(current_units_per_port or [])
+        if not units_per_port:
+            for pidx in range(len(decomp_data["ports"])):
+                if pidx < len(discharge_times):
+                    dt = discharge_times[pidx]
+                    units_per_port.append(len(dt) if isinstance(dt, list) else 1)
+                else:
+                    units_per_port.append(0)
         port_peel_seqs = _partition_peel_sequence(peel_seq_raw, units_per_port)
         port_peel_seq = port_peel_seqs[port_idx]
         global_offset = sum(units_per_port[:port_idx])
@@ -771,6 +795,11 @@ def recalculate_unit_filter(
     emg_proc = preprocess_emg(raw_tensor, config, device, w_mat=w_mat)
 
     # ── Step 2: Replay peel-off up to this unit ───────────────────────────
+    replay_stop = (
+        local_mu_idx
+        if replay_stop_before_local_idx is None
+        else replay_stop_before_local_idx
+    )
     emg_peeled, _ = _replay_peel_off_for_port(
         emg_proc,
         port_peel_seq,
@@ -781,13 +810,17 @@ def recalculate_unit_filter(
         window_size,
         min_peak_sep,
         device,
-        stop_before_local_idx=local_mu_idx,
+        stop_before_local_idx=replay_stop,
         square_source=square_source,
         edge_mask=edge_mask,
+        current_timestamps_abs=current_port_timestamps_abs,
     )
 
     # ── Step 3: STA filter from all edited timestamps (full signal) ───────
-    ts_valid = edited_timestamps_abs[edited_timestamps_abs < emg_peeled.shape[0]]
+    ts_valid = edited_timestamps_abs[
+        (edited_timestamps_abs >= 0)
+        & (edited_timestamps_abs < emg_peeled.shape[0])
+    ]
     if len(ts_valid) < 2:
         raise ValueError("Need at least 2 spikes for filter recalculation.")
 
