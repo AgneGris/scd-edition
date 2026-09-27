@@ -89,6 +89,7 @@ class SelectionArm:
     NONE = "none"
     ADD = "add"
     DELETE = "delete"
+    SPLIT = "split"
 
 
 class _AuxLegend(pg.LegendItem):
@@ -182,6 +183,7 @@ class SourcePlotWidget(SafePlotWidget):
     spike_add_requested = Signal(int)
     spike_delete_requested = Signal(int)
     spike_inspect_requested = Signal(int)
+    split_toggle_requested = Signal(int)
     region_selected = Signal(float, float, float, float)
 
     def __init__(self, parent=None):
@@ -205,6 +207,8 @@ class SourcePlotWidget(SafePlotWidget):
 
         self._source: np.ndarray | None = None
         self._timestamps: np.ndarray | None = None
+        self._secondary_timestamps = np.array([], dtype=np.int64)
+        self._split_preview = False
         self._inspected_sample: int | None = None
         self._spike_inspection_press = False
 
@@ -223,6 +227,14 @@ class SourcePlotWidget(SafePlotWidget):
         )
         self._spike_scatter.sigClicked.connect(self._on_spike_marker_clicked)
         self.addItem(self._spike_scatter)
+        self._secondary_spike_scatter = pg.ScatterPlotItem(
+            size=10,
+            pen=pg.mkPen(None),
+            brush=pg.mkBrush("#22d3ee"),
+            symbol="o",
+        )
+        self._secondary_spike_scatter.setZValue(11)
+        self.addItem(self._secondary_spike_scatter)
         self._inspected_spike_scatter = pg.ScatterPlotItem(
             size=16,
             pen=pg.mkPen("#f9e2af", width=2),
@@ -274,10 +286,21 @@ class SourcePlotWidget(SafePlotWidget):
     # Data
     # ------------------------------------------------------------------
 
-    def set_data(self, source: np.ndarray, timestamps: np.ndarray):
+    def set_data(
+        self,
+        source: np.ndarray,
+        timestamps: np.ndarray,
+        secondary_timestamps: np.ndarray | None = None,
+    ):
         source = np.nan_to_num(source, nan=0.0, posinf=0.0, neginf=0.0)
         self._source = source**2
         self._timestamps = timestamps
+        self._secondary_timestamps = (
+            np.asarray(secondary_timestamps, dtype=np.int64)
+            if secondary_timestamps is not None
+            else np.array([], dtype=np.int64)
+        )
+        self._split_preview = False
         t = np.arange(len(self._source)) / self._fsamp
         self._signal_curve.setData(t, self._source)
         self._update_spike_markers()
@@ -395,8 +418,27 @@ class SourcePlotWidget(SafePlotWidget):
         else:
             self.showAxis("right", show=False)
 
-    def update_timestamps(self, timestamps: np.ndarray):
+    def update_timestamps(
+        self,
+        timestamps: np.ndarray,
+        secondary_timestamps: np.ndarray | None = None,
+    ):
         self._timestamps = timestamps
+        self._secondary_timestamps = (
+            np.asarray(secondary_timestamps, dtype=np.int64)
+            if secondary_timestamps is not None
+            else np.array([], dtype=np.int64)
+        )
+        self._split_preview = False
+        self._update_spike_markers()
+
+    def set_split_preview(self, group_a: np.ndarray, group_b: np.ndarray) -> None:
+        """Show one timestamp partition as orange/cyan on the current source."""
+        group_a = np.asarray(group_a, dtype=np.int64)
+        group_b = np.asarray(group_b, dtype=np.int64)
+        self._timestamps = np.sort(np.concatenate([group_a, group_b]))
+        self._secondary_timestamps = group_b
+        self._split_preview = True
         self._update_spike_markers()
 
     def set_inspected_spike(self, sample: int | None):
@@ -407,11 +449,14 @@ class SourcePlotWidget(SafePlotWidget):
     def clear_data(self):
         self._signal_curve.setData([], [])
         self._spike_scatter.setData([], [])
+        self._secondary_spike_scatter.setData([], [])
         self._inspected_spike_scatter.setData([], [])
         for curve in self._aux_curves:
             curve.setData([], [])
         self._source = None
         self._timestamps = None
+        self._secondary_timestamps = np.array([], dtype=np.int64)
+        self._split_preview = False
         self._inspected_sample = None
         if self._plateau_region is not None:
             self.removeItem(self._plateau_region)
@@ -482,6 +527,10 @@ class SourcePlotWidget(SafePlotWidget):
                 x1, x2 = sorted([tl.x(), br.x()])
                 y1, y2 = sorted([tl.y(), br.y()])
                 self.region_selected.emit(x1, x2, y1, y2)
+            elif self._sel_arm == SelectionArm.SPLIT:
+                sample = self._spike_sample_near_position(ev.pos())
+                if sample is not None:
+                    self.split_toggle_requested.emit(sample)
             ev.accept()
             return
 
@@ -559,6 +608,7 @@ class SourcePlotWidget(SafePlotWidget):
             or len(self._timestamps) == 0
         ):
             self._spike_scatter.setData([], [])
+            self._secondary_spike_scatter.setData([], [])
             self._update_inspected_marker()
             return
         valid = self._timestamps[
@@ -566,12 +616,30 @@ class SourcePlotWidget(SafePlotWidget):
         ]
         if len(valid) == 0:
             self._spike_scatter.setData([], [])
+            self._secondary_spike_scatter.setData([], [])
             self._update_inspected_marker()
             return
+        secondary = self._secondary_timestamps[
+            (self._secondary_timestamps >= 0)
+            & (self._secondary_timestamps < len(self._source))
+        ]
+        if self._split_preview and len(secondary):
+            secondary_set = set(secondary.tolist())
+            primary = np.asarray(
+                [sample for sample in valid if int(sample) not in secondary_set],
+                dtype=np.int64,
+            )
+        else:
+            primary = valid
         self._spike_scatter.setData(
-            valid / self._fsamp,
-            self._source[valid],
-            data=valid.tolist(),
+            primary / self._fsamp,
+            self._source[primary],
+            data=primary.tolist(),
+        )
+        self._secondary_spike_scatter.setData(
+            secondary / self._fsamp,
+            self._source[secondary],
+            data=secondary.tolist(),
         )
         self._update_inspected_marker()
 
@@ -610,6 +678,9 @@ class FiringRatePlotWidget(SafePlotWidget):
         self._curve = self.plot([], pen=pg.mkPen(COLORS["warning"], width=1.5))
         self._curve.setDownsampling(auto=True, method="peak")
         self._curve.setClipToView(True)
+        self._secondary_curve = self.plot([], pen=pg.mkPen("#22d3ee", width=1.5))
+        self._secondary_curve.setDownsampling(auto=True, method="peak")
+        self._secondary_curve.setClipToView(True)
         self._fsamp = 1.0
         self._y_max = 1.0
 
@@ -619,22 +690,37 @@ class FiringRatePlotWidget(SafePlotWidget):
     def link_x(self, other: pg.PlotWidget):
         self.setXLink(other)
 
-    def set_data(self, timestamps: np.ndarray):
+    def set_data(
+        self,
+        timestamps: np.ndarray,
+        secondary_timestamps: np.ndarray | None = None,
+    ):
+        primary_max = self._set_curve_data(self._curve, timestamps)
+        secondary_max = self._set_curve_data(
+            self._secondary_curve,
+            secondary_timestamps
+            if secondary_timestamps is not None
+            else np.array([], dtype=np.int64),
+        )
+        self._y_max = max(primary_max, secondary_max, 1.0)
+        self.getViewBox().enableAutoRange(axis=1, enable=False)
+        self.getViewBox().setYRange(0, self._y_max * 1.1, padding=0)
+
+    def _set_curve_data(self, curve, timestamps: np.ndarray) -> float:
         ts = np.sort(timestamps)
         if len(ts) < 2:
-            self._curve.setData([], [])
-            return
+            curve.setData([], [])
+            return 0.0
         isi = np.diff(ts) / self._fsamp
         ifr = np.where(isi > 0.01, 1.0 / isi, 0.0)
         t_mid = (ts[:-1] + ts[1:]) / 2 / self._fsamp
-        self._curve.setData(t_mid, ifr)
+        curve.setData(t_mid, ifr)
         valid = ifr[ifr > 0]
-        self._y_max = float(np.max(valid)) if len(valid) > 0 else 1.0
-        self.getViewBox().enableAutoRange(axis=1, enable=False)
-        self.getViewBox().setYRange(0, self._y_max * 1.1, padding=0)
+        return float(np.max(valid)) if len(valid) > 0 else 0.0
 
     def reset_y_range(self):
         self.getViewBox().setYRange(0, self._y_max * 1.1, padding=0)
 
     def clear_data(self):
         self._curve.setData([], [])
+        self._secondary_curve.setData([], [])

@@ -68,6 +68,7 @@ from scd_app.core.spike_muap import (
     SpikeMUAPUnavailable,
     inspect_spike_muap,
 )
+from scd_app.core.unit_splitting import suggest_split_by_peak_height
 from scd_app.core.utils import to_numpy
 from scd_app.gui.style.styling import (
     COLORS,
@@ -146,6 +147,12 @@ class EditionTab(QWidget):
         self._spike_muap_inspection_key: tuple[str, int] | None = None
         self._show_selected_spike: bool = True
         self._remove_other_units_from_selected_spike: bool = False
+        self._split_preview_key: tuple[str, int] | None = None
+        self._split_group_b: set[int] = set()
+        self._split_suggestion_score: float | None = None
+        self._split_suggestion_threshold: float | None = None
+        self._split_preview_manually_adjusted: bool = False
+        self._split_suggestion_error: str | None = None
 
         # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
         self._props_timer = QTimer(self)
@@ -422,6 +429,27 @@ class EditionTab(QWidget):
         self.btn_recalc_filter.setEnabled(False)
         self.btn_recalc_filter.setStyleSheet(self._warn_toolbar_btn_style())
         tb.addWidget(self.btn_recalc_filter)
+
+        self.btn_split_unit = QPushButton("Split Unit")
+        self.btn_split_unit.setToolTip(
+            "Suggest two groups from the distribution of source peak heights, "
+            "then preview and adjust them before creating two motor units."
+        )
+        self.btn_split_unit.clicked.connect(self._toggle_split_preview)
+        self.btn_split_unit.setEnabled(False)
+        self.btn_split_unit.setStyleSheet(self._warn_toolbar_btn_style())
+        tb.addWidget(self.btn_split_unit)
+
+        self.btn_confirm_split = QPushButton("Confirm Split")
+        self.btn_confirm_split.setToolTip(
+            "Create two motor units from the orange and cyan spike groups"
+        )
+        self.btn_confirm_split.clicked.connect(self._confirm_split_unit)
+        self.btn_confirm_split.setEnabled(False)
+        self.btn_confirm_split.setStyleSheet(self._sel_btn_style("#22d3ee"))
+        self.btn_confirm_split.setVisible(False)
+        self._confirm_split_action = tb.addWidget(self.btn_confirm_split)
+        self._confirm_split_action.setVisible(False)
 
         self.btn_flag_delete = QPushButton("⚑ Flag Unit")
         self.btn_flag_delete.setToolTip("Toggle deletion flag for the current MU [X]")
@@ -701,6 +729,7 @@ class EditionTab(QWidget):
         self.source_plot.spike_add_requested.connect(self._handle_add_click)
         self.source_plot.spike_delete_requested.connect(self._handle_delete_click)
         self.source_plot.spike_inspect_requested.connect(self._inspect_spike_muap)
+        self.source_plot.split_toggle_requested.connect(self._toggle_split_spike)
         self.source_plot.region_selected.connect(self._on_region_selected)
         plot_splitter.addWidget(self.source_plot)
 
@@ -815,6 +844,8 @@ class EditionTab(QWidget):
             self._apply_selection_add(x1, x2, y1, y2)
         elif self._sel_arm == SelectionArm.DELETE:
             self._apply_selection_delete(x1, x2, y1, y2)
+        elif self._sel_arm == SelectionArm.SPLIT:
+            self._apply_selection_split(x1, x2, y1, y2)
 
     # ------------------------------------------------------------------
     # Selection operations
@@ -900,6 +931,560 @@ class EditionTab(QWidget):
         self._on_data_changed(f"Deleted {n_remove} spikes from selection")
 
     # ------------------------------------------------------------------
+    # Split-unit preview and commit
+    # ------------------------------------------------------------------
+
+    def _split_preview_active(self) -> bool:
+        return self._split_preview_key is not None
+
+    def _toggle_split_preview(self):
+        """Start a split preview, or discard the active preview unchanged."""
+        if self._split_preview_active():
+            self._cancel_split_preview()
+        else:
+            self._start_split_preview()
+
+    def _start_split_preview(self):
+        mu = self._current_mu()
+        if mu is None:
+            self._update_status("Select a motor unit first")
+            return
+        if mu.split_parent_id is not None:
+            self._update_status("This motor unit is already part of a split")
+            return
+        timestamps = np.asarray(mu.timestamps, dtype=np.int64)
+        if len(timestamps) < 4:
+            self._update_status("Need at least 4 spikes to split a motor unit")
+            return
+
+        self._clear_spike_muap_inspection()
+        self._set_mode(EditMode.VIEW)
+        self._split_preview_key = (self._current_port or "", self._current_mu_idx)
+        try:
+            suggestion = suggest_split_by_peak_height(timestamps, mu.source)
+            self._split_group_b = set(suggestion.group_b.tolist())
+            self._split_suggestion_score = suggestion.separation_score
+            self._split_suggestion_threshold = suggestion.threshold
+            self._split_suggestion_error = None
+        except ValueError as exc:
+            # Keep the preview useful even when the distribution is flat or
+            # invalid: the user may still assign the second group manually.
+            self._split_group_b = set()
+            self._split_suggestion_score = None
+            self._split_suggestion_threshold = None
+            self._split_suggestion_error = str(exc)
+        self._split_preview_manually_adjusted = False
+        self._sel_arm = SelectionArm.SPLIT
+        self.source_plot.set_selection_arm(SelectionArm.SPLIT)
+        self._set_split_preview_controls(True)
+        self._render_split_preview()
+
+    def _split_preview_groups(self) -> tuple[np.ndarray, np.ndarray]:
+        preview_key = self._split_preview_key
+        if preview_key is None:
+            empty = np.array([], dtype=np.int64)
+            return empty, empty
+        mu = self._get_mu(*preview_key)
+        if mu is None:
+            empty = np.array([], dtype=np.int64)
+            return empty, empty
+        original = np.sort(np.asarray(mu.timestamps, dtype=np.int64))
+        in_group_b = np.isin(original, list(self._split_group_b))
+        group_b = original[in_group_b]
+        group_a = original[~in_group_b]
+        return group_a, group_b
+
+    @staticmethod
+    def _split_group_median_height(
+        motor_unit: MotorUnit,
+        timestamps: np.ndarray,
+    ) -> float:
+        """Return the median squared source height for one proposed child."""
+        samples = np.asarray(timestamps, dtype=np.int64)
+        samples = samples[(samples >= 0) & (samples < len(motor_unit.source))]
+        if len(samples) == 0:
+            return float("-inf")
+        source = np.nan_to_num(
+            motor_unit.source,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        return float(np.median(np.square(source[samples])))
+
+    def _render_split_preview(self):
+        group_a, group_b = self._split_preview_groups()
+        self.source_plot.set_split_preview(group_a, group_b)
+        self.fr_plot.set_data(group_a, group_b)
+        valid = len(group_a) >= 2 and len(group_b) >= 2
+        self.btn_confirm_split.setEnabled(valid)
+        if self._split_suggestion_score is None:
+            method = "Automatic height split unavailable; assign cyan spikes manually"
+            if self._split_suggestion_error:
+                method += f" ({self._split_suggestion_error})"
+        elif self._split_preview_manually_adjusted:
+            method = (
+                "Adjusted automatic source-height split "
+                f"(initial separation {self._split_suggestion_score:.0%})"
+            )
+        else:
+            method = (
+                "Automatic source-height split "
+                f"(separation {self._split_suggestion_score:.0%})"
+            )
+        self._update_status(
+            f"{method} — orange A (higher amplitude): {len(group_a)} spikes | "
+            f"cyan B: {len(group_b)} spikes. Click or drag to adjust."
+        )
+
+    def _toggle_split_spike(self, sample: int):
+        preview_key = self._split_preview_key
+        if preview_key is None:
+            return
+        mu = self._get_mu(*preview_key)
+        if mu is None or int(sample) not in mu.timestamps:
+            return
+        sample = int(sample)
+        if sample in self._split_group_b:
+            self._split_group_b.remove(sample)
+        else:
+            self._split_group_b.add(sample)
+        self._split_preview_manually_adjusted = True
+        self._render_split_preview()
+
+    def _apply_selection_split(self, x1: float, x2: float, y1: float, y2: float):
+        preview_key = self._split_preview_key
+        if preview_key is None:
+            return
+        mu = self._get_mu(*preview_key)
+        if mu is None:
+            return
+        s1, s2 = sorted((int(x1 * self._fsamp), int(x2 * self._fsamp)))
+        source_sq = np.nan_to_num(mu.source, nan=0.0, posinf=0.0, neginf=0.0) ** 2
+        selected = [
+            int(timestamp)
+            for timestamp in mu.timestamps
+            if s1 <= timestamp < s2
+            and 0 <= timestamp < len(source_sq)
+            and y1 <= source_sq[timestamp] <= y2
+        ]
+        if not selected:
+            self._update_status("No spike markers in split selection")
+            return
+        for timestamp in selected:
+            if timestamp in self._split_group_b:
+                self._split_group_b.remove(timestamp)
+            else:
+                self._split_group_b.add(timestamp)
+        self._split_preview_manually_adjusted = True
+        self._render_split_preview()
+
+    def _cancel_split_preview(self, *, announce: bool = True):
+        if not self._split_preview_active():
+            return
+        self._split_preview_key = None
+        self._split_group_b.clear()
+        self._split_suggestion_score = None
+        self._split_suggestion_threshold = None
+        self._split_preview_manually_adjusted = False
+        self._split_suggestion_error = None
+        self._sel_arm = SelectionArm.NONE
+        self.source_plot.set_selection_arm(SelectionArm.NONE)
+        self._set_split_preview_controls(False)
+        self._update_plots(reset_view=False)
+        if announce:
+            self._update_status("Split canceled — motor unit unchanged")
+
+    def _set_split_preview_controls(self, active: bool):
+        self.btn_split_unit.setVisible(True)
+        self.btn_split_unit.setText("Cancel Split" if active else "Split Unit")
+        self.btn_split_unit.setEnabled(True)
+        if active:
+            self.btn_split_unit.setToolTip(
+                "Discard the split preview and restore the unchanged unit [Esc]"
+            )
+        self.btn_confirm_split.setVisible(active)
+        self._confirm_split_action.setVisible(active)
+        self.port_combo.setEnabled(not active)
+        self.mu_combo.setEnabled(not active)
+        self.quality_bar.setEnabled(not active)
+
+        controls = (
+            self.btn_recalc_filter,
+            self.btn_flag_delete,
+            self.btn_remove_outliers,
+            self.btn_auto_edit_mu,
+            self.btn_sel_add,
+            self.btn_sel_delete,
+            self.btn_delete_flagged,
+            self.btn_flag_within_dups,
+            self.btn_flag_cross_dups,
+            self.btn_notes,
+            self.btn_reviewed,
+            self.btn_next_unreviewed,
+        )
+        if active:
+            for control in controls:
+                control.setEnabled(False)
+            return
+
+        has_unit = self._current_mu() is not None
+        for control in (
+            self.btn_flag_delete,
+            self.btn_remove_outliers,
+            self.btn_auto_edit_mu,
+            self.btn_sel_add,
+            self.btn_sel_delete,
+            self.btn_notes,
+        ):
+            control.setEnabled(has_unit)
+        has_data = bool(self._ports)
+        self.btn_delete_flagged.setEnabled(has_data)
+        all_have_props = has_data and all(
+            unit.props is not None
+            for motor_units in self._ports.values()
+            for unit in motor_units
+        )
+        self.btn_flag_within_dups.setEnabled(all_have_props)
+        self.btn_flag_cross_dups.setEnabled(all_have_props)
+        self._update_recalc_control()
+        self._update_split_button_state()
+        self._update_review_controls()
+
+    def _confirm_split_unit(self):
+        preview_key = self._split_preview_key
+        if preview_key is None:
+            return
+        port_name, unit_index = preview_key
+        mu = self._get_mu(port_name, unit_index)
+        group_a, group_b = self._split_preview_groups()
+        if mu is None or len(group_a) < 2 or len(group_b) < 2:
+            self._update_status("Each split unit needs at least 2 spikes")
+            return
+
+        # Keep the semantic labels stable even after manual preview edits:
+        # split A is always the higher-amplitude population.
+        if self._split_group_median_height(
+            mu, group_b
+        ) > self._split_group_median_height(mu, group_a):
+            group_a, group_b = group_b, group_a
+
+        self._ensure_peel_group_ids()
+        peel_snapshot = self._capture_peel_group_mapping()
+        parent_id = mu.id
+        peel_group_id = mu.peel_group_id
+        suggestion_score = self._split_suggestion_score
+        suggestion_threshold = self._split_suggestion_threshold
+        manually_adjusted = self._split_preview_manually_adjusted
+        new_id = max((unit.id for unit in self._ports[port_name]), default=-1) + 1
+        new_filter = mu.mu_filter.copy() if mu.mu_filter is not None else None
+        child = MotorUnit(
+            id=new_id,
+            timestamps=group_b.copy(),
+            source=mu.source.copy(),
+            port_name=port_name,
+            mu_filter=new_filter,
+            peel_group_id=peel_group_id,
+            split_parent_id=parent_id,
+            split_label="B",
+            enabled=mu.enabled,
+        )
+
+        mu.timestamps = group_a.copy()
+        mu.peel_group_id = peel_group_id
+        mu.split_parent_id = parent_id
+        mu.split_label = "A"
+        mu.flagged_duplicate = False
+        mu.reviewed = False
+        mu.within_duplicate_role = None
+        mu.within_duplicate_partners = []
+        mu.cross_duplicate_role = None
+        mu.cross_duplicate_partners = []
+        self._ports[port_name].insert(unit_index + 1, child)
+        stored_group_a = (
+            self._ts_to_plateau_local(group_a) if self._full_source_mode else group_a
+        )
+        stored_group_b = (
+            self._ts_to_plateau_local(group_b) if self._full_source_mode else group_b
+        )
+        old_peel_key = (port_name, int(peel_group_id), None)
+        self._remap_peel_group_mapping(
+            peel_snapshot,
+            replacements={
+                old_peel_key: [
+                    (
+                        (port_name, int(peel_group_id), "A"),
+                        stored_group_a,
+                    ),
+                    (
+                        (port_name, int(peel_group_id), "B"),
+                        stored_group_b,
+                    ),
+                ]
+            },
+        )
+
+        mu.props = self._recompute_split_properties(port_name, mu)
+        child.props = self._recompute_split_properties(port_name, child)
+        clear_duplicate_roles(self._ports, "within")
+        clear_duplicate_roles(self._ports, "cross")
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._props_timer.stop()
+        self._pending_props_key = None
+        self._pending_source_changed = False
+
+        self._split_preview_key = None
+        self._split_group_b.clear()
+        self._split_suggestion_score = None
+        self._split_suggestion_threshold = None
+        self._split_preview_manually_adjusted = False
+        self._split_suggestion_error = None
+        self._sel_arm = SelectionArm.NONE
+        self.source_plot.set_selection_arm(SelectionArm.NONE)
+        self._set_split_preview_controls(False)
+        self._refresh_mu_combo()
+        self.mu_combo.blockSignals(True)
+        self.mu_combo.setCurrentIndex(unit_index)
+        self.mu_combo.blockSignals(False)
+        self._current_mu_idx = unit_index
+        self._update_plots(reset_view=False)
+        self._log_event(
+            "split_unit",
+            f"split MU {parent_id} into MU {parent_id} and MU {new_id}",
+            port_name,
+            unit_index,
+            parent_mu_id=parent_id,
+            child_mu_id=new_id,
+            group_a_spikes=len(group_a),
+            group_b_spikes=len(group_b),
+            peel_group_id=peel_group_id,
+            split_method=(
+                "source_peak_height_distribution"
+                if suggestion_score is not None
+                else "manual"
+            ),
+            automatic_separation_score=suggestion_score,
+            automatic_height_threshold=suggestion_threshold,
+            manually_adjusted=manually_adjusted,
+        )
+        self._mark_modified()
+        self._update_status(
+            f"Split MU {parent_id}: {len(group_a)} spikes in A, "
+            f"{len(group_b)} spikes in new MU {new_id}. Clean A first, then "
+            "recalculate B to remove A's contribution."
+        )
+
+    def _recompute_split_properties(
+        self, port_name: str, motor_unit: MotorUnit
+    ) -> MUProperties:
+        grid_config = self._grid_info.get(port_name)
+        return recompute_unit_properties(
+            mu_props=MUProperties(),
+            new_timestamps=motor_unit.timestamps,
+            source=motor_unit.source,
+            emg_port=self._emg_data.get(port_name),
+            grid_positions=self._active_grid_positions.get(port_name),
+            grid_shape=grid_config["grid_shape"] if grid_config else None,
+            fsamp=self._fsamp,
+        )
+
+    def _ensure_peel_group_ids(self) -> None:
+        """Give legacy/in-memory units stable local peel group identifiers."""
+        for motor_units in self._ports.values():
+            for unit_index, motor_unit in enumerate(motor_units):
+                if motor_unit.peel_group_id is None:
+                    motor_unit.peel_group_id = unit_index
+
+    @staticmethod
+    def _peel_step_key(port_name: str, motor_unit: MotorUnit) -> tuple:
+        """Return the stable identity of one accepted peel step."""
+        return (
+            port_name,
+            int(motor_unit.peel_group_id),
+            motor_unit.split_label,
+        )
+
+    def _capture_peel_group_mapping(self):
+        """Capture accepted peel entries by stable group before a list edit."""
+        if self._original_decomp_data is None:
+            return None
+        peel_sequence = self._original_decomp_data.get("peel_off_sequence")
+        if not isinstance(peel_sequence, list):
+            return None
+
+        port_names = list(self._ports)
+        per_port = bool(peel_sequence) and isinstance(peel_sequence[0], list)
+        sequences = []
+        if per_port:
+            for port_index, port_name in enumerate(port_names):
+                entries = (
+                    peel_sequence[port_index]
+                    if port_index < len(peel_sequence)
+                    and isinstance(peel_sequence[port_index], list)
+                    else []
+                )
+                motor_units = self._ports.get(port_name, [])
+                annotated = []
+                for entry in entries:
+                    key = None
+                    if isinstance(entry, dict):
+                        unit_index = entry.get("accepted_unit_idx")
+                        if isinstance(unit_index, (int, np.integer)) and 0 <= int(
+                            unit_index
+                        ) < len(motor_units):
+                            motor_unit = motor_units[int(unit_index)]
+                            key = self._peel_step_key(port_name, motor_unit)
+                    annotated.append((entry, key))
+                sequences.append(annotated)
+        else:
+            flat_units = [
+                (port_name, motor_unit)
+                for port_name, motor_units in self._ports.items()
+                for motor_unit in motor_units
+            ]
+            annotated = []
+            for entry in peel_sequence:
+                key = None
+                if isinstance(entry, dict):
+                    unit_index = entry.get("accepted_unit_idx")
+                    if isinstance(unit_index, (int, np.integer)) and 0 <= int(
+                        unit_index
+                    ) < len(flat_units):
+                        port_name, motor_unit = flat_units[int(unit_index)]
+                        key = self._peel_step_key(port_name, motor_unit)
+                annotated.append((entry, key))
+            sequences.append(annotated)
+        return {"per_port": per_port, "sequences": sequences}
+
+    def _remap_peel_group_mapping(self, snapshot, *, replacements=None) -> None:
+        """Remap accepted peel steps after units are inserted or removed.
+
+        ``replacements`` can expand one historic step into multiple current
+        steps. A confirmed split uses this to place A and B consecutively at
+        the original merged unit's position in the replay order.
+        """
+        if snapshot is None or self._original_decomp_data is None:
+            return
+        replacements = replacements or {}
+
+        local_representatives = {}
+        for port_name, motor_units in self._ports.items():
+            for unit_index, motor_unit in enumerate(motor_units):
+                key = self._peel_step_key(port_name, motor_unit)
+                local_representatives.setdefault(key, unit_index)
+
+        per_port = snapshot["per_port"]
+        offsets = {}
+        offset = 0
+        for port_name, motor_units in self._ports.items():
+            offsets[port_name] = offset
+            offset += len(motor_units)
+
+        def accepted_index(key):
+            local_index = local_representatives[key]
+            return local_index if per_port else offsets[key[0]] + local_index
+
+        def remap_entry(entry, key):
+            if key is None:
+                return [entry]
+            if key in replacements:
+                expanded = []
+                for replacement_key, timestamps in replacements[key]:
+                    if replacement_key not in local_representatives:
+                        continue
+                    expanded.append(
+                        {
+                            **entry,
+                            "accepted_unit_idx": accepted_index(replacement_key),
+                            "timestamps": np.asarray(timestamps, dtype=np.int64).copy(),
+                        }
+                    )
+                return expanded
+            if key not in local_representatives:
+                return []
+            return [{**entry, "accepted_unit_idx": accepted_index(key)}]
+
+        rebuilt_sequences = []
+        for annotated in snapshot["sequences"]:
+            entries = []
+            for entry, key in annotated:
+                entries.extend(remap_entry(entry, key))
+            rebuilt_sequences.append(entries)
+        rebuilt = rebuilt_sequences if per_port else rebuilt_sequences[0]
+        self._original_decomp_data["peel_off_sequence"] = rebuilt
+
+    def _ensure_split_peel_steps(self) -> None:
+        """Upgrade an older one-step split session to one step per child."""
+        self._ensure_peel_group_ids()
+        snapshot = self._capture_peel_group_mapping()
+        if snapshot is None:
+            return
+
+        present_keys = {
+            key
+            for sequence in snapshot["sequences"]
+            for _entry, key in sequence
+            if key is not None
+        }
+        split_groups = {}
+        for port_name, motor_units in self._ports.items():
+            for motor_unit in motor_units:
+                if motor_unit.split_parent_id is None:
+                    continue
+                group_key = (
+                    port_name,
+                    int(motor_unit.peel_group_id),
+                    int(motor_unit.split_parent_id),
+                )
+                split_groups.setdefault(group_key, []).append(motor_unit)
+
+        replacements = {}
+        for (
+            port_name,
+            _peel_group_id,
+            _parent_id,
+        ), motor_units in split_groups.items():
+            if len(motor_units) < 2:
+                continue
+            ordered = sorted(
+                motor_units,
+                key=lambda motor_unit: (
+                    motor_unit.split_label not in ("A", "B"),
+                    motor_unit.split_label or "",
+                    motor_unit.id,
+                ),
+            )
+            step_keys = [
+                self._peel_step_key(port_name, motor_unit) for motor_unit in ordered
+            ]
+            if all(key in present_keys for key in step_keys):
+                continue
+            template_key = next(
+                (key for key in step_keys if key in present_keys),
+                None,
+            )
+            if template_key is None:
+                continue
+            replacements[template_key] = [
+                (
+                    step_key,
+                    (
+                        self._ts_to_plateau_local(motor_unit.timestamps)
+                        if self._full_source_mode
+                        else motor_unit.timestamps
+                    ),
+                )
+                for step_key, motor_unit in zip(step_keys, ordered, strict=True)
+            ]
+
+        if replacements:
+            self._remap_peel_group_mapping(
+                snapshot,
+                replacements=replacements,
+            )
+
+    # ------------------------------------------------------------------
     # File I/O
     # ------------------------------------------------------------------
 
@@ -931,6 +1516,8 @@ class EditionTab(QWidget):
 
     def confirm_save_changes(self, action: str = "continuing") -> bool:
         """Offer to save dirty data, returning whether *action* may proceed."""
+        if self._split_preview_active():
+            self._cancel_split_preview(announce=False)
         if not self._dirty:
             return True
 
@@ -990,9 +1577,16 @@ class EditionTab(QWidget):
             "_spike_muap_inspection_key",
             "_pending_source_changed",
             "_pending_props_key",
+            "_split_preview_key",
+            "_split_group_b",
+            "_split_suggestion_score",
+            "_split_suggestion_threshold",
+            "_split_preview_manually_adjusted",
+            "_split_suggestion_error",
         )
         controls = (
             "btn_recalc_filter",
+            "btn_split_unit",
             "btn_remove_outliers",
             "btn_flag_delete",
             "btn_delete_flagged",
@@ -1045,6 +1639,13 @@ class EditionTab(QWidget):
         self.btn_sel_delete.setChecked(self._sel_arm == SelectionArm.DELETE)
         self.btn_sel_add.blockSignals(False)
         self.btn_sel_delete.blockSignals(False)
+        split_active = self._split_preview_active()
+        self.btn_split_unit.setVisible(True)
+        self.btn_split_unit.setText("Cancel Split" if split_active else "Split Unit")
+        self.btn_confirm_split.setVisible(split_active)
+        self._confirm_split_action.setVisible(split_active)
+        if split_active:
+            self._render_split_preview()
 
         for name, (enabled, tooltip) in state["controls"].items():
             control = getattr(self, name)
@@ -1070,7 +1671,18 @@ class EditionTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to read file:\n{e}")
             return False
-        if data.get("skip_filter_recalc"):
+        has_split_units = any(
+            isinstance(lineage, dict) and lineage.get("split_parent_id") is not None
+            for port_lineage in data.get("unit_lineage", [])
+            if isinstance(port_lineage, list)
+            for lineage in port_lineage
+        )
+        if has_split_units:
+            # Keep manually cleaned split sources authoritative on load.
+            # Individual recalculation preserves the A-then-B peel order and
+            # uses the current curated timestamp trains.
+            data["skip_filter_recalc"] = True
+        elif data.get("skip_filter_recalc"):
             reply = QMessageBox.question(
                 self,
                 "Recalculate Filters?",
@@ -1154,6 +1766,19 @@ class EditionTab(QWidget):
         self._redo_stack = {}
         self._spike_muap_inspection = None
         self._spike_muap_inspection_key = None
+        self._split_preview_key = None
+        self._split_group_b = set()
+        self._split_suggestion_score = None
+        self._split_suggestion_threshold = None
+        self._split_preview_manually_adjusted = False
+        self._split_suggestion_error = None
+        self.btn_split_unit.setVisible(True)
+        self.btn_split_unit.setText("Split Unit")
+        self.btn_confirm_split.setVisible(False)
+        self._confirm_split_action.setVisible(False)
+        self.port_combo.setEnabled(True)
+        self.mu_combo.setEnabled(True)
+        self.quality_bar.setEnabled(True)
         # Carry forward any edit history already stored in the file so the log
         # accumulates across multiple editing sessions.
         prior_history = decomp_data.get("edit_history", [])
@@ -1252,6 +1877,8 @@ class EditionTab(QWidget):
                 ch_offset,
             )
 
+        self._ensure_split_peel_steps()
+
         self._refresh_port_combo()
         if ports:
             self.port_combo.setCurrentText(ports[0])
@@ -1265,9 +1892,7 @@ class EditionTab(QWidget):
 
         ok, reason = supports_filter_recalculation(decomp_data)
         self._filter_recalc_available = ok
-        self.btn_recalc_filter.setEnabled(ok)
-        if not ok:
-            self.btn_recalc_filter.setToolTip(f"Unavailable: {reason}")
+        self._update_recalc_control(reason if not ok else None)
 
         for btn in (
             self.btn_remove_outliers,
@@ -1278,8 +1903,10 @@ class EditionTab(QWidget):
             self.btn_sel_delete,
             self.btn_flag_within_dups,
             self.btn_flag_cross_dups,
+            self.btn_split_unit,
         ):
             btn.setEnabled(True)
+        self._update_split_button_state()
 
         all_mus_have_props = all(
             mu.props is not None for mus in self._ports.values() for mu in mus
@@ -1368,6 +1995,9 @@ class EditionTab(QWidget):
         return self._save_file(prompt_for_path=True)
 
     def _save_file(self, *, prompt_for_path: bool = False) -> bool:
+        if self._split_preview_active():
+            self._update_status("Confirm or cancel the split before saving")
+            return False
         if not self._ports:
             self._update_status("Nothing to save")
             return False
@@ -1451,6 +2081,9 @@ class EditionTab(QWidget):
 
     def _handle_escape(self):
         """Return to view mode and dismiss any transient MUAP inspection."""
+        if self._split_preview_active():
+            self._cancel_split_preview()
+            return
         had_inspection = self._spike_muap_inspection is not None
         self._clear_spike_muap_inspection()
         self._set_mode(EditMode.VIEW)
@@ -1605,9 +2238,23 @@ class EditionTab(QWidget):
         # Match the accepted-unit peel-off order used by filter recalculation:
         # only units extracted before the current unit contribute to its
         # residual. In particular, MU 0 has nothing to remove.
+        port_units = self._ports.get(port_name, [])
+        target_group = mu.peel_group_id
+        target_group_start = (
+            next(
+                (
+                    index
+                    for index, candidate in enumerate(port_units)
+                    if candidate.peel_group_id == target_group
+                ),
+                self._current_mu_idx,
+            )
+            if target_group is not None
+            else self._current_mu_idx
+        )
         other_unit_timestamps = [
             earlier.timestamps
-            for earlier in self._ports.get(port_name, [])[: self._current_mu_idx]
+            for earlier in port_units[:target_group_start]
             if earlier.enabled
         ]
         try:
@@ -1882,6 +2529,15 @@ class EditionTab(QWidget):
             return
 
         current_port_filters = [m.mu_filter for m in self._ports[self._current_port]]
+        current_port_timestamps_abs = [
+            (
+                np.asarray(m.timestamps, dtype=np.int64)
+                if self._full_source_mode
+                else self._ts_to_absolute(np.asarray(m.timestamps, dtype=np.int64))
+            )
+            for m in self._ports[self._current_port]
+        ]
+        replay_stop_before = self._current_mu_idx
         ts_abs = mu.timestamps
         if not self._full_source_mode:
             ts_abs = self._ts_to_absolute(mu.timestamps)
@@ -1898,6 +2554,9 @@ class EditionTab(QWidget):
                 start_sample=self._start_sample,
                 end_sample=self._end_sample,
                 current_port_filters=current_port_filters,
+                current_units_per_port=[len(units) for units in self._ports.values()],
+                current_port_timestamps_abs=current_port_timestamps_abs,
+                replay_stop_before_local_idx=replay_stop_before,
             )
 
             new_timestamps = (
@@ -1945,6 +2604,60 @@ class EditionTab(QWidget):
             offset += len(mus)
         return None
 
+    def _update_recalc_control(self, unavailable_reason: str | None = None) -> None:
+        motor_unit = self._current_mu()
+        enabled = self._filter_recalc_available and motor_unit is not None
+        self.btn_recalc_filter.setEnabled(enabled)
+        if not self._filter_recalc_available:
+            reason = unavailable_reason or "required decomposition data is unavailable"
+            self.btn_recalc_filter.setToolTip(f"Unavailable: {reason}")
+        elif motor_unit is not None and motor_unit.split_parent_id is not None:
+            if motor_unit.split_label == "B":
+                self.btn_recalc_filter.setToolTip(
+                    "Peel split A at A's current edited timestamps, then "
+                    "recompute split B from the cleaned residual [F]"
+                )
+            else:
+                self.btn_recalc_filter.setToolTip(
+                    "Recompute split A from the residual before the split stage, "
+                    "using its manually edited timestamps [F]"
+                )
+        else:
+            self.btn_recalc_filter.setToolTip(
+                "Replay peel-off and recompute filter + source + timestamps [F]"
+            )
+
+    def _update_split_button_state(self) -> None:
+        if self._split_preview_active():
+            self.btn_split_unit.setText("Cancel Split")
+            self.btn_split_unit.setEnabled(True)
+            self.btn_split_unit.setToolTip(
+                "Discard the split preview and restore the unchanged unit [Esc]"
+            )
+            return
+
+        motor_unit = self._current_mu()
+        enabled = (
+            motor_unit is not None
+            and motor_unit.split_parent_id is None
+            and len(np.unique(motor_unit.timestamps)) >= 4
+        )
+        self.btn_split_unit.setText("Split Unit")
+        self.btn_split_unit.setEnabled(enabled)
+        if motor_unit is not None and motor_unit.split_parent_id is not None:
+            self.btn_split_unit.setToolTip(
+                "This motor unit is already part of a split group"
+            )
+        elif motor_unit is not None and len(np.unique(motor_unit.timestamps)) < 4:
+            self.btn_split_unit.setToolTip(
+                "At least 4 spikes are required so each child can contain 2"
+            )
+        else:
+            self.btn_split_unit.setToolTip(
+                "Suggest two groups from the distribution of source peak heights, "
+                "then preview and adjust them before creating two motor units"
+            )
+
     # ------------------------------------------------------------------
     # Motor-unit accessors
     # ------------------------------------------------------------------
@@ -1972,6 +2685,8 @@ class EditionTab(QWidget):
         mus = self._ports.get(self._current_port, [])
         if index < 0 or index >= len(mus):
             return
+        if self._split_preview_active() and index != self._current_mu_idx:
+            self._cancel_split_preview(announce=False)
         if index != self._current_mu_idx:
             self._clear_spike_muap_inspection(render=False)
         self._current_mu_idx = index
@@ -1981,25 +2696,35 @@ class EditionTab(QWidget):
                 "Unflag Unit" if mu.flagged_for_deletion else "⚑ Flag Unit"
             )
         self._update_review_controls()
+        self._update_recalc_control()
+        self._update_split_button_state()
         self._update_plots(reset_view=True)
         self._update_status()
 
     def _select_prev_mu(self):
+        if self._split_preview_active():
+            return
         idx = self.mu_combo.currentIndex()
         if idx > 0:
             self.mu_combo.setCurrentIndex(idx - 1)
 
     def _select_next_mu(self):
+        if self._split_preview_active():
+            return
         idx = self.mu_combo.currentIndex()
         if idx < self.mu_combo.count() - 1:
             self.mu_combo.setCurrentIndex(idx + 1)
 
     def _select_prev_port(self):
+        if self._split_preview_active():
+            return
         idx = self.port_combo.currentIndex()
         if idx > 0:
             self.port_combo.setCurrentIndex(idx - 1)
 
     def _select_next_port(self):
+        if self._split_preview_active():
+            return
         idx = self.port_combo.currentIndex()
         if idx < self.port_combo.count() - 1:
             self.port_combo.setCurrentIndex(idx + 1)
@@ -2032,6 +2757,9 @@ class EditionTab(QWidget):
         self.btn_reviewed.blockSignals(False)
 
         self.btn_next_unreviewed.setEnabled(total > reviewed)
+        if self._split_preview_active():
+            self.btn_reviewed.setEnabled(False)
+            self.btn_next_unreviewed.setEnabled(False)
         self.review_progress_label.setText(f"Reviewed {reviewed}/{total}")
         progress_color = (
             COLORS.get("success", "#a6e3a1")
@@ -2137,6 +2865,8 @@ class EditionTab(QWidget):
         Flipping to a value that matches the automatic verdict clears the
         override, so the unit goes back to tracking its quality metrics.
         """
+        if self._split_preview_active():
+            return
         mu = self._current_mu()
         if mu is None or mu.props is None:
             self._update_status("No quality data for this MU")
@@ -2166,6 +2896,8 @@ class EditionTab(QWidget):
 
     def _reset_reliability(self):
         """Drop the current MU's manual override and follow the metrics again."""
+        if self._split_preview_active():
+            return
         mu = self._current_mu()
         if mu is None or mu.props is None:
             return
@@ -2221,36 +2953,11 @@ class EditionTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Remap peel_off_sequence before deletion so filter recalculation
-        # continues to work correctly on the remaining units.
-        if self._original_decomp_data is not None:
-            orig_peel = self._original_decomp_data.get("peel_off_sequence")
-            if orig_peel is not None:
-                port_index_maps = {}
-                for port_name in ports:
-                    old_to_new = {}
-                    new_idx = 0
-                    for old_idx, mu in enumerate(self._ports[port_name]):
-                        if not mu.flagged_for_deletion:
-                            old_to_new[old_idx] = new_idx
-                            new_idx += 1
-                    port_index_maps[port_name] = old_to_new
-
-                new_peel = []
-                for port_idx, port_name in enumerate(ports):
-                    port_seq = orig_peel[port_idx] if port_idx < len(orig_peel) else []
-                    old_to_new = port_index_maps[port_name]
-                    remapped = []
-                    for entry in port_seq:
-                        uid = entry.get("accepted_unit_idx")
-                        if uid is None:
-                            remapped.append(entry)
-                        elif uid in old_to_new:
-                            remapped.append(
-                                {**entry, "accepted_unit_idx": old_to_new[uid]}
-                            )
-                    new_peel.append(remapped)
-                self._original_decomp_data["peel_off_sequence"] = new_peel
+        # Capture stable peel lineage before compacting the output-unit lists.
+        # Each split child has its own step within a shared stage, so deleting
+        # one child drops only that step and keeps the sibling's replay entry.
+        self._ensure_peel_group_ids()
+        peel_snapshot = self._capture_peel_group_mapping()
 
         deleted_by_port = flagged_by_port
         id_maps = {}
@@ -2258,6 +2965,7 @@ class EditionTab(QWidget):
             kept = [mu for mu in self._ports[port_name] if not mu.flagged_for_deletion]
             id_maps[port_name] = {mu.id: mu.id for mu in kept}
             self._ports[port_name] = kept
+        self._remap_peel_group_mapping(peel_snapshot)
 
         # Retained units preserve their stable ids; notes for removed units are
         # marked as deleted instead of being silently reassigned.
@@ -2298,6 +3006,8 @@ class EditionTab(QWidget):
             self._refresh_mu_combo()
             self._clear_plots()
         self._update_status(f"Deleted {total} flagged MU(s)")
+        self._update_split_button_state()
+        self._update_recalc_control()
         self._mark_modified()
 
     def _remove_outliers(self):
@@ -2655,6 +3365,8 @@ class EditionTab(QWidget):
     def _on_port_changed(self, port_name: str):
         if not port_name or port_name not in self._ports:
             return
+        if self._split_preview_active() and port_name != self._current_port:
+            self._cancel_split_preview(announce=False)
         self._clear_spike_muap_inspection(render=False)
         self._current_port = port_name
         self._current_mu_idx = -1
@@ -2670,6 +3382,8 @@ class EditionTab(QWidget):
         if self._current_port is not None:
             for mu in self._ports.get(self._current_port, []):
                 label = f"MU {mu.id}  ({len(mu.timestamps)} spikes)"
+                if mu.split_label is not None:
+                    label += f"  [split {mu.split_label}]"
                 if mu.flagged_for_deletion:
                     label += "  ⚠"
                 if mu.props is not None:
@@ -2776,6 +3490,7 @@ class EditionTab(QWidget):
         self.mu_combo.blockSignals(True)
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
         self.mu_combo.blockSignals(False)
+        self._update_split_button_state()
         if review_reset:
             msg = f"{msg} — review reset"
         self._update_status(msg)
@@ -2972,11 +3687,19 @@ class EditionTab(QWidget):
             parts.append(f"{n} MUs")
         if self._current_mu_idx >= 0:
             parts.append(f"MU: {self._current_mu_id()}")
+            motor_unit = self._current_mu()
+            if motor_unit is not None and motor_unit.split_parent_id is not None:
+                parts.append("orange: current split unit | cyan: sibling")
 
         if self._sel_arm == SelectionArm.ADD:
             parts.append("⬜ Drag to ADD  (armed)")
         elif self._sel_arm == SelectionArm.DELETE:
             parts.append("⬜ Drag to DELETE  (armed)")
+        elif self._sel_arm == SelectionArm.SPLIT:
+            group_a, group_b = self._split_preview_groups()
+            parts.append(
+                f"Split preview: orange A {len(group_a)} | cyan B {len(group_b)}"
+            )
 
         key = (self._current_port or "", self._current_mu_idx)
         n_undo = len(self._undo_stack.get(key, []))

@@ -37,6 +37,13 @@ Completed results open in the Edition tab. Select a motor unit, zoom the source
 plot and use **Add** or **Delete** to correct spikes. Press `Ctrl+Z` to undo.
 The right-hand panel recomputes quality and MUAP properties after edits.
 
+If a source contains two clear spike-height populations, click **Split Unit**.
+Review the automatic orange high-amplitude A and cyan low-amplitude B groups,
+adjust markers by clicking or dragging, then choose **Confirm Split**. Clean A
+first and recalculate B afterward so A is peeled from B's residual using the
+curated A timestamps. Clicking **Cancel Split** or pressing `Escape` leaves the
+original unit unchanged.
+
 ## 5. Inspect the population
 
 Open the Visualisation tab for the raster, instantaneous discharge rate,

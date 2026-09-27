@@ -283,6 +283,14 @@ def load_edition_port(
         if port_index < len(all_motor_unit_ids)
         else list(range(len(timestamp_arrays)))
     )
+    all_unit_lineage = decomposition.get("unit_lineage", [])
+    port_lineage = (
+        list(all_unit_lineage[port_index])
+        if isinstance(all_unit_lineage, (list, tuple))
+        and port_index < len(all_unit_lineage)
+        and isinstance(all_unit_lineage[port_index], (list, tuple))
+        else []
+    )
     filter_arrays = (
         ensure_list_of_arrays(port_filters)
         if port_filters is not None
@@ -292,6 +300,28 @@ def load_edition_port(
 
     motor_units = []
     for motor_unit_index in range(len(timestamp_arrays)):
+        lineage = (
+            port_lineage[motor_unit_index]
+            if motor_unit_index < len(port_lineage)
+            and isinstance(port_lineage[motor_unit_index], Mapping)
+            else {}
+        )
+        peel_group_id = lineage.get("peel_group_id", motor_unit_index)
+        split_parent_id = lineage.get("split_parent_id")
+        split_label = lineage.get("split_label")
+        try:
+            peel_group_id = int(peel_group_id)
+        except (TypeError, ValueError):
+            peel_group_id = motor_unit_index
+        try:
+            split_parent_id = (
+                int(split_parent_id) if split_parent_id is not None else None
+            )
+        except (TypeError, ValueError):
+            split_parent_id = None
+        if split_label not in ("A", "B"):
+            split_label = None
+
         motor_unit_filter = (
             to_numpy(filter_arrays[motor_unit_index])
             if motor_unit_index < len(filter_arrays)
@@ -331,6 +361,9 @@ def load_edition_port(
                 source=source,
                 port_name=port_name,
                 mu_filter=motor_unit_filter,
+                peel_group_id=peel_group_id,
+                split_parent_id=split_parent_id,
+                split_label=split_label,
             )
         )
 
@@ -434,6 +467,7 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
     mu_filters = []
     mu_properties = []
     motor_unit_ids = []
+    unit_lineage = []
     flagged_mus_per_port = {}
     reviewed_mus_per_port = {}
     reliability_overrides_per_port = {}
@@ -441,6 +475,20 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
     for port_name in port_names:
         motor_units = state.ports[port_name]
         motor_unit_ids.append([motor_unit.id for motor_unit in motor_units])
+        unit_lineage.append(
+            [
+                {
+                    "peel_group_id": (
+                        motor_unit.peel_group_id
+                        if motor_unit.peel_group_id is not None
+                        else index
+                    ),
+                    "split_parent_id": motor_unit.split_parent_id,
+                    "split_label": motor_unit.split_label,
+                }
+                for index, motor_unit in enumerate(motor_units)
+            ]
+        )
         flagged_mus_per_port[port_name] = [
             index
             for index, motor_unit in enumerate(motor_units)
@@ -498,6 +546,7 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
         "discharge_times": discharge_times,
         "pulse_trains": pulse_trains,
         "motor_unit_ids": motor_unit_ids,
+        "unit_lineage": unit_lineage,
         "mu_filters": mu_filters,
         "skip_filter_recalc": True,
         "mu_properties": mu_properties,
@@ -516,7 +565,10 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
 
         original_peel_sequence = state.original_decomposition.get("peel_off_sequence")
         if original_peel_sequence is not None:
-            save_data["peel_off_sequence"] = original_peel_sequence
+            save_data["peel_off_sequence"] = _sync_peel_sequence_timestamps(
+                original_peel_sequence,
+                discharge_times,
+            )
 
         original_filters = state.original_decomposition.get("mu_filters")
         if original_filters is not None:
@@ -526,3 +578,49 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
         save_data["emg_per_port"] = dict(state.emg_data)
 
     return save_data
+
+
+def _sync_peel_sequence_timestamps(
+    peel_sequence,
+    discharge_times: list[list[np.ndarray]],
+):
+    """Copy a peel sequence with accepted steps using current discharge trains."""
+    per_port = (
+        isinstance(peel_sequence, list)
+        and bool(peel_sequence)
+        and isinstance(peel_sequence[0], list)
+    )
+
+    def updated_entry(entry, timestamps_by_index):
+        if not isinstance(entry, Mapping):
+            return entry
+        updated = dict(entry)
+        unit_index = entry.get("accepted_unit_idx")
+        if isinstance(unit_index, (int, np.integer)) and 0 <= int(unit_index) < len(
+            timestamps_by_index
+        ):
+            updated["timestamps"] = np.asarray(
+                timestamps_by_index[int(unit_index)], dtype=np.int64
+            ).copy()
+        return updated
+
+    if per_port:
+        return [
+            [
+                updated_entry(
+                    entry,
+                    discharge_times[port_index]
+                    if port_index < len(discharge_times)
+                    else [],
+                )
+                for entry in entries
+            ]
+            for port_index, entries in enumerate(peel_sequence)
+        ]
+
+    flattened_timestamps = [
+        timestamps
+        for port_timestamps in discharge_times
+        for timestamps in port_timestamps
+    ]
+    return [updated_entry(entry, flattened_timestamps) for entry in peel_sequence]

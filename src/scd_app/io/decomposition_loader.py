@@ -14,7 +14,7 @@ from scd_app.core.utils import to_numpy
 
 GUI_FORMAT = "scd-edition"
 UPSTREAM_SCD_FORMAT = "swarm-contrastive-decomposition"
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 _GUI_REQUIRED_KEYS = {"ports", "discharge_times", "pulse_trains"}
 _SCD_TIMESTAMP_KEYS = ("timestamps", "MUPulses")
 _SCD_SOURCE_KEYS = ("source", "sources")
@@ -270,12 +270,89 @@ def _validate_native_decomposition(data: dict) -> dict:
                 )
             normalized_motor_unit_ids.append(normalized_port_ids)
 
+    raw_unit_lineage = data.get("unit_lineage")
+    if raw_unit_lineage is None:
+        normalized_unit_lineage = [
+            [
+                {
+                    "peel_group_id": unit_index,
+                    "split_parent_id": None,
+                    "split_label": None,
+                }
+                for unit_index in range(len(port_timestamps))
+            ]
+            for port_timestamps in normalized_timestamps
+        ]
+    else:
+        lineage_ports = _outer_list(raw_unit_lineage, "unit_lineage")
+        if len(lineage_ports) != len(ports):
+            raise UnsupportedDecompositionFormat(
+                "SCD Edition unit_lineage must contain one entry per port."
+            )
+        normalized_unit_lineage = []
+        for port_index, port_name in enumerate(ports):
+            lineage_items = _outer_list(
+                lineage_ports[port_index], f"unit_lineage[{port_index}]"
+            )
+            expected_count = len(normalized_timestamps[port_index])
+            if len(lineage_items) != expected_count:
+                raise UnsupportedDecompositionFormat(
+                    f"Port {port_name!r} has {expected_count} motor units but "
+                    f"{len(lineage_items)} unit_lineage entries."
+                )
+            normalized_port_lineage = []
+            for unit_index, item in enumerate(lineage_items):
+                if not isinstance(item, dict):
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition "
+                        f"unit_lineage[{port_index}][{unit_index}] must be a dictionary."
+                    )
+                peel_group_id = item.get("peel_group_id", unit_index)
+                split_parent_id = item.get("split_parent_id")
+                split_label = item.get("split_label")
+                if isinstance(peel_group_id, (bool, np.bool_)) or not isinstance(
+                    peel_group_id, (int, np.integer)
+                ):
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition peel_group_id values must be non-negative integers."
+                    )
+                if int(peel_group_id) < 0:
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition peel_group_id values must be non-negative integers."
+                    )
+                if split_parent_id is not None and (
+                    isinstance(split_parent_id, (bool, np.bool_))
+                    or not isinstance(split_parent_id, (int, np.integer))
+                    or int(split_parent_id) < 0
+                ):
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition split_parent_id values must be non-negative "
+                        "integers or null."
+                    )
+                if split_label not in (None, "A", "B"):
+                    raise UnsupportedDecompositionFormat(
+                        "SCD Edition split_label values must be 'A', 'B', or null."
+                    )
+                normalized_port_lineage.append(
+                    {
+                        "peel_group_id": int(peel_group_id),
+                        "split_parent_id": (
+                            int(split_parent_id)
+                            if split_parent_id is not None
+                            else None
+                        ),
+                        "split_label": split_label,
+                    }
+                )
+            normalized_unit_lineage.append(normalized_port_lineage)
+
     normalized = dict(data)
     normalized["ports"] = ports
     normalized["sampling_rate"] = sampling_rate
     normalized["discharge_times"] = normalized_timestamps
     normalized["pulse_trains"] = normalized_sources
     normalized["motor_unit_ids"] = normalized_motor_unit_ids
+    normalized["unit_lineage"] = normalized_unit_lineage
     if not isinstance(normalized.get("notes", []), list):
         normalized["notes"] = []
     if not isinstance(normalized.get("edit_history", []), list):

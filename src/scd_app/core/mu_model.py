@@ -21,6 +21,13 @@ class MotorUnit:
     source: np.ndarray
     port_name: str = ""
     mu_filter: np.ndarray | None = None
+    # Stable link back to the accepted decomposition/peel-off step that
+    # produced this editable unit.  Ordinarily this is one-to-one.  Units
+    # created by splitting a merged discharge train deliberately share the
+    # same group so replay still peels the original contribution exactly once.
+    peel_group_id: int | None = None
+    split_parent_id: int | None = None
+    split_label: str | None = None  # "A" | "B" | None
     enabled: bool = True
     # Persisted user/general deletion flag. Duplicate suggestions remain in
     # their scan-specific roles and are combined by ``flagged_for_deletion``.
