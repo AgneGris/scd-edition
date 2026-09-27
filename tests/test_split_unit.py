@@ -386,6 +386,59 @@ def test_deleting_one_split_child_keeps_shared_peel_step():
     app.processEvents()
 
 
+@pytest.mark.parametrize("has_split_units", [True, False])
+def test_loading_edited_file_explains_or_asks_about_filter_recalc(
+    tmp_path, has_split_units
+):
+    from PySide6.QtWidgets import QMessageBox
+
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    path = tmp_path / "edited.pkl"
+    path.write_bytes(b"placeholder")
+    split_parent_id = 0 if has_split_units else None
+    data = {
+        "skip_filter_recalc": True,
+        "unit_lineage": [
+            [
+                {
+                    "peel_group_id": 0,
+                    "split_parent_id": split_parent_id,
+                    "split_label": "A" if has_split_units else None,
+                }
+            ]
+        ],
+    }
+
+    with (
+        patch(
+            "scd_app.gui.tabs.edition_tab.load_decomposition_file",
+            return_value=data,
+        ),
+        patch.object(tab, "_load_decomposition_data"),
+        patch.object(QMessageBox, "information") as information,
+        patch.object(
+            QMessageBox,
+            "question",
+            return_value=QMessageBox.StandardButton.No,
+        ) as question,
+    ):
+        assert tab.load_from_path(path) is True
+
+    assert data["skip_filter_recalc"] is True
+    if has_split_units:
+        information.assert_called_once()
+        question.assert_not_called()
+    else:
+        information.assert_not_called()
+        question.assert_called_once()
+
+    tab.close()
+    app.processEvents()
+
+
 def test_split_lineage_round_trips_through_session_loader():
     from scd_app.core.mu_properties import MUProperties
     from scd_app.io.decomposition_loader import migrate_and_validate_decomposition

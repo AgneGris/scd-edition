@@ -1682,6 +1682,13 @@ class EditionTab(QWidget):
             # Individual recalculation preserves the A-then-B peel order and
             # uses the current curated timestamp trains.
             data["skip_filter_recalc"] = True
+            QMessageBox.information(
+                self,
+                "Filters Not Recalculated",
+                "This file contains split motor units, so filters were not "
+                "recalculated on load.\n\n"
+                "Use Recalc Filter [F] to recalculate individual units.",
+            )
         elif data.get("skip_filter_recalc"):
             reply = QMessageBox.question(
                 self,
