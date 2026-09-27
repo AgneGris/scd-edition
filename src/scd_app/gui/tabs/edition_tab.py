@@ -980,10 +980,11 @@ class EditionTab(QWidget):
         self._render_split_preview()
 
     def _split_preview_groups(self) -> tuple[np.ndarray, np.ndarray]:
-        if self._split_preview_key is None:
+        preview_key = self._split_preview_key
+        if preview_key is None:
             empty = np.array([], dtype=np.int64)
             return empty, empty
-        mu = self._get_mu(*self._split_preview_key)
+        mu = self._get_mu(*preview_key)
         if mu is None:
             empty = np.array([], dtype=np.int64)
             return empty, empty
@@ -1037,9 +1038,10 @@ class EditionTab(QWidget):
         )
 
     def _toggle_split_spike(self, sample: int):
-        if not self._split_preview_active():
+        preview_key = self._split_preview_key
+        if preview_key is None:
             return
-        mu = self._get_mu(*self._split_preview_key)
+        mu = self._get_mu(*preview_key)
         if mu is None or int(sample) not in mu.timestamps:
             return
         sample = int(sample)
@@ -1050,12 +1052,11 @@ class EditionTab(QWidget):
         self._split_preview_manually_adjusted = True
         self._render_split_preview()
 
-    def _apply_selection_split(
-        self, x1: float, x2: float, y1: float, y2: float
-    ):
-        if not self._split_preview_active():
+    def _apply_selection_split(self, x1: float, x2: float, y1: float, y2: float):
+        preview_key = self._split_preview_key
+        if preview_key is None:
             return
-        mu = self._get_mu(*self._split_preview_key)
+        mu = self._get_mu(*preview_key)
         if mu is None:
             return
         s1, s2 = sorted((int(x1 * self._fsamp), int(x2 * self._fsamp)))
@@ -1151,9 +1152,10 @@ class EditionTab(QWidget):
         self._update_review_controls()
 
     def _confirm_split_unit(self):
-        if self._split_preview_key is None:
+        preview_key = self._split_preview_key
+        if preview_key is None:
             return
-        port_name, unit_index = self._split_preview_key
+        port_name, unit_index = preview_key
         mu = self._get_mu(port_name, unit_index)
         group_a, group_b = self._split_preview_groups()
         if mu is None or len(group_a) < 2 or len(group_b) < 2:
@@ -1200,14 +1202,10 @@ class EditionTab(QWidget):
         mu.cross_duplicate_partners = []
         self._ports[port_name].insert(unit_index + 1, child)
         stored_group_a = (
-            self._ts_to_plateau_local(group_a)
-            if self._full_source_mode
-            else group_a
+            self._ts_to_plateau_local(group_a) if self._full_source_mode else group_a
         )
         stored_group_b = (
-            self._ts_to_plateau_local(group_b)
-            if self._full_source_mode
-            else group_b
+            self._ts_to_plateau_local(group_b) if self._full_source_mode else group_b
         )
         old_peel_key = (port_name, int(peel_group_id), None)
         self._remap_peel_group_mapping(
@@ -1399,9 +1397,7 @@ class EditionTab(QWidget):
                         {
                             **entry,
                             "accepted_unit_idx": accepted_index(replacement_key),
-                            "timestamps": np.asarray(
-                                timestamps, dtype=np.int64
-                            ).copy(),
+                            "timestamps": np.asarray(timestamps, dtype=np.int64).copy(),
                         }
                     )
                 return expanded
@@ -1444,7 +1440,11 @@ class EditionTab(QWidget):
                 split_groups.setdefault(group_key, []).append(motor_unit)
 
         replacements = {}
-        for (port_name, _peel_group_id, _parent_id), motor_units in split_groups.items():
+        for (
+            port_name,
+            _peel_group_id,
+            _parent_id,
+        ), motor_units in split_groups.items():
             if len(motor_units) < 2:
                 continue
             ordered = sorted(
@@ -1456,8 +1456,7 @@ class EditionTab(QWidget):
                 ),
             )
             step_keys = [
-                self._peel_step_key(port_name, motor_unit)
-                for motor_unit in ordered
+                self._peel_step_key(port_name, motor_unit) for motor_unit in ordered
             ]
             if all(key in present_keys for key in step_keys):
                 continue
@@ -1642,9 +1641,7 @@ class EditionTab(QWidget):
         self.btn_sel_delete.blockSignals(False)
         split_active = self._split_preview_active()
         self.btn_split_unit.setVisible(True)
-        self.btn_split_unit.setText(
-            "Cancel Split" if split_active else "Split Unit"
-        )
+        self.btn_split_unit.setText("Cancel Split" if split_active else "Split Unit")
         self.btn_confirm_split.setVisible(split_active)
         self._confirm_split_action.setVisible(split_active)
         if split_active:
@@ -2536,9 +2533,7 @@ class EditionTab(QWidget):
             (
                 np.asarray(m.timestamps, dtype=np.int64)
                 if self._full_source_mode
-                else self._ts_to_absolute(
-                    np.asarray(m.timestamps, dtype=np.int64)
-                )
+                else self._ts_to_absolute(np.asarray(m.timestamps, dtype=np.int64))
             )
             for m in self._ports[self._current_port]
         ]
@@ -2615,9 +2610,7 @@ class EditionTab(QWidget):
         self.btn_recalc_filter.setEnabled(enabled)
         if not self._filter_recalc_available:
             reason = unavailable_reason or "required decomposition data is unavailable"
-            self.btn_recalc_filter.setToolTip(
-                f"Unavailable: {reason}"
-            )
+            self.btn_recalc_filter.setToolTip(f"Unavailable: {reason}")
         elif motor_unit is not None and motor_unit.split_parent_id is not None:
             if motor_unit.split_label == "B":
                 self.btn_recalc_filter.setToolTip(

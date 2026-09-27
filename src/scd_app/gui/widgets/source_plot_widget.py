@@ -432,9 +432,7 @@ class SourcePlotWidget(SafePlotWidget):
         self._split_preview = False
         self._update_spike_markers()
 
-    def set_split_preview(
-        self, group_a: np.ndarray, group_b: np.ndarray
-    ) -> None:
+    def set_split_preview(self, group_a: np.ndarray, group_b: np.ndarray) -> None:
         """Show one timestamp partition as orange/cyan on the current source."""
         group_a = np.asarray(group_a, dtype=np.int64)
         group_b = np.asarray(group_b, dtype=np.int64)

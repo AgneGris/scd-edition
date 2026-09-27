@@ -70,9 +70,7 @@ def suggest_split_by_peak_height(
     sorted_heights = heights[order]
 
     prefix_sum = np.concatenate(([0.0], np.cumsum(sorted_features)))
-    prefix_square_sum = np.concatenate(
-        ([0.0], np.cumsum(np.square(sorted_features)))
-    )
+    prefix_square_sum = np.concatenate(([0.0], np.cumsum(np.square(sorted_features))))
 
     def interval_sse(start: int, stop: int) -> float:
         count = stop - start

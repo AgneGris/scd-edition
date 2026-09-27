@@ -414,7 +414,11 @@ def test_split_lineage_round_trips_through_session_loader():
         channel_offset=0,
         full_source_mode=False,
         sampling_rate=1000.0,
-        property_computer=lambda **_kwargs: [MUProperties(), MUProperties(), MUProperties()],
+        property_computer=lambda **_kwargs: [
+            MUProperties(),
+            MUProperties(),
+            MUProperties(),
+        ],
     )
 
     assert [unit.peel_group_id for unit in loaded.motor_units] == [0, 0, 1]

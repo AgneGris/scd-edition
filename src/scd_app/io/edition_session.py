@@ -596,9 +596,9 @@ def _sync_peel_sequence_timestamps(
             return entry
         updated = dict(entry)
         unit_index = entry.get("accepted_unit_idx")
-        if isinstance(unit_index, (int, np.integer)) and 0 <= int(
-            unit_index
-        ) < len(timestamps_by_index):
+        if isinstance(unit_index, (int, np.integer)) and 0 <= int(unit_index) < len(
+            timestamps_by_index
+        ):
             updated["timestamps"] = np.asarray(
                 timestamps_by_index[int(unit_index)], dtype=np.int64
             ).copy()
@@ -623,6 +623,4 @@ def _sync_peel_sequence_timestamps(
         for port_timestamps in discharge_times
         for timestamps in port_timestamps
     ]
-    return [
-        updated_entry(entry, flattened_timestamps) for entry in peel_sequence
-    ]
+    return [updated_entry(entry, flattened_timestamps) for entry in peel_sequence]

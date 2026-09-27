@@ -527,9 +527,8 @@ def _replay_peel_off_for_port(
                 edge_mask,
             )
             results_dict[local_idx] = (source_np, ts_display, new_filt_np)
-        elif (
-            current_timestamps_abs is not None
-            and 0 <= local_idx < len(current_timestamps_abs)
+        elif current_timestamps_abs is not None and 0 <= local_idx < len(
+            current_timestamps_abs
         ):
             ts_abs = np.asarray(
                 current_timestamps_abs[local_idx], dtype=np.int64
@@ -818,8 +817,7 @@ def recalculate_unit_filter(
 
     # ── Step 3: STA filter from all edited timestamps (full signal) ───────
     ts_valid = edited_timestamps_abs[
-        (edited_timestamps_abs >= 0)
-        & (edited_timestamps_abs < emg_peeled.shape[0])
+        (edited_timestamps_abs >= 0) & (edited_timestamps_abs < emg_peeled.shape[0])
     ]
     if len(ts_valid) < 2:
         raise ValueError("Need at least 2 spikes for filter recalculation.")
