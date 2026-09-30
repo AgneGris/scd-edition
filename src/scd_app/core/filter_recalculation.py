@@ -53,7 +53,6 @@ def _get_scd_modules():
             spike_triggered_average,
         )
         from scd.processing.preprocess import (
-            autocorrelation_whiten,
             extend,
             high_pass_filter,
             low_pass_filter,
@@ -64,7 +63,6 @@ def _get_scd_modules():
 
         return {
             "whiten": whiten,
-            "autocorrelation_whiten": autocorrelation_whiten,
             "extend": extend,
             "time_differentiate": time_differentiate,
             "notch_filter": notch_filter,
@@ -191,15 +189,75 @@ def _partition_peel_sequence(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _fit_window(x: torch.Tensor, plateau: slice | None) -> torch.Tensor:
+    """Rows of `x` SCD fitted its whitening on (the plateau), else all of `x`."""
+    if plateau is None:
+        return x
+    fit = x[plateau]
+    return fit if fit.shape[0] > 1 else x
+
+
+def _autocorrelation_whiten(
+    emg: torch.Tensor,  # (samples, channels), already spatially whitened
+    extension_factor: int,
+    method: str,
+    plateau: slice | None,
+    fn: dict,
+) -> torch.Tensor:
+    """scd.autocorrelation_whiten, fitted on the plateau and applied to all of emg.
+
+    SCD whitens each channel's lagged windows using statistics of the plateau
+    it decomposed, and does not save the resulting matrices, so they are
+    refitted here from the windows lying entirely inside the plateau.  The
+    overlap-add reconstruction is SCD's; with plateau=None the result is
+    identical to scd.autocorrelation_whiten.
+    """
+    n_samples = emg.shape[0]
+    n_windows = n_samples - extension_factor + 1
+    fit_rows = slice(None)
+    if plateau is not None:
+        lo, hi, _ = plateau.indices(n_samples)
+        if hi - extension_factor + 1 - lo > 1:
+            fit_rows = slice(lo, hi - extension_factor + 1)
+
+    fold_kw = {"output_size": (1, n_samples), "kernel_size": (1, extension_factor)}
+    overlap_count = torch.nn.functional.fold(
+        torch.ones((extension_factor, n_windows), device=emg.device, dtype=emg.dtype),
+        **fold_kw,
+    ).squeeze()
+
+    out = torch.empty_like(emg)
+    for ch in range(emg.shape[1]):
+        windows = torch.nn.functional.unfold(
+            emg[:, ch].reshape(1, 1, -1), (1, extension_factor)
+        ).t()  # (n_windows, extension_factor)
+        fit = windows[fit_rows]
+        # whiten() centres its input in place, hence the clone
+        _, w = fn["whiten"](fit.clone(), method, return_matrix=True)
+        whitened = torch.matmul(windows - fit.mean(0), w.t())
+        out[:, ch] = (
+            torch.nn.functional.fold(whitened.t(), **fold_kw).squeeze() / overlap_count
+        )
+    return out
+
+
 def preprocess_emg(
     raw_emg: torch.Tensor,  # (samples, active_channels)
     config: dict[str, Any],
     device: torch.device,
     w_mat: np.ndarray | None = None,
+    plateau: slice | None = None,
 ) -> torch.Tensor:
-    """Preprocess raw EMG exactly as SCD does. Returns (samples, ext_ch)."""
+    """Preprocess raw EMG exactly as SCD does. Returns (samples, ext_ch).
+
+    SCD only saw the plateau, so its whitening statistics (the mean removed
+    before w_mat, and any whitening not saved in the file) are taken from
+    `plateau` and then applied to the whole signal.  None means the whole
+    signal is the plateau.
+    """
     fn = _get_scd_modules()
-    emg = raw_emg.to(device).float()
+    # SCD's filters write into their argument, so never hand them the caller's
+    emg = raw_emg.to(device=device, dtype=torch.float32, copy=True)
     fs = float(config["sampling_frequency"])
 
     if config.get("notch_params") is not None:
@@ -217,13 +275,23 @@ def preprocess_emg(
     if R > 1:
         emg = fn["extend"](emg, R)
 
+    method = config.get("whitening_method", "zca")
+    fit = _fit_window(emg, plateau)
     if w_mat is not None:
         w_t = torch.from_numpy(w_mat.astype(np.float32)).to(device)
-        emg = torch.matmul(emg, w_t.T)
-    elif config.get("whitening") == "autocorrelation":
-        emg = fn["autocorrelation_whiten"](emg)
     else:
-        emg = fn["whiten"](emg)
+        # whiten() centres its input in place, hence the clone
+        _, w_t = fn["whiten"](fit.clone(), method, return_matrix=True)
+        w_t = w_t.to(device)
+
+    # SCD whitens (x - mean) @ W.T.  emg is always our own tensor here (copied
+    # above), so centre it in place rather than allocating a centred copy.
+    emg -= fit.mean(0, keepdim=True)
+    emg = torch.matmul(emg, w_t.T)
+
+    # SCD applies this on top of the spatial whitening, not instead of it
+    if config.get("autocorrelation_whiten", False):
+        emg = _autocorrelation_whiten(emg, R, method, plateau, fn)
 
     return emg
 
@@ -645,7 +713,7 @@ def compute_all_full_sources(
         )
         window_size = int(config["peel_off_window_size"])
         min_peak_sep = int(config.get("min_peak_separation", MIN_PEAK_SEP))
-        # square_sources_spike_det not saved by SCD; default True for back-compat
+        # Missing from files saved by older SCD versions; True is SCD's default
         square_source = bool(config.get("square_sources_spike_det", True))
         edge_mask = _edge_mask_samples(config)
 
@@ -680,7 +748,13 @@ def compute_all_full_sources(
 
         raw_tensor = torch.from_numpy(raw_port.astype(np.float32).T).to(device)
         try:
-            emg_proc = preprocess_emg(raw_tensor, config, device, w_mat=w_mat)
+            emg_proc = preprocess_emg(
+                raw_tensor,
+                config,
+                device,
+                w_mat=w_mat,
+                plateau=slice(start_sample, end_sample),
+            )
         except Exception as e:
             logger.error("Preprocessing failed for '%s': %s", port_name, e)
             port_results[port_idx] = [(None, None, None)] * n_units
@@ -791,7 +865,13 @@ def recalculate_unit_filter(
     raw_port_channels = raw_port_channels.copy()
     _replace_bad_channels(raw_port_channels, decomp_data, port_idx)
     raw_tensor = torch.from_numpy(raw_port_channels.astype(np.float32).T).to(device)
-    emg_proc = preprocess_emg(raw_tensor, config, device, w_mat=w_mat)
+    emg_proc = preprocess_emg(
+        raw_tensor,
+        config,
+        device,
+        w_mat=w_mat,
+        plateau=slice(start_sample, end_sample),
+    )
 
     # ── Step 2: Replay peel-off up to this unit ───────────────────────────
     replay_stop = (

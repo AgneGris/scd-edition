@@ -2259,7 +2259,7 @@ wheels = [
 
 [[package]]
 name = "swarm-contrastive-decomposition"
-version = "0.2.3"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mat73" },
@@ -2274,9 +2274,9 @@ dependencies = [
     { name = "torch", version = "2.12.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra != 'extra-11-scd-edition-cpu' and extra != 'extra-11-scd-edition-cuda') or (sys_platform != 'emscripten' and extra != 'extra-11-scd-edition-cpu' and extra != 'extra-11-scd-edition-cuda') or (extra == 'extra-11-scd-edition-cpu' and extra == 'extra-11-scd-edition-cuda')" },
     { name = "torch", version = "2.12.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-11-scd-edition-cpu') or (extra == 'extra-11-scd-edition-cpu' and extra == 'extra-11-scd-edition-cuda')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/f0/816e59e95b88e546ca307ffac68f0dddce7b9b77f5cffd66f542fbe3b7d8/swarm_contrastive_decomposition-0.2.3.tar.gz", hash = "sha256:08ad36a37c2cd9cadebd85b6f96d41d01634db96eb682ea515ba522281595b0b", size = 39329, upload-time = "2026-09-19T15:54:59.037Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/80/ccca725b818ee81be1ef664dbe5e995de3e3a694ff1778c35b3f0f528c4e/swarm_contrastive_decomposition-0.2.4.tar.gz", hash = "sha256:ce087dc770fe73d6272ef4c2346e44fc14788065992206da867e0603633aca99", size = 41110, upload-time = "2026-09-30T15:44:16.562Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/30/88/9075b0d0244643695201c2e220bb39223b2f98a44862078ea9853c7fda2d/swarm_contrastive_decomposition-0.2.3-py3-none-any.whl", hash = "sha256:043f9e4bce275da93534c7c18fedb15c9e41b3f1ba14e863e17621015ca1f9ca", size = 32621, upload-time = "2026-09-19T15:54:57.928Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/4b/d61f6ea4c7bea3edb8fce112da9c5e23daee6170f91376623f3cc211d74e/swarm_contrastive_decomposition-0.2.4-py3-none-any.whl", hash = "sha256:7c221b92a143d920518edc8e40c3caf6dbb9e5f110b5455424ebd61284016384", size = 33858, upload-time = "2026-09-30T15:44:15.151Z" },
 ]
 
 [[package]]

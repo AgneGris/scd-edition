@@ -11,6 +11,10 @@ All notable changes to SCD Edition are documented here.
 - Add rotating application logs and copyable runtime diagnostics for support.
 - Validate decomposition schemas and warn before loading pickle files.
 - Preserve an explicitly selected CPU or CUDA backend during development checks.
+- Replay SCD's whitening faithfully during filter recalculation: apply
+  autocorrelation whitening when the decomposition used it, centre the EMG
+  before the saved whitening matrix, and fit any missing whitening on the
+  plateau with the recorded method.
 
 ## 0.1.0 — 2026-09-19
 

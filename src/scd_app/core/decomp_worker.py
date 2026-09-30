@@ -176,13 +176,6 @@ class DecompositionWorker(QThread):
                         dictionary.get("peel_off_sequence", [])
                     )
                     prep_cfg = dict(dictionary.get("preprocessing_config", {}))
-                    # Patch in square_sources_spike_det — SCD does not include it in
-                    # _capture_preprocessing_config but defaults it to True, so we
-                    # record it explicitly so filter_recalculation can replay faithfully.
-                    prep_cfg.setdefault(
-                        "square_sources_spike_det",
-                        bool(scd_config.square_sources_spike_det),
-                    )
                     results["preprocessing_config"].append(prep_cfg)
 
                     n_mus = len(timestamps) if isinstance(timestamps, list) else 1
