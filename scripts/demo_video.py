@@ -31,6 +31,8 @@ VIEWPORT_FILL = (11, 15, 20)
 BORDER = (45, 49, 57)
 STAGES = ("Configure", "Decompose", "Edit", "Visualise")
 CAPTION_FADE_S = 0.45
+# Multiplies every storyboard time and motion; raise it to slow the video down.
+PACE = 1.1
 FONT_DIR = Path(__file__).resolve().parents[1] / "src/scd_app/gui/style/fonts"
 
 Rect = tuple[float, float, float, float]
@@ -119,6 +121,7 @@ class Timeline:
         self.clicks: list[float] = []
         self.drags: list[tuple[float, float, Point]] = []
         self.spotlights: list[tuple[float, float, Rect]] = []
+        self.keys: list[tuple[float, float, str, str]] = []
         self.end_start = 0.0
         self.duration = 0.0
 
@@ -163,33 +166,40 @@ class Timeline:
             return whole
         return self.band(0.0, self.window[1], cx, pad=0.0)
 
+    # Storyboard times below are in paced seconds: each is multiplied by PACE.
+
     def screen(self, time: float, name: str, fade: float = 0.0) -> None:
-        self.screens.add(time, name, fade)
+        self.screens.add(time * PACE, name, fade * PACE)
 
     def camera(self, time: float, camera: Camera, duration: float = 0.0) -> None:
-        self.cameras.add(time, camera, duration)
+        self.cameras.add(time * PACE, camera, duration * PACE)
 
     def caption(self, time: float, headline: str, kicker: str | None = None) -> None:
-        self.captions.add(time, (headline, kicker), CAPTION_FADE_S if time else 0.0)
+        fade = CAPTION_FADE_S if time else 0.0
+        self.captions.add(time * PACE, (headline, kicker), fade)
 
     def stage(self, time: float, index: int | None) -> None:
-        self.stages.add(time, index, 0.4 if time else 0.0)
+        self.stages.add(time * PACE, index, 0.4 if time else 0.0)
 
     def cursor(self, time: float, point: Point | None, duration: float = 0.25) -> None:
-        self.cursors.add(time, point, duration)
+        self.cursors.add(time * PACE, point, duration * PACE)
 
     def click(self, time: float) -> None:
-        self.clicks.append(time)
+        self.clicks.append(time * PACE)
 
     def drag(self, start: float, end: float, anchor: Point) -> None:
-        self.drags.append((start, end, anchor))
+        self.drags.append((start * PACE, end * PACE, anchor))
 
     def spotlight(self, start: float, end: float, rect: Rect) -> None:
-        self.spotlights.append((start, end, rect))
+        self.spotlights.append((start * PACE, end * PACE, rect))
+
+    def key(self, start: float, end: float, key: str, label: str) -> None:
+        """Show a keyboard shortcut whose button is outside the frame."""
+        self.keys.append((start * PACE, end * PACE, key, label))
 
     def end_card(self, start: float, duration: float) -> None:
-        self.end_start = start
-        self.duration = start + duration
+        self.end_start = start * PACE
+        self.duration = (start + duration) * PACE
 
 
 def build_storyboard(shots: dict[str, Shot], layout: Layout, scale: int) -> Timeline:
@@ -201,37 +211,36 @@ def build_storyboard(shots: dict[str, Shot], layout: Layout, scale: int) -> Time
     def mark(shot: str, name: str):
         return shots[shot].marks[name]
 
-    source = mark("edit_merged", "source")
-    rate = mark("edit_merged", "rate")
+    source = mark("edit_review", "source")
+    rate = mark("edit_review", "rate")
     plots_left = source[0] + 2
-
-    # Hook: the most colourful state, with a slow push towards the plots.
-    tl.screen(0.0, "edit_split_preview")
-    tl.camera(0.0, tl.overview(_centre(source)[0] - 120))
-    tl.camera(
-        0.3,
-        tl.band(source[1], rate[1] + rate[3], _centre(source)[0], plots_left),
-        2.4,
+    plots = tl.band(source[1], rate[1] + rate[3], _centre(source)[0], plots_left)
+    # The MUAP grid, kept left of the plots so no sliver of them shows.
+    cx, cy, muap_width = tl.fit(mark("edit_review", "muap"), pad=0.02)
+    muap = (min(cx, plots_left - 4 - muap_width / 2), cy, muap_width)
+    split = mark("edit_merged", "split")
+    toolbar_and_source = tl.band(
+        split[1] - 10, source[1] + source[3], _centre(source)[0], plots_left
     )
+    zoom_steps = sum(name.startswith("edit_zoom_") for name in shots)
+
+    # Each scene starts where the previous one ends; ``t`` is its start.
+    # Configure, opening on the hook headline.
+    tl.screen(0.0, "config")
+    tl.camera(0.0, tl.overview(width / 2 + 150))
     tl.caption(0.0, "From raw HD-EMG to clean motor units", "Free & open source")
     tl.stage(0.0, None)
-
-    # Configure.
-    t = 2.8
-    tl.screen(t, "config", 0.4)
-    tl.camera(t, tl.overview(width / 2 + 150), 0.7)
-    tl.caption(t, "Load a recording and map your grids")
-    tl.stage(t, 0)
-    apply = mark("config", "apply")
     tl.camera(
-        t + 0.8, tl.fit((width * 0.42, height * 0.42, width * 0.58, height * 0.58)), 0.9
+        0.6, tl.fit((width * 0.42, height * 0.42, width * 0.58, height * 0.58)), 3.0
     )
-    tl.cursor(t + 0.5, (width * 0.6, height * 0.62), 0.25)
-    tl.cursor(t + 0.8, _centre(apply), 0.8)
-    tl.click(t + 1.7)
+    tl.caption(2.8, "Load a recording and map your grids")
+    tl.stage(2.8, 0)
+    tl.cursor(3.0, (width * 0.6, height * 0.62), 0.25)
+    tl.cursor(3.3, _centre(mark("config", "apply")), 0.8)
+    tl.click(4.3)
+    t = 5.2
 
     # Decompose: the source converges iteration by iteration.
-    t = 5.0
     tl.screen(t, "decomp_ready", 0.35)
     tl.camera(t, tl.overview(0.0), 0.6)
     tl.caption(t, "Watch each source converge, live")
@@ -239,7 +248,7 @@ def build_storyboard(shots: dict[str, Shot], layout: Layout, scale: int) -> Time
     tl.cursor(t + 0.3, _centre(mark("decomp_ready", "start")), 0.7)
     tl.click(t + 1.1)
     for index in range(4):
-        tl.screen(t + 1.2 + 0.55 * index, f"decomp_{index}", 0.15)
+        tl.screen(t + 1.2 + 0.7 * index, f"decomp_{index}", 0.2)
     plot = mark("decomp_ready", "plot")
     axes = (
         plot[0] + 0.06 * plot[2],
@@ -249,82 +258,94 @@ def build_storyboard(shots: dict[str, Shot], layout: Layout, scale: int) -> Time
     )
     tl.camera(t + 1.2, tl.fit(axes, pad=0.0), 0.9)
     tl.cursor(t + 1.4, None)
+    t += 4.6
 
-    # Review: the merged unit is flagged unreliable. The same framing returns
-    # after the split so the metrics read as a before/after pair.
-    t = 8.7
-    tl.screen(t, "edit_merged", 0.35)
-    tl.caption(t, "Spot the units that need attention")
+    # Review the first unit over the whole contraction, then its MUAPs.
+    tl.screen(t, "edit_review", 0.4)
+    tl.caption(t, "Review each unit against the force")
     tl.stage(t, 2)
-    reasons = _union(
-        mark("edit_merged", "badge"),
-        mark("edit_merged", "cov"),
-        mark("edit_merged", "sil"),
-    )
-    tl.camera(t, tl.fit(reasons, pad=0.25), 0.9)
-    tl.spotlight(t + 1.0, t + 2.2, reasons)
+    tl.camera(t, plots, 0.9)
+    tl.caption(t + 2.0, "…and its MUAPs across the grid")
+    tl.camera(t + 2.0, muap, 0.9)
+    t += 4.0
 
-    # Split the merged unit, then confirm.
-    t = 11.3
-    split = mark("edit_merged", "split")
-    tl.caption(t, "Split a merged unit in seconds")
-    tl.camera(
-        t,
-        tl.band(split[1] - 10, source[1] + source[3], _centre(source)[0], plots_left),
-        0.7,
-    )
-    tl.cursor(t + 0.1, _centre(source), 0.25)
-    tl.cursor(t + 0.4, _centre(split), 0.7)
-    tl.click(t + 1.2)
-    tl.screen(t + 1.25, "edit_split_preview", 0.25)
-    tl.cursor(t + 1.7, _centre(mark("edit_split_preview", "confirm")), 0.5)
+    # Zoom the application in, then inspect a genuine and a false discharge.
+    tl.camera(t, plots, 0.8)
+    for step in range(1, zoom_steps + 1):
+        tl.screen(t + 0.3 + 0.06 * (step - 1), f"edit_zoom_{step}")
+    tl.caption(t + 0.3, "Click a discharge to overlay its MUAP")
+    spike = mark("edit_inspect_true", "spike")
+    tl.cursor(t + 1.5, (spike[0] - 120, spike[1] + 140), 0.25)
+    tl.cursor(t + 1.7, spike, 0.6)
     tl.click(t + 2.4)
-    tl.screen(t + 2.45, "edit_split_done", 0.25)
-    tl.caption(t + 2.6, "Quality metrics update instantly")
-    tl.camera(t + 2.6, tl.fit(reasons, pad=0.25), 0.8)
-    tl.cursor(t + 2.7, None)
-    tl.spotlight(t + 3.4, t + 4.5, reasons)
+    tl.screen(t + 2.45, "edit_inspect_true", 0.2)
+    tl.cursor(t + 2.6, None)
+    tl.camera(t + 2.6, muap, 0.8)
+    tl.caption(t + 4.2, "A false discharge doesn't match")
+    tl.screen(t + 4.2, "edit_inspect_false", 0.3)
+    tl.camera(t + 5.8, plots, 0.8)
+    t += 6.8
 
-    # Add a discharge the decomposition missed.
-    t = 16.1
-    add = mark("edit_add_armed", "add")
-    box_start = mark("edit_add_armed", "box_start")
-    box_end = mark("edit_add_armed", "box_end")
-    peak = mark("edit_add_armed", "peak")
-    tl.screen(t, "edit_add_view", 0.35)
-    tl.caption(t, "Recover a missed discharge")
-    tl.camera(t, tl.overview(700.0), 0.8)
-    tl.cursor(t + 0.2, _centre(source), 0.25)
-    tl.cursor(t + 0.4, _centre(add), 0.7)
-    tl.click(t + 1.2)
-    tl.screen(t + 1.25, "edit_add_armed", 0.2)
-    tl.camera(
-        t + 1.4,
-        tl.band(source[1] - 4, rate[1] + rate[3] + 4, peak[0], plots_left),
-        0.9,
+    # Delete the false discharge and add the missed one.
+    start, end = (
+        mark("edit_delete_armed", "box_start"),
+        mark("edit_delete_armed", "box_end"),
     )
-    tl.cursor(t + 1.5, box_start, 0.7)
-    tl.drag(t + 2.3, t + 3.0, box_start)
-    tl.cursor(t + 2.3, box_end, 0.7)
-    tl.screen(t + 3.05, "edit_add_done", 0.25)
-    tl.caption(t + 3.2, "…and the firing-rate gap closes")
-    tl.cursor(t + 3.3, None)
-    tl.spotlight(t + 3.4, t + 4.3, (peak[0] - 90, rate[1], 180, rate[3]))
+    tl.caption(t, "Delete it with a box…")
+    tl.key(t, t + 1.4, "D", "Delete spikes")
+    tl.screen(t + 0.3, "edit_delete_armed", 0.25)
+    tl.cursor(t + 0.4, (start[0] - 60, start[1] - 60), 0.25)
+    tl.cursor(t + 0.7, start, 0.5)
+    tl.drag(t + 1.3, t + 2.0, start)
+    tl.cursor(t + 1.3, end, 0.7)
+    tl.screen(t + 2.05, "edit_deleted", 0.25)
+    start, end = mark("edit_add_armed", "box_start"), mark("edit_add_armed", "box_end")
+    tl.caption(t + 2.6, "…and add the ones it missed")
+    tl.key(t + 2.6, t + 4.0, "A", "Add spikes")
+    tl.screen(t + 2.9, "edit_add_armed", 0.25)
+    tl.cursor(t + 3.0, start, 0.7)
+    tl.drag(t + 3.9, t + 4.6, start)
+    tl.cursor(t + 3.9, end, 0.7)
+    tl.screen(t + 4.65, "edit_added", 0.25)
+    tl.cursor(t + 5.0, None)
+    t += 6.0
+
+    # Recalculate the filter from the edited discharges, in the same framing
+    # so the pulses visibly grow against the fixed axis.
+    tl.caption(t, "Recalculate the filter: stronger pulses")
+    tl.key(t, t + 1.6, "F", "Recalc filter")
+    tl.screen(t + 0.6, "edit_recalculated", 0.6)
+    t += 3.8
+
+    # The next unit merges two: split it in seconds.
+    tl.caption(t, "Merged units? Split them in seconds")
+    tl.camera(t, toolbar_and_source, 0.8)
+    tl.key(t, t + 1.3, "N", "Next unreviewed")
+    tl.screen(t + 0.3, "edit_merged", 0.35)
+    tl.cursor(t + 0.9, _centre(source), 0.25)
+    tl.cursor(t + 1.1, _centre(split), 0.6)
+    tl.click(t + 1.8)
+    tl.screen(t + 1.85, "edit_split_preview", 0.25)
+    tl.cursor(t + 2.6, _centre(mark("edit_split_preview", "confirm")), 0.5)
+    tl.click(t + 3.2)
+    tl.screen(t + 3.25, "edit_split_done", 0.25)
+    tl.cursor(t + 3.5, None)
+    t += 4.6
 
     # Visualise the whole population against the force.
-    t = 20.7
     idr_tab = mark("vis_raster", "idr_tab")
     tl.screen(t, "vis_raster", 0.4)
     tl.camera(t, tl.overview(700.0), 0.8)
     tl.caption(t, "See the whole motor-unit population")
     tl.stage(t, 3)
-    tl.cursor(t + 0.6, (width * 0.55, height * 0.5), 0.25)
-    tl.cursor(t + 0.9, _centre(idr_tab), 0.6)
-    tl.click(t + 1.6)
-    tl.screen(t + 1.65, "vis_idr", 0.3)
-    tl.cursor(t + 1.9, None)
+    tl.cursor(t + 0.8, (width * 0.55, height * 0.5), 0.25)
+    tl.cursor(t + 1.1, _centre(idr_tab), 0.6)
+    tl.click(t + 1.9)
+    tl.screen(t + 1.95, "vis_idr", 0.35)
+    tl.cursor(t + 2.2, None)
+    t += 4.4
 
-    tl.end_card(24.6, 3.4)
+    tl.end_card(t, 3.8)
     return tl
 
 
@@ -351,6 +372,7 @@ class _Renderer:
         self.wordmark_font = _font("SemiBold", 26)
         self._view_cache: dict[tuple, Image.Image] = {}
         self._caption_cache: dict[tuple, Image.Image] = {}
+        self._key_cache: dict[tuple[str, str], Image.Image] = {}
         self._end_background: Image.Image | None = None
 
     # ── static pieces ────────────────────────────────────────────────────
@@ -689,9 +711,18 @@ class _Renderer:
 
     def _end_card(self, time: float) -> Image.Image:
         if self._end_background is None:
-            last = self._compose(self.tl.end_start)
-            blurred = last.filter(ImageFilter.GaussianBlur(18))
-            self._end_background = ImageEnhance.Brightness(blurred).enhance(0.28)
+            # The interface alone, filling the frame, so no caption blurs in.
+            view = self._view(self.tl.end_start)
+            width, height = self.layout.width, self.layout.height
+            scale = max(width / view.width, height / view.height)
+            cover = view.resize(
+                (round(view.width * scale), round(view.height * scale)),
+                Image.Resampling.BICUBIC,
+            )
+            left, top = (cover.width - width) // 2, (cover.height - height) // 2
+            cover = cover.crop((left, top, left + width, top + height))
+            blurred = cover.filter(ImageFilter.GaussianBlur(18))
+            self._end_background = ImageEnhance.Brightness(blurred).enhance(0.3)
         local = time - self.tl.end_start
         fade = _ease(local / 0.6)
         canvas = Image.blend(self._compose(time), self._end_background, fade)
@@ -737,6 +768,57 @@ class _Renderer:
             self._paste_faded(canvas, layer, (0, 0), appear)
         return canvas.convert("RGB")
 
+    # ── keyboard shortcut hints ──────────────────────────────────────────
+
+    def _key_sprite(self, key: str, label: str) -> Image.Image:
+        cached = self._key_cache.get((key, label))
+        if cached is not None:
+            return cached
+        k = 3  # drawn oversized, then reduced, for anti-aliased edges
+        key_font = _font("SemiBold", 26 * k)
+        label_font = _font("Medium", 25 * k)
+        pad, cap = 12 * k, 44 * k
+        width = int(pad + cap + 16 * k + label_font.getlength(label) + 2 * pad)
+        height = cap + 2 * pad
+        sprite = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(sprite)
+        draw.rounded_rectangle(
+            (0, 0, width - 1, height - 1),
+            radius=height // 2,
+            fill=(*BACKGROUND_TOP, 235),
+            outline=(*ACCENT, 255),
+            width=2 * k,
+        )
+        draw.rounded_rectangle(
+            (pad, pad, pad + cap, pad + cap), radius=9 * k, fill=(*TEXT, 255)
+        )
+        draw.text(
+            (pad + cap / 2, pad + cap / 2),
+            key,
+            font=key_font,
+            fill=(*BACKGROUND_BOTTOM, 255),
+            anchor="mm",
+        )
+        draw.text(
+            (pad + cap + 16 * k, height / 2),
+            label,
+            font=label_font,
+            fill=(*TEXT, 255),
+            anchor="lm",
+        )
+        sprite = sprite.resize((width // k, height // k), Image.Resampling.LANCZOS)
+        self._key_cache[(key, label)] = sprite
+        return sprite
+
+    def _draw_keys(self, canvas: Image.Image, time: float) -> None:
+        vx, vy, _vw, _vh = self.layout.viewport
+        for start, end, key, label in self.tl.keys:
+            alpha = min(_ease((time - start) / 0.25), 1 - _ease((time - end) / 0.25))
+            if alpha > 0:
+                lift = 10 * (1 - alpha)
+                sprite = self._key_sprite(key, label)
+                self._paste_faded(canvas, sprite, (vx + 20, vy + 20 + lift), alpha)
+
     # ── frames ───────────────────────────────────────────────────────────
 
     def _compose(self, time: float) -> Image.Image:
@@ -750,6 +832,7 @@ class _Renderer:
             outline=BORDER,
             width=2,
         )
+        self._draw_keys(canvas, time)
         self._draw_caption(canvas, time)
         self._draw_footer(canvas, time)
         return canvas.convert("RGB")
@@ -809,3 +892,8 @@ def render_video(shots: dict[str, Shot], output: Path, aspect: str, scale: int) 
         f"{frames / FPS:.1f} s)",
         flush=True,
     )
+    # The finished title card, to upload as the post's custom thumbnail so the
+    # video itself can open straight on the interface.
+    thumbnail = output.with_name(f"{output.stem}-thumbnail.png")
+    renderer.frame(timeline.duration - 1 / FPS).save(thumbnail, optimize=True)
+    print(f"Wrote {thumbnail}", flush=True)

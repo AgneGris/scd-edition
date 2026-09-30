@@ -6,7 +6,9 @@ import pytest
 from scd_app.core.spike_muap import (
     SpikeMUAPInspection,
     SpikeMUAPUnavailable,
+    _window_sums,
     inspect_spike_muap,
+    split_preview_muaps,
 )
 
 
@@ -217,6 +219,79 @@ def test_edge_spike_and_missing_reference_are_reported():
             fsamp=1000.0,
             win_ms=10,
         )
+
+
+def test_split_preview_templates_share_one_time_axis():
+    muap_a = np.array(
+        [
+            [0.0, 0.0, -1.0, 4.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ]
+    )
+    muap_b = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 3.0, -1.0, 0.0, 0.0],
+        ]
+    )
+    group_a = np.array([20, 60, 100])
+    group_b = np.array([40, 80, 120])
+    emg = np.zeros((2, 200))
+    for timestamps, muap in ((group_a, muap_a), (group_b, muap_b)):
+        for timestamp in timestamps:
+            emg[:, timestamp - 5 : timestamp + 5] = muap
+
+    result = split_preview_muaps(emg, group_a, group_b, fsamp=1000.0, win_ms=10)
+
+    assert result.n_group_a == 3
+    assert result.n_group_b == 3
+    assert result.group_a_grid.shape == result.group_b_grid.shape
+    assert result.group_a_grid.shape[:2] == (2, 1)
+    np.testing.assert_array_equal(
+        np.isfinite(result.group_a_grid), np.isfinite(result.group_b_grid)
+    )
+    a_display = result.group_a_grid[0, 0]
+    b_display = result.group_b_grid[1, 0]
+    np.testing.assert_allclose(
+        a_display[np.isfinite(a_display)], muap_a[0] - np.mean(muap_a[0])
+    )
+    np.testing.assert_allclose(
+        b_display[np.isfinite(b_display)], muap_b[1] - np.mean(muap_b[1])
+    )
+    # The parent's dominant peak is centred and B keeps its 3-sample latency.
+    center = a_display.size // 2
+    assert np.nanargmax(np.abs(a_display)) == center
+    assert np.nanargmax(np.abs(b_display)) - center == 3
+
+
+def test_split_preview_skips_edge_discharges_and_reports_empty_groups():
+    emg = np.zeros((1, 50))
+    emg[0, 25] = 1.0
+
+    result = split_preview_muaps(
+        emg, np.array([20, 30]), np.array([2, 48]), fsamp=1000.0, win_ms=10
+    )
+
+    assert result.n_group_a == 2
+    assert result.n_group_b == 0
+    assert np.any(np.isfinite(result.group_a_grid))
+    assert np.all(np.isnan(result.group_b_grid))
+
+    with pytest.raises(SpikeMUAPUnavailable, match="Neither split group"):
+        split_preview_muaps(emg, np.array([1]), np.array([49]), fsamp=1000.0, win_ms=10)
+
+
+def test_window_sums_match_direct_average_across_chunks():
+    rng = np.random.default_rng(0)
+    emg = rng.normal(size=(3, 400)).astype(np.float32)
+    emg[1, 150:160] = np.nan
+    timestamps = np.arange(20, 380, 7)
+
+    sums, counts = _window_sums(emg, timestamps, half_window=6, chunk_size=4)
+
+    windows = np.stack([emg[:, t - 6 : t + 6] for t in timestamps]).astype(float)
+    np.testing.assert_allclose(sums, np.nansum(windows, axis=0), rtol=1e-6)
+    np.testing.assert_array_equal(counts, np.sum(np.isfinite(windows), axis=0))
 
 
 def test_source_marker_right_click_requests_non_destructive_inspection():

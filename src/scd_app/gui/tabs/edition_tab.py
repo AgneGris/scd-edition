@@ -66,7 +66,9 @@ from scd_app.core.mu_properties import (
 from scd_app.core.spike_muap import (
     SpikeMUAPInspection,
     SpikeMUAPUnavailable,
+    SplitMUAPPreview,
     inspect_spike_muap,
+    split_preview_muaps,
 )
 from scd_app.core.unit_splitting import suggest_split_by_peak_height
 from scd_app.core.utils import to_numpy
@@ -77,7 +79,12 @@ from scd_app.gui.style.styling import (
     get_section_header_style,
 )
 from scd_app.gui.widgets.mu_properties_panel import MUPropertiesPanel
-from scd_app.gui.widgets.muap_popout import MuapPopoutDialog
+from scd_app.gui.widgets.muap_popout import (
+    SPLIT_A_COLOR,
+    SPLIT_B_COLOR,
+    MuapPopoutDialog,
+    muap_overlay_pens,
+)
 from scd_app.gui.widgets.plot_tools import XZoomViewBox, make_plot_item_safe
 from scd_app.gui.widgets.source_plot_widget import (
     FiringRatePlotWidget,
@@ -153,12 +160,18 @@ class EditionTab(QWidget):
         self._split_suggestion_threshold: float | None = None
         self._split_preview_manually_adjusted: bool = False
         self._split_suggestion_error: str | None = None
+        self._split_muap_preview: SplitMUAPPreview | None = None
 
         # Debounce: expensive recompute + MUAP render fire 120ms after the last edit
         self._props_timer = QTimer(self)
         self._props_timer.setSingleShot(True)
         self._props_timer.setInterval(120)
         self._props_timer.timeout.connect(self._flush_props_update)
+        # Split previews re-average the A/B templates once reassignment pauses
+        self._split_muap_timer = QTimer(self)
+        self._split_muap_timer.setSingleShot(True)
+        self._split_muap_timer.setInterval(120)
+        self._split_muap_timer.timeout.connect(self._refresh_split_muap_preview)
         self._pending_source_changed: bool = False
         self._pending_props_key: tuple[str, int] | None = None
 
@@ -978,6 +991,7 @@ class EditionTab(QWidget):
         self.source_plot.set_selection_arm(SelectionArm.SPLIT)
         self._set_split_preview_controls(True)
         self._render_split_preview()
+        self._refresh_split_muap_preview()
 
     def _split_preview_groups(self) -> tuple[np.ndarray, np.ndarray]:
         preview_key = self._split_preview_key
@@ -1036,6 +1050,39 @@ class EditionTab(QWidget):
             f"{method} — orange A (higher amplitude): {len(group_a)} spikes | "
             f"cyan B: {len(group_b)} spikes. Click or drag to adjust."
         )
+        self._split_muap_timer.start()
+
+    def _current_split_muap_preview(self) -> SplitMUAPPreview | None:
+        key = (self._current_port or "", self._current_mu_idx)
+        if self._split_preview_key != key:
+            return None
+        return self._split_muap_preview
+
+    def _refresh_split_muap_preview(self):
+        """Re-average the A/B MUAP templates shown during a split preview."""
+        self._split_muap_timer.stop()
+        self._split_muap_preview = None
+        preview_key = self._split_preview_key
+        if preview_key is None:
+            return
+        port_name = preview_key[0]
+        emg_port = self._emg_data.get(port_name)
+        if emg_port is not None:
+            group_a, group_b = self._split_preview_groups()
+            grid_cfg = self._grid_info.get(port_name)
+            try:
+                self._split_muap_preview = split_preview_muaps(
+                    emg_port,
+                    group_a,
+                    group_b,
+                    self._fsamp,
+                    grid_positions=self._active_grid_positions.get(port_name),
+                    grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
+                )
+            except SpikeMUAPUnavailable as exc:
+                # Fall back to the parent unit's MUAP.
+                logger.debug("Split MUAP preview unavailable: %s", exc)
+        self._plot_muap()
 
     def _toggle_split_spike(self, sample: int):
         preview_key = self._split_preview_key
@@ -1088,6 +1135,8 @@ class EditionTab(QWidget):
         self._split_suggestion_threshold = None
         self._split_preview_manually_adjusted = False
         self._split_suggestion_error = None
+        self._split_muap_timer.stop()
+        self._split_muap_preview = None
         self._sel_arm = SelectionArm.NONE
         self.source_plot.set_selection_arm(SelectionArm.NONE)
         self._set_split_preview_controls(False)
@@ -1240,6 +1289,8 @@ class EditionTab(QWidget):
         self._split_suggestion_threshold = None
         self._split_preview_manually_adjusted = False
         self._split_suggestion_error = None
+        self._split_muap_timer.stop()
+        self._split_muap_preview = None
         self._sel_arm = SelectionArm.NONE
         self.source_plot.set_selection_arm(SelectionArm.NONE)
         self._set_split_preview_controls(False)
@@ -1583,6 +1634,7 @@ class EditionTab(QWidget):
             "_split_suggestion_threshold",
             "_split_preview_manually_adjusted",
             "_split_suggestion_error",
+            "_split_muap_preview",
         )
         controls = (
             "btn_recalc_filter",
@@ -1614,6 +1666,7 @@ class EditionTab(QWidget):
 
     def _restore_session_state(self, state: dict) -> None:
         self._props_timer.stop()
+        self._split_muap_timer.stop()
         for name, value in state["attributes"].items():
             setattr(self, name, value)
 
@@ -1779,6 +1832,8 @@ class EditionTab(QWidget):
         self._split_suggestion_threshold = None
         self._split_preview_manually_adjusted = False
         self._split_suggestion_error = None
+        self._split_muap_timer.stop()
+        self._split_muap_preview = None
         self.btn_split_unit.setVisible(True)
         self.btn_split_unit.setText("Split Unit")
         self.btn_confirm_split.setVisible(False)
@@ -2221,6 +2276,12 @@ class EditionTab(QWidget):
 
     def _inspect_spike_muap(self, sample: int):
         """Show raw/cleaned views of one discharge against a fixed reference."""
+        if self._split_preview_active():
+            # The MUAP panel shows the A/B templates while a split is pending.
+            self._update_status(
+                "Confirm or cancel the split before inspecting single spikes"
+            )
+            return
         current_inspection = self._current_spike_muap_inspection()
         if current_inspection is not None and current_inspection.selected_sample == int(
             sample
@@ -3740,20 +3801,25 @@ class EditionTab(QWidget):
         if mu is None:
             self._clear_muap_plot("Select a Motor Unit")
             return
-        if mu.props is None or mu.props.muap_grid is None:
+        split_preview = self._current_split_muap_preview()
+        muap_grid = mu.props.muap_grid if mu.props is not None else None
+        if muap_grid is None and split_preview is None:
             no_emg = self._emg_data.get(self._current_port) is None
             msg = "No EMG data in file" if no_emg else "MUAP unavailable"
             self._clear_muap_plot(msg)
             return
 
-        muap_grid = mu.props.muap_grid
         grid_cfg = self._grid_info.get(self._current_port)
         rejected_pos = self._rejected_ch_positions.get(self._current_port, set())
         inspection = self._current_spike_muap_inspection()
 
         if grid_cfg is not None:
             self._render_muap_grid(
-                muap_grid, grid_cfg, rejected_pos, inspection=inspection
+                muap_grid,
+                grid_cfg,
+                rejected_pos,
+                inspection=inspection,
+                split_preview=split_preview,
             )
             if self._muap_popout and self._muap_popout.isVisible():
                 self._muap_popout.render_grid(
@@ -3765,21 +3831,26 @@ class EditionTab(QWidget):
                     fsamp=self._fsamp,
                     show_selected=self._show_selected_spike,
                     remove_other_units=self._remove_other_units_from_selected_spike,
+                    split_preview=split_preview,
                 )
         else:
-            display_grid = (
-                inspection.reference_grid if inspection is not None else muap_grid
-            )
+            if split_preview is not None:
+                display_grid = split_preview.group_a_grid
+                selected_grid = split_preview.group_b_grid
+            else:
+                display_grid = (
+                    inspection.reference_grid if inspection is not None else muap_grid
+                )
+                selected_grid = (
+                    self._selected_spike_view(inspection)[0]
+                    if inspection is not None and self._show_selected_spike
+                    else None
+                )
             n_ch = display_grid.shape[0]
             waveforms = [display_grid[i, 0] for i in range(n_ch)]
-            selected_grid = (
-                self._selected_spike_view(inspection)[0]
-                if inspection is not None
-                else None
-            )
             selected_waveforms = (
                 [selected_grid[i, 0] for i in range(n_ch)]
-                if selected_grid is not None and self._show_selected_spike
+                if selected_grid is not None
                 else None
             )
             self._render_muap_stacked(
@@ -3787,6 +3858,7 @@ class EditionTab(QWidget):
                 list(range(n_ch)),
                 selected_waveforms=selected_waveforms,
                 inspection=inspection,
+                split_preview=split_preview,
             )
             if self._muap_popout and self._muap_popout.isVisible():
                 self._muap_popout.render_stacked(
@@ -3797,6 +3869,7 @@ class EditionTab(QWidget):
                     inspection=inspection,
                     fsamp=self._fsamp,
                     remove_other_units=self._remove_other_units_from_selected_spike,
+                    split_preview=split_preview,
                 )
 
     def _muap_title_html(
@@ -3825,16 +3898,30 @@ class EditionTab(QWidget):
             f"{selected_label} ({selected_mode})</span>"
         )
 
+    def _split_muap_title_html(
+        self, split_preview: SplitMUAPPreview, *, font_size: str = "10pt"
+    ) -> str:
+        return (
+            f"<span style='color:{COLORS['foreground']};font-size:{font_size};'>"
+            f"MU {self._current_mu_id()} | split preview</span><br>"
+            f"<span style='color:{SPLIT_A_COLOR};font-size:8pt;'>"
+            f"A: {split_preview.n_group_a} spikes</span> | "
+            f"<span style='color:{SPLIT_B_COLOR};font-size:8pt;'>"
+            f"B: {split_preview.n_group_b} spikes</span>"
+        )
+
     def _render_muap_grid(
         self,
-        muap_grid: np.ndarray,
+        muap_grid: np.ndarray | None,
         grid_cfg: dict,
         rejected_positions: set | None = None,
         inspection: SpikeMUAPInspection | None = None,
+        split_preview: SplitMUAPPreview | None = None,
     ):
         """Render MUAPs in physical grid layout (portrait, rows × cols).
 
         muap_grid: (rows, cols, n_samples) from compute_port_properties.
+        A split preview replaces it with the orange A and cyan B templates.
         On the first call (or when grid shape changes) all PlotItems are built and
         stored; on subsequent calls only waveform data and amplitudes are updated,
         avoiding expensive scene teardown/rebuild.
@@ -3842,14 +3929,20 @@ class EditionTab(QWidget):
         if rejected_positions is None:
             rejected_positions = set()
 
-        reference_grid = (
-            inspection.reference_grid if inspection is not None else muap_grid
-        )
-        selected_grid = (
-            self._selected_spike_view(inspection)[0]
-            if inspection is not None and self._show_selected_spike
-            else None
-        )
+        if split_preview is not None:
+            reference_grid = split_preview.group_a_grid
+            selected_grid = split_preview.group_b_grid
+            title_html = self._split_muap_title_html(split_preview)
+        else:
+            reference_grid = (
+                inspection.reference_grid if inspection is not None else muap_grid
+            )
+            selected_grid = (
+                self._selected_spike_view(inspection)[0]
+                if inspection is not None and self._show_selected_spike
+                else None
+            )
+            title_html = self._muap_title_html(inspection)
         rows, cols = grid_cfg["grid_shape"]
         electrode_positions = set(grid_cfg["positions"].values())
         n_samples = reference_grid.shape[2] if reference_grid.ndim == 3 else 409
@@ -3871,9 +3964,14 @@ class EditionTab(QWidget):
         all_values = np.concatenate(valid_wavs) if valid_wavs else np.array([])
         finite_values = all_values[np.isfinite(all_values)]
         amp = float(np.max(np.abs(finite_values))) * 1.2 if finite_values.size else 1.0
-        grid_key = (rows, cols, n_samples, frozenset(rejected_positions))
-
-        title_html = self._muap_title_html(inspection)
+        # Split previews use different pens, so switching mode forces a rebuild.
+        grid_key = (
+            rows,
+            cols,
+            n_samples,
+            frozenset(rejected_positions),
+            split_preview is not None,
+        )
 
         if grid_key == self._muap_grid_key and self._muap_cell_plots:
             # Fast path: only update amplitudes and waveform data in existing plots
@@ -3950,6 +4048,7 @@ class EditionTab(QWidget):
         _rej_bg = (50, 30, 30)
         _empty_bg = (28, 28, 28)
         gl = self.muap_widget.ci.layout
+        primary_pen, overlay_pen = muap_overlay_pens(split_preview is not None)
 
         for r in range(rows):
             for c in range(cols):
@@ -3977,18 +4076,11 @@ class EditionTab(QWidget):
                 elif rc not in electrode_positions:
                     p.getViewBox().setBackgroundColor(_empty_bg)
                 else:
-                    # Pre-create both waveform items; the inspection overlay is
-                    # empty until the user right-clicks a spike marker.
-                    item = p.plot([], pen=pg.mkPen(color=COLORS["info"], width=3.0))
+                    # Pre-create both waveform items; the overlay is empty
+                    # until a spike is inspected or a split is previewed.
+                    item = p.plot([], pen=primary_pen)
                     self._muap_waveform_items[rc] = item
-                    selected_item = p.plot(
-                        [],
-                        pen=pg.mkPen(
-                            color=(237, 137, 54, 210),
-                            width=1.5,
-                            style=Qt.PenStyle.SolidLine,
-                        ),
-                    )
+                    selected_item = p.plot([], pen=overlay_pen)
                     self._muap_inspection_items[rc] = selected_item
 
         gl.setSpacing(0)
@@ -4026,6 +4118,7 @@ class EditionTab(QWidget):
         *,
         selected_waveforms=None,
         inspection: SpikeMUAPInspection | None = None,
+        split_preview: SplitMUAPPreview | None = None,
     ):
         self.muap_widget.clear()
         self._muap_grid_key = None  # force grid rebuild on next _render_muap_grid call
@@ -4040,28 +4133,25 @@ class EditionTab(QWidget):
         all_data = np.concatenate(spacing_waveforms)
         finite_data = all_data[np.isfinite(all_data)]
         spacing = float(np.max(np.abs(finite_data))) * 0.6 if finite_data.size else 1.0
+        primary_pen, overlay_pen = muap_overlay_pens(split_preview is not None)
         n = len(valid)
         for rank, (pidx, wav) in enumerate(valid):
             offset = (n - rank - 1) * spacing
             ch = int(ch_indices[pidx]) if pidx < len(ch_indices) else pidx
-            plot.plot(wav + offset, pen=pg.mkPen(COLORS["info"], width=3.0))
+            if np.any(np.isfinite(wav)):
+                plot.plot(wav + offset, pen=primary_pen)
             if selected_waveforms is not None and pidx < len(selected_waveforms):
                 selected = selected_waveforms[pidx]
                 if len(selected) > 0 and np.any(np.isfinite(selected)):
-                    plot.plot(
-                        selected + offset,
-                        pen=pg.mkPen(
-                            color=(237, 137, 54, 210),
-                            width=1.5,
-                            style=Qt.PenStyle.SolidLine,
-                        ),
-                    )
+                    plot.plot(selected + offset, pen=overlay_pen)
             txt = pg.TextItem(f"Ch {ch}", color=(150, 150, 150), anchor=(1, 0.5))
             txt.setPos(-1, offset)
             txt.setFont(QFont(FONT_FAMILY, 7))
             plot.addItem(txt)
         plot.getAxis("left").setVisible(False)
-        if inspection is None:
+        if split_preview is not None:
+            plot.setTitle(self._split_muap_title_html(split_preview, font_size="9pt"))
+        elif inspection is None:
             plot.setTitle(
                 f"MU {self._current_mu_id()} — Stacked",
                 color=COLORS["foreground"],

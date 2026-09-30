@@ -1,11 +1,12 @@
-"""Single-discharge MUAP inspection helpers.
+"""Single-discharge and split-preview MUAP inspection helpers.
 
 The Edition GUI uses this module to compare one discharge with a raw,
 leave-one-out template made from the unit's other discharges.  The selected
 waveform is available both as recorded and after timestamp-aligned MUAP
-estimates for the other units have been removed.  Keeping the numerical work
-outside Qt makes the result easy to test and prevents a diagnostic interaction
-from mutating the decomposition.
+estimates for the other units have been removed.  During a split preview it
+also provides the raw templates of the two proposed groups on a shared time
+axis.  Keeping the numerical work outside Qt makes the result easy to test and
+prevents a diagnostic interaction from mutating the decomposition.
 """
 
 from __future__ import annotations
@@ -437,4 +438,120 @@ def inspect_spike_muap(
         raw_similarity=raw_similarity,
         raw_amplitude_ratio=raw_ratio,
         raw_lag_ms=float(-raw_best_shift / sampling_rate * 1000.0),
+    )
+
+
+@dataclass(frozen=True)
+class SplitMUAPPreview:
+    """Raw MUAP templates of the two proposed groups of a split preview.
+
+    Both grids share one time axis, so a latency difference between A and B
+    remains visible.  A group without a complete discharge has an all-NaN
+    grid; ``n_group_a`` and ``n_group_b`` count the discharges averaged.
+    """
+
+    group_a_grid: np.ndarray
+    group_b_grid: np.ndarray
+    n_group_a: int
+    n_group_b: int
+
+
+def _window_sums(
+    emg: np.ndarray,
+    timestamps: np.ndarray,
+    half_window: int,
+    chunk_size: int = 256,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-sample finite sums and counts over complete event windows.
+
+    Windows are gathered in chunks, so long recordings never need an
+    (events, channels, samples) array or a float64 copy of the whole EMG.
+    """
+    offsets = np.arange(-half_window, half_window)
+    sums = np.zeros((emg.shape[0], offsets.size), dtype=np.float64)
+    counts = np.zeros(sums.shape, dtype=np.int64)
+    for start in range(0, timestamps.size, chunk_size):
+        indices = timestamps[start : start + chunk_size, None] + offsets[None, :]
+        windows = np.asarray(emg[:, indices], dtype=np.float64)
+        finite = np.isfinite(windows)
+        sums += np.where(finite, windows, 0.0).sum(axis=1)
+        counts += finite.sum(axis=1)
+    return sums, counts
+
+
+def split_preview_muaps(
+    emg_port: np.ndarray,
+    group_a: np.ndarray | Sequence[int],
+    group_b: np.ndarray | Sequence[int],
+    fsamp: float,
+    *,
+    grid_positions: dict[int, tuple[int, int]] | None = None,
+    grid_shape: tuple[int, int] | None = None,
+    win_ms: int = MUAP_WIN_MS,
+) -> SplitMUAPPreview:
+    """Average the raw EMG around each proposed split group's discharges.
+
+    Each template is a spike-triggered average with each channel's temporal
+    mean removed.  The two templates are shifted together so the dominant
+    peak of the combined (parent) template sits at the window centre; they are
+    never aligned to each other.  Discharges whose window extends past the
+    recording are excluded.
+    """
+    emg = np.asarray(emg_port)
+    try:
+        sampling_rate = float(fsamp)
+    except (TypeError, ValueError) as exc:
+        raise SpikeMUAPUnavailable("The sampling rate is invalid") from exc
+    if emg.ndim != 2 or emg.shape[0] == 0 or emg.shape[1] == 0:
+        raise SpikeMUAPUnavailable("Raw multichannel EMG is unavailable")
+    if not np.isfinite(sampling_rate) or sampling_rate <= 0:
+        raise SpikeMUAPUnavailable("The sampling rate is invalid")
+
+    half_window = max(1, int(round(float(win_ms) / 2.0 / 1000.0 * sampling_rate)))
+    groups = []
+    for raw_group in (group_a, group_b):
+        timestamps = _finite_integer_timestamps(raw_group)
+        complete = timestamps[
+            (timestamps >= half_window) & (timestamps + half_window <= emg.shape[1])
+        ]
+        sums, counts = _window_sums(emg, complete, half_window)
+        groups.append((sums, counts, int(complete.size)))
+    (sums_a, counts_a, n_group_a), (sums_b, counts_b, n_group_b) = groups
+    if n_group_a == 0 and n_group_b == 0:
+        raise SpikeMUAPUnavailable("Neither split group has a complete discharge")
+
+    def _template(sums: np.ndarray, counts: np.ndarray) -> np.ndarray:
+        template = np.divide(
+            sums,
+            counts,
+            out=np.full(sums.shape, np.nan),
+            where=counts > 0,
+        )
+        return _demean_channels(template)
+
+    template_a = _template(sums_a, counts_a)
+    template_b = _template(sums_b, counts_b)
+    parent = _template(sums_a + sums_b, counts_a + counts_b)
+
+    shift = 0
+    channel_energy = np.nansum(parent**2, axis=1)
+    if np.any(channel_energy > 0):
+        dominant_waveform = parent[int(np.argmax(channel_energy))]
+        peak_sample = int(np.nanargmax(np.abs(dominant_waveform)))
+        shift = parent.shape[1] // 2 - peak_sample
+    padding = abs(shift)
+
+    return SplitMUAPPreview(
+        group_a_grid=_as_grid(
+            _shift_onto_padded_canvas(template_a, shift, padding),
+            grid_positions=grid_positions,
+            grid_shape=grid_shape,
+        ),
+        group_b_grid=_as_grid(
+            _shift_onto_padded_canvas(template_b, shift, padding),
+            grid_positions=grid_positions,
+            grid_shape=grid_shape,
+        ),
+        n_group_a=n_group_a,
+        n_group_b=n_group_b,
     )

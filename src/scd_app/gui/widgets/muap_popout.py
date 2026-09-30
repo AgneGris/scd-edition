@@ -7,12 +7,38 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPen
 from PySide6.QtWidgets import QDialog, QVBoxLayout
 
-from scd_app.core.spike_muap import SpikeMUAPInspection
+from scd_app.core.spike_muap import SpikeMUAPInspection, SplitMUAPPreview
 from scd_app.gui.style.styling import COLORS, FONT_FAMILY
 from scd_app.gui.widgets.plot_tools import XZoomViewBox, make_plot_item_safe
+
+SPLIT_A_COLOR = "#ed8936"
+SPLIT_B_COLOR = "#22d3ee"
+
+
+def muap_overlay_pens(split_preview: bool = False) -> tuple[QPen, QPen]:
+    """Return the (primary, overlay) pens for MUAP waveform panels.
+
+    Normally the primary curve is the blue unit or reference template and the
+    overlay is the orange inspected discharge.  During a split preview they
+    are the orange A and cyan B templates, matching the source-plot markers;
+    B is drawn thinner on top so identical shapes remain distinguishable.
+    """
+    if split_preview:
+        return (
+            pg.mkPen(color=SPLIT_A_COLOR, width=2.5),
+            pg.mkPen(color=SPLIT_B_COLOR, width=1.5),
+        )
+    return (
+        pg.mkPen(color=COLORS["info"], width=3.0),
+        pg.mkPen(
+            color=(237, 137, 54, 210),
+            width=1.5,
+            style=Qt.PenStyle.SolidLine,
+        ),
+    )
 
 
 class MuapPopoutDialog(QDialog):
@@ -45,19 +71,25 @@ class MuapPopoutDialog(QDialog):
         fsamp: float = 1.0,
         show_selected: bool = True,
         remove_other_units: bool = False,
+        split_preview: SplitMUAPPreview | None = None,
     ):
         self._plot.clear()
         rows, cols = grid_cfg["grid_shape"]
         positions = grid_cfg["positions"]
         electrode_positions = set(positions.values())
-        reference_grid = (
-            inspection.reference_grid if inspection is not None else muap_grid
-        )
-        selected_grid = (
-            inspection.selected_view(remove_other_units)[0]
-            if inspection is not None and show_selected
-            else None
-        )
+        if split_preview is not None:
+            reference_grid = split_preview.group_a_grid
+            selected_grid = split_preview.group_b_grid
+        else:
+            reference_grid = (
+                inspection.reference_grid if inspection is not None else muap_grid
+            )
+            selected_grid = (
+                inspection.selected_view(remove_other_units)[0]
+                if inspection is not None and show_selected
+                else None
+            )
+        primary_pen, overlay_pen = muap_overlay_pens(split_preview is not None)
 
         valid_wavs = [
             grid[r, c]
@@ -78,7 +110,9 @@ class MuapPopoutDialog(QDialog):
         amp = float(np.max(np.abs(finite_values))) * 1.2 if finite_values.size else 1.0
         n_samples = reference_grid.shape[2] if reference_grid.ndim == 3 else 409
 
-        if inspection is None:
+        if split_preview is not None:
+            label = self._split_title_html(split_preview, mu_id)
+        elif inspection is None:
             label = (
                 f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
                 f"MU {mu_id}</span>"
@@ -179,24 +213,17 @@ class MuapPopoutDialog(QDialog):
                 if rc not in electrode_positions or rc in rejected_positions:
                     continue
                 wav = reference_grid[r, c]
-                if len(wav) == 0 or not np.any(np.isfinite(wav)):
-                    continue
                 p = cell_plots.get(rc)
                 if p is not None:
-                    p.plot(wav, pen=pg.mkPen(color=COLORS["info"], width=3.0))
+                    # Split group A may have no complete discharge while B does.
+                    if len(wav) > 0 and np.any(np.isfinite(wav)):
+                        p.plot(wav, pen=primary_pen)
                     if selected_grid is not None:
                         selected = selected_grid[r, c]
                         if len(selected) > 0 and np.any(np.isfinite(selected)):
-                            p.plot(
-                                selected,
-                                pen=pg.mkPen(
-                                    color=(237, 137, 54, 210),
-                                    width=1.5,
-                                    style=Qt.PenStyle.SolidLine,
-                                ),
-                            )
+                            p.plot(selected, pen=overlay_pen)
 
-        self.setWindowTitle(f"MUAP Shapes — MU {mu_id}")
+        self.setWindowTitle(self._window_title(mu_id, split_preview))
 
     def render_stacked(
         self,
@@ -208,6 +235,7 @@ class MuapPopoutDialog(QDialog):
         inspection: SpikeMUAPInspection | None = None,
         fsamp: float = 1.0,
         remove_other_units: bool = False,
+        split_preview: SplitMUAPPreview | None = None,
     ):
         self._plot.clear()
         plot = self._plot.addPlot(row=0, col=0, viewBox=XZoomViewBox())
@@ -221,27 +249,26 @@ class MuapPopoutDialog(QDialog):
         all_data = np.concatenate(spacing_waveforms)
         finite_data = all_data[np.isfinite(all_data)]
         spacing = float(np.max(np.abs(finite_data))) * 0.6 if finite_data.size else 1.0
+        primary_pen, overlay_pen = muap_overlay_pens(split_preview is not None)
         n = len(valid)
         for rank, (pidx, wav) in enumerate(valid):
             offset = (n - rank - 1) * spacing
             ch = int(ch_indices[pidx]) if pidx < len(ch_indices) else pidx
-            plot.plot(wav + offset, pen=pg.mkPen(COLORS["info"], width=3.0))
+            if np.any(np.isfinite(wav)):
+                plot.plot(wav + offset, pen=primary_pen)
             if selected_waveforms is not None and pidx < len(selected_waveforms):
                 selected = selected_waveforms[pidx]
                 if len(selected) > 0 and np.any(np.isfinite(selected)):
-                    plot.plot(
-                        selected + offset,
-                        pen=pg.mkPen(
-                            color=(237, 137, 54, 210),
-                            width=1.5,
-                            style=Qt.PenStyle.SolidLine,
-                        ),
-                    )
+                    plot.plot(selected + offset, pen=overlay_pen)
             txt = pg.TextItem(f"Ch {ch}", color=(150, 150, 150), anchor=(1, 0.5))
             txt.setPos(-1, offset)
             txt.setFont(QFont(FONT_FAMILY, 8))
             plot.addItem(txt)
         plot.getAxis("left").setVisible(False)
+        if split_preview is not None:
+            plot.setTitle(self._split_title_html(split_preview, mu_id))
+            self.setWindowTitle(f"{self._window_title(mu_id, split_preview)} (Stacked)")
+            return
         if inspection is None:
             title = f"MU {mu_id} — Stacked"
         else:
@@ -258,6 +285,22 @@ class MuapPopoutDialog(QDialog):
             )
         plot.setTitle(title, color=COLORS["foreground"], size="11pt")
         self.setWindowTitle(f"MUAP Shapes — MU {mu_id} (Stacked)")
+
+    @staticmethod
+    def _split_title_html(split_preview: SplitMUAPPreview, mu_id: int) -> str:
+        return (
+            f"<span style='color:{COLORS['foreground']};font-size:11pt;'>"
+            f"MU {mu_id} · split preview</span><br>"
+            f"<span style='color:{SPLIT_A_COLOR};font-size:9pt;'>"
+            f"A: {split_preview.n_group_a} spikes</span> · "
+            f"<span style='color:{SPLIT_B_COLOR};font-size:9pt;'>"
+            f"B: {split_preview.n_group_b} spikes</span>"
+        )
+
+    @staticmethod
+    def _window_title(mu_id: int, split_preview: SplitMUAPPreview | None) -> str:
+        suffix = " split preview" if split_preview is not None else ""
+        return f"MUAP Shapes — MU {mu_id}{suffix}"
 
     def clear(self, message="Select a Motor Unit"):
         self._plot.clear()

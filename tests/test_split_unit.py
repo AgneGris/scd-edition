@@ -144,6 +144,116 @@ def test_split_preview_is_non_destructive_and_cancelable():
     app.processEvents()
 
 
+def test_split_preview_overlays_group_muaps_until_canceled():
+    from scd_app.core.spike_muap import split_preview_muaps
+
+    app = _application()
+    tab, _merged, _later = _tab_with_two_units()
+    emg = np.random.default_rng(0).normal(size=(2, 100))
+    tab._emg_data = {"Grid A": emg}
+
+    tab.btn_split_unit.click()
+
+    group_a, group_b = tab._split_preview_groups()
+    expected = split_preview_muaps(emg, group_a, group_b, tab._fsamp)
+    preview = tab._current_split_muap_preview()
+    assert preview is not None
+    assert (preview.n_group_a, preview.n_group_b) == (
+        expected.n_group_a,
+        expected.n_group_b,
+    )
+    np.testing.assert_allclose(
+        preview.group_a_grid, expected.group_a_grid, equal_nan=True
+    )
+    np.testing.assert_allclose(
+        preview.group_b_grid, expected.group_b_grid, equal_nan=True
+    )
+    assert "split preview" in tab.muap_widget.getItem(0, 0).titleLabel.text
+
+    # Reassignment is debounced, then the templates follow the new groups.
+    _set_preview_group_b(tab, {20, 40})
+    assert tab._split_muap_timer.isActive()
+    tab._refresh_split_muap_preview()
+    expected = split_preview_muaps(
+        emg, np.array([10, 30, 50, 60]), np.array([20, 40]), tab._fsamp
+    )
+    preview = tab._current_split_muap_preview()
+    np.testing.assert_allclose(
+        preview.group_b_grid, expected.group_b_grid, equal_nan=True
+    )
+    assert preview.n_group_b == 2
+
+    # Single-spike inspection would compete with the A/B overlay.
+    tab._inspect_spike_muap(20)
+    assert tab._spike_muap_inspection is None
+
+    tab.btn_split_unit.click()
+
+    assert tab._split_muap_preview is None
+    assert tab._split_muap_timer.isActive() is False
+    tab.close()
+    app.processEvents()
+
+
+def test_split_muap_grid_uses_split_colours_and_restores_unit_view():
+    from scd_app.core.spike_muap import SplitMUAPPreview
+    from scd_app.gui.widgets.muap_popout import (
+        SPLIT_A_COLOR,
+        SPLIT_B_COLOR,
+        MuapPopoutDialog,
+    )
+
+    app = _application()
+    tab, _merged, _later = _tab_with_two_units()
+    group_a_grid = np.arange(10, dtype=float).reshape(1, 1, 10)
+    group_b_grid = np.full((1, 1, 10), np.nan)
+    group_b_grid[0, 0, 2:8] = -1.0
+    preview = SplitMUAPPreview(
+        group_a_grid=group_a_grid,
+        group_b_grid=group_b_grid,
+        n_group_a=4,
+        n_group_b=2,
+    )
+    grid_config = {"grid_shape": (1, 1), "positions": {0: (0, 0)}}
+
+    tab._render_muap_grid(None, grid_config, split_preview=preview)
+
+    _, a_y = tab._muap_waveform_items[(0, 0)].getData()
+    _, b_y = tab._muap_inspection_items[(0, 0)].getData()
+    np.testing.assert_allclose(a_y, group_a_grid.ravel())
+    np.testing.assert_allclose(b_y, group_b_grid.ravel(), equal_nan=True)
+    a_pen = tab._muap_waveform_items[(0, 0)].opts["pen"]
+    b_pen = tab._muap_inspection_items[(0, 0)].opts["pen"]
+    assert a_pen.color().name() == SPLIT_A_COLOR
+    assert b_pen.color().name() == SPLIT_B_COLOR
+    assert a_pen.widthF() > b_pen.widthF()
+    assert "A: 4 spikes" in tab._muap_title_label.text
+
+    ordinary = np.ones((1, 1, 10))
+    tab._render_muap_grid(ordinary, grid_config)
+
+    unit_pen = tab._muap_waveform_items[(0, 0)].opts["pen"]
+    _, cleared_y = tab._muap_inspection_items[(0, 0)].getData()
+    assert unit_pen.widthF() == pytest.approx(3.0)
+    assert cleared_y is None or cleared_y.size == 0
+
+    popout = MuapPopoutDialog()
+    popout.render_grid(None, grid_config, set(), 0, split_preview=preview)
+    assert popout.windowTitle().endswith("split preview")
+    popout.render_stacked(
+        [group_a_grid[0, 0]],
+        [0],
+        0,
+        selected_waveforms=[group_b_grid[0, 0]],
+        split_preview=preview,
+    )
+    assert popout.windowTitle().endswith("split preview (Stacked)")
+
+    popout.close()
+    tab.close()
+    app.processEvents()
+
+
 def test_confirm_split_creates_two_units_and_two_grouped_peel_steps():
     from scd_app.core.mu_properties import MUProperties
 

@@ -5,14 +5,18 @@ logical resolution but is never shown on screen. The "offscreen" plugin must
 not be used: it has no system font fallback and draws every symbol glyph in
 the interface as an empty box.
 
-The decomposition frames use deterministic illustrative sources so the
-capture does not run a costly scientific decomposition. Edition and
-Visualisation are populated through the same data path used for a saved
-session, from a synthetic 64-channel recording of a trapezoidal contraction:
-motor units are recruited in order of size with physiological discharge
-variability, the first source merges two units to demonstrate the split
-preview, and one of its discharges is left unmarked to demonstrate adding a
-missed spike.
+The interface is driven with a synthetic 64-channel recording of a 30 % MVC
+trapezoidal contraction: motor units are recruited in order of size with
+physiological discharge variability, and their MUAPs propagate from each
+unit's innervation zone. The sources are what the application's own filter
+recalculation produces, spike-triggered-average filters applied to the
+extended and whitened EMG, except that each decomposition filter carries a
+stray component, as an imperfectly converged separation vector would, so
+recalculating it after editing strengthens the pulses. The first unit has a
+false discharge marked on another unit's crosstalk and misses one of its own;
+the second merges two units to demonstrate the split preview. No
+decomposition is run: the Decomposition frames show one filter converging
+from a random start onto the first unit.
 
     uv run python scripts/capture_demo.py                  # GIF + screenshots
     uv run python scripts/capture_demo.py --video-dir export/linkedin
@@ -28,15 +32,17 @@ from pathlib import Path
 os.environ.setdefault("QT_SCALE_FACTOR", str(2))
 
 import numpy as np
+import torch
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSplitter, QWidget
+from scd.models.timestamping import spike_triggered_average
 from scipy import signal as sp_signal
 
 from scd_app._vendor.motor_unit_toolbox import props as tb_props
-from scd_app.core.filter_recalculation import snap_to_local_peak
+from scd_app.core.filter_recalculation import preprocess_emg, snap_to_local_peak
 from scd_app.examples import bundled_example_config
 from scd_app.gui.main_window import MainWindow, _configure_example_on_startup
 from scd_app.gui.style.styling import COLORS, set_style_sheet
@@ -58,35 +64,41 @@ DURATION_S = 10.0
 FORCE_KNOTS_S = (1.0, 3.5, 6.5, 9.0)  # rise start, plateau start and end, rest
 MVC_N = 400.0
 PLATEAU_MVC = 0.3
-# Recruitment threshold of each true unit as a fraction of the plateau force.
+EXTENSION_FACTOR = 16
+# Per true unit: recruitment threshold as a fraction of the plateau force,
+# territory centre and spread on the 8 x 8 grid (row, column), row of the
+# innervation zone, and weight of the leading MUAP phase.
 THRESHOLDS = (0.04, 0.12, 0.20, 0.28, 0.36, 0.46, 0.56, 0.66, 0.76)
-# Territory centre of each true unit on the 8 x 8 grid (row, column).
 CENTRES = (
     (1.5, 1.5),
     (5.5, 2.0),
     (2.0, 5.5),
-    (4.5, 4.5),
+    (3.5, 3.5),
     (6.5, 6.0),
-    (3.0, 3.0),
+    (3.0, 1.0),
     (1.0, 6.5),
     (6.0, 0.8),
-    (3.8, 7.0),
+    (4.0, 7.0),
 )
-# Decomposed sources in extraction order; the first one merges two units.
-SOURCE_UNITS = ((2, 4), (0,), (5,), (1,), (7,), (3,), (8,), (6,))
-MISSED_DISCHARGE_S = 5.1
+SPREADS = ((2.0, 1.4),) * 3 + ((3.0, 2.2),) + ((2.0, 1.4),) * 5
+IZ_ROWS = (3.5, 2.0, 5.0, 3.5, 1.5, 6.0, 2.5, 4.5, 3.0)
+LEADING_PHASE = (0.55, 0.25, 0.8, 0.5, 0.65, 0.3, 0.7, 0.5, 0.2)
+EDITED_UNIT = 3  # shown first: one false and one missed discharge
+MERGED_UNITS = (2, 4)  # shown second: merged, with the first dominant
+# Decomposed sources in extraction order.
+SOURCE_UNITS = ((EDITED_UNIT,), MERGED_UNITS, (0,), (5,), (1,), (7,), (8,), (6,))
+EDIT_VIEW_S = (4.3, 5.8)
 SPLIT_VIEW_S = (3.8, 6.4)
-ADD_VIEW_HALF_WIDTH_S = 0.75
-INSPECT_DISCHARGE_S = 4.6
+ZOOM_STEPS = 20
 
 README_STEPS = (
     ("config", "Load the bundled 64-channel example"),
     ("decomp_3", "Decompose with live source feedback"),
-    ("edit_merged", "Review every motor unit, its quality and MUAP"),
-    ("edit_inspect", "Check any discharge against the unit's MUAP"),
-    ("edit_split_preview", "Preview a split: high-amplitude A, low-amplitude B"),
-    ("edit_split_done", "Confirm two units with recomputed quality"),
-    ("edit_add_done", "Box-select a missed discharge to add it"),
+    ("edit_review", "Review each unit's pulse train against the force"),
+    ("edit_inspect_true", "Click a discharge to overlay its MUAP"),
+    ("edit_added", "Box-select to delete false and add missed discharges"),
+    ("edit_recalculated", "Recalculate the filter from the edited discharges"),
+    ("edit_split_preview", "Split merged units: high-amplitude A, low-amplitude B"),
     ("vis_idr", "Compare discharge rates with the force"),
 )
 SCREENSHOTS = {
@@ -111,8 +123,11 @@ class Shot:
 class DemoSession:
     data: dict
     sampling_rate: int
-    missed_peak: int
-    inspect_peak: int
+    false_peak: int  # marked by the decomposition on another unit's crosstalk
+    missed_peak: int  # a discharge the decomposition left unmarked
+    true_peak: int  # a genuine discharge to inspect, before the false one
+    edit_top: float  # source² axis top fitting the recalculated pulses
+    iterations: list[tuple[int, np.ndarray, np.ndarray, float]]
 
 
 # ── Synthetic recording ──────────────────────────────────────────────────────
@@ -157,36 +172,31 @@ def _discharge_times(
     return np.asarray(times, dtype=np.int64)
 
 
-def _pulse_train(n_samples: int, events: np.ndarray, heights: np.ndarray) -> np.ndarray:
-    offsets = np.arange(-18, 19)
-    kernel = np.exp(-0.5 * (offsets / 5.0) ** 2)
-    train = np.zeros(n_samples, dtype=np.float32)
-    for event, height in zip(events, heights, strict=True):
-        if 18 <= event < n_samples - 18:
-            train[event - 18 : event + 19] += height * kernel
-    return train
-
-
 def _muap_templates(unit: int, half_window: int, sampling_rate: int) -> np.ndarray:
-    """Propagating, spatially localised 64-channel MUAP of one unit (µV)."""
+    """Spatially localised 64-channel MUAP of one unit (µV).
+
+    The action potential travels both ways from the innervation zone at
+    5 m/s, i.e. 2 ms per 10 mm row of the grid.
+    """
     rows, cols = np.divmod(np.arange(64), 8)
     centre_row, centre_col = CENTRES[unit]
+    spread_row, spread_col = SPREADS[unit]
     spatial = np.exp(
-        -((rows - centre_row) ** 2) / (2 * 2.2**2)
-        - (cols - centre_col) ** 2 / (2 * 1.2**2)
+        -((rows - centre_row) ** 2) / (2 * spread_row**2)
+        - (cols - centre_col) ** 2 / (2 * spread_col**2)
     )
-    # 0.5 ms conduction delay per 10 mm row along the fibres.
-    delay = (rows - centre_row) * 0.0005 * sampling_rate / half_window
-    width = 0.9 + 0.3 * unit / len(THRESHOLDS)
+    delay = np.abs(rows - IZ_ROWS[unit]) * 0.002 * sampling_rate / half_window
+    width = 0.8 + 0.4 * ((unit * 5) % len(THRESHOLDS)) / (len(THRESHOLDS) - 1)
     phase = np.linspace(-1.0, 1.0, 2 * half_window, endpoint=False)
     phase = (phase[np.newaxis, :] - delay[:, np.newaxis]) / width
+    lead = LEADING_PHASE[unit]
     shape = (
-        -0.55 * np.exp(-(((phase + 0.24) / 0.16) ** 2))
+        -lead * np.exp(-(((phase + 0.24) / 0.16) ** 2))
         + np.exp(-((phase / 0.11) ** 2))
-        - 0.42 * np.exp(-(((phase - 0.27) / 0.18) ** 2))
+        - 0.8 * (1 - lead) * np.exp(-(((phase - 0.27) / 0.18) ** 2))
     )
     templates = spatial[:, np.newaxis] * shape
-    peak_to_peak = 60.0 + 260.0 * THRESHOLDS[unit]  # larger units recruit later
+    peak_to_peak = 90.0 + 230.0 * THRESHOLDS[unit]  # larger units recruit later
     return templates * peak_to_peak / np.ptp(templates, axis=1).max()
 
 
@@ -205,24 +215,76 @@ def _illustrative_emg(
     return emg
 
 
-def _choose_missed(a_train: np.ndarray, b_train: np.ndarray, sampling_rate: int):
-    """A plateau discharge of unit A, clear of unit B, in its steadiest stretch.
+def _unit_norm(vector: torch.Tensor) -> torch.Tensor:
+    return vector / vector.norm()
 
-    A regular neighbourhood makes the missing discharge the only visible
-    anomaly in the firing-rate plot.
+
+class _Separation:
+    """The application's filter maths on the extended, whitened EMG."""
+
+    def __init__(self, emg: np.ndarray, config: dict) -> None:
+        self.whitened = preprocess_emg(
+            torch.from_numpy(emg.T.copy()), config, torch.device("cpu")
+        )
+
+    def matched(self, timestamps: np.ndarray) -> torch.Tensor:
+        """Spike-triggered-average filter, as filter recalculation estimates it."""
+        events = torch.from_numpy(np.asarray(timestamps, dtype=np.int64))
+        return _unit_norm(spike_triggered_average(self.whitened, events, 1).t())
+
+    def source(self, filt: torch.Tensor) -> np.ndarray:
+        source = (self.whitened @ filt).squeeze(-1)
+        return ((source - source.mean()) / source.std()).numpy().astype(np.float64)
+
+
+def _plant_edits(
+    source: np.ndarray, timestamps: np.ndarray, sampling_rate: int
+) -> tuple[int, int, int]:
+    """Choose the false, missed and inspected discharges in the edit view.
+
+    The false one is the tallest crosstalk peak clear of the unit's own
+    discharges; the missed one is the unit's lowest peak there, as the one a
+    decomposition would most plausibly miss.
     """
-    intervals = np.diff(a_train)
-    candidates = []
-    for index in range(4, len(a_train) - 4):
-        event = a_train[index]
-        if abs(event / sampling_rate - MISSED_DISCHARGE_S) > 0.5:
-            continue
-        if np.min(np.abs(b_train - event)) <= 0.012 * sampling_rate:
-            continue
-        nearby = intervals[index - 4 : index + 4]
-        irregularity = np.max(np.abs(nearby / np.median(nearby) - 1.0))
-        candidates.append((irregularity, int(event)))
-    return min(candidates)[1]
+    lo, hi = (int(s * sampling_rate) for s in EDIT_VIEW_S)
+    margin = int(0.15 * sampling_rate)
+    squared = source**2
+    peaks, _ = sp_signal.find_peaks(
+        squared[lo + margin : hi - margin], distance=int(0.01 * sampling_rate)
+    )
+    peaks += lo + margin
+    clear = [p for p in peaks if np.min(np.abs(timestamps - p)) > 0.025 * sampling_rate]
+    false_peak = int(max(clear, key=lambda p: squared[p]))
+    inside = timestamps[(timestamps > lo + margin) & (timestamps < hi - margin)]
+    away = inside[np.abs(inside - false_peak) > 0.1 * sampling_rate]
+    missed_peak = int(min(away, key=lambda p: squared[p]))
+    # Inspect a typical discharge before the false one.
+    before = inside[(inside < false_peak) & (inside != missed_peak)]
+    true_peak = int(before[np.argsort(squared[before])[len(before) // 2]])
+    return false_peak, missed_peak, true_peak
+
+
+def _decomposition_iterations(
+    separation: _Separation, target: torch.Tensor, start: torch.Tensor, fs: int
+) -> list[tuple[int, np.ndarray, np.ndarray, float]]:
+    """One separation vector converging from *start* onto *target*."""
+    first = int(FORCE_KNOTS_S[1] * fs)
+    segment = slice(first, first + 25600)
+    iterations = []
+    for iteration, weight in ((1, 0.25), (5, 0.5), (11, 0.75), (18, 1.0)):
+        filt = _unit_norm(weight * target + (1 - weight) * start)
+        source = separation.source(filt)[segment]
+        squared = source**2
+        peaks, _ = sp_signal.find_peaks(
+            squared, height=0.3 * squared.max(), distance=int(0.02 * fs)
+        )
+        spike_train = np.zeros((len(source), 1), dtype=bool)
+        spike_train[peaks, 0] = True
+        silhouette = float(
+            np.ravel(tb_props.get_silhouette_measure(spike_train, squared[:, None]))[0]
+        )
+        iterations.append((iteration, source, peaks, silhouette))
+    return iterations
 
 
 def _demo_session() -> DemoSession:
@@ -235,7 +297,7 @@ def _demo_session() -> DemoSession:
         _discharge_times(force, threshold, sampling_rate, rng)
         for threshold in THRESHOLDS
     ]
-    unit_a, unit_b = SOURCE_UNITS[0]
+    unit_a, unit_b = MERGED_UNITS
     # Keep the merged pair free of superimposed discharges, which would snap
     # to one shared peak and appear as a duplicate marker: nudge B by 5 ms.
     offsets = trains[unit_b][:, None] - trains[unit_a][None, :]
@@ -243,68 +305,72 @@ def _demo_session() -> DemoSession:
     clash = np.abs(nearest) <= 0.004 * sampling_rate
     nudge = np.where(nearest[clash] < 0, -1, 1) * int(0.005 * sampling_rate)
     trains[unit_b][clash] += nudge - nearest[clash]
-    missed = _choose_missed(trains[unit_a], trains[unit_b], sampling_rate)
 
-    sources, timestamps = [], []
-    missed_peak = -1
-    for index, units in enumerate(SOURCE_UNITS):
-        source = rng.normal(0.0, 0.035, n_samples).astype(np.float32)
-        marked = []
-        for rank, unit in enumerate(units):
-            events = trains[unit]
-            if len(units) > 1:
-                level = 1.45 if rank == 0 else 0.62
-            else:
-                level = 1.2 + 0.04 * index
-            heights = level * rng.normal(1.0, 0.04, len(events))
-            if index == 0 and rank == 0:
-                heights[events == missed] = 1.32
-                events_marked = events[events != missed]
-            else:
-                events_marked = events
-            source += _pulse_train(n_samples, events, heights)
-            marked.append(events_marked)
-        crosstalk = trains[SOURCE_UNITS[(index + 3) % len(SOURCE_UNITS)][0]]
-        source += _pulse_train(n_samples, crosstalk, np.full(len(crosstalk), 0.16))
-        nominal = np.sort(np.concatenate(marked))
-        timestamps.append(
-            np.unique(
-                snap_to_local_peak(source, nominal, max_shift=6, square_source=False)
+    emg = _illustrative_emg(trains, n_samples, sampling_rate)
+    preprocessing = {
+        "sampling_frequency": sampling_rate,
+        "extension_factor": EXTENSION_FACTOR,
+        "peel_off_window_size": 256,
+        "min_peak_separation": 20,
+        "square_sources_spike_det": True,
+    }
+    separation = _Separation(emg, preprocessing)
+    stray = torch.from_numpy(
+        np.random.default_rng(7)
+        .normal(size=(separation.whitened.shape[1], 3))
+        .astype(np.float32)
+    )
+    stray = stray / stray.norm(dim=0)
+    filters = [
+        _unit_norm(separation.matched(trains[EDITED_UNIT]) + 0.9 * stray[:, :1]),
+        _unit_norm(
+            separation.matched(trains[unit_a])
+            + 0.5 * separation.matched(trains[unit_b])
+            + 0.3 * stray[:, 1:2]
+        ),
+        *(separation.matched(trains[units[0]]) for units in SOURCE_UNITS[2:]),
+    ]
+    sources = [separation.source(filt) for filt in filters]
+    timestamps = [
+        np.unique(
+            snap_to_local_peak(
+                source,
+                np.sort(np.concatenate([trains[unit] for unit in units])),
+                max_shift=6,
+                square_source=True,
             )
         )
-        if index == 0:
-            missed_peak = int(
-                snap_to_local_peak(
-                    source, np.asarray([missed]), max_shift=6, square_source=False
-                )[0]
-            )
-        sources.append(source)
+        for source, units in zip(sources, SOURCE_UNITS, strict=True)
+    ]
+    false_peak, missed_peak, true_peak = _plant_edits(
+        sources[0], timestamps[0], sampling_rate
+    )
+    decomposed = timestamps[0][timestamps[0] != missed_peak]
+    timestamps[0] = np.sort(np.append(decomposed, false_peak))
 
-    inspect_target = INSPECT_DISCHARGE_S * sampling_rate
-    tall = timestamps[0][sources[0][timestamps[0]] > 1.0]
-    inspect_peak = int(min(tall, key=lambda sample: abs(sample - inspect_target)))
-    emg = _illustrative_emg(trains, n_samples, sampling_rate)
+    # Fit the edit view's axis to the pulses the recalculation will produce.
+    curated = np.sort(np.append(decomposed, missed_peak))
+    recalculated = separation.source(separation.matched(curated))
+    lo, hi = (int(s * sampling_rate) for s in EDIT_VIEW_S)
+    edit_top = 1.12 * float(np.max(recalculated[lo:hi] ** 2))
+    iterations = _decomposition_iterations(
+        separation, filters[0], stray[:, 2:3], sampling_rate
+    )
+    del separation
+
     data = {
         "ports": ["Example_Grid"],
         "sampling_rate": sampling_rate,
         "discharge_times": [timestamps],
         "pulse_trains": [sources],
-        "mu_filters": [[None for _source in sources]],
+        "mu_filters": [[filt.numpy() for filt in filters]],
         "peel_off_sequence": [
             [
                 {"accepted_unit_idx": unit_index, "timestamps": unit_ts.copy()}
                 for unit_index, unit_ts in enumerate(timestamps)
             ]
         ],
-        "preprocessing_config": [
-            {
-                "sampling_frequency": sampling_rate,
-                "extension_factor": 1,
-                "peel_off_window_size": 256,
-                "min_peak_separation": 20,
-                "square_sources_spike_det": True,
-            }
-        ],
+        "preprocessing_config": [preprocessing],
         "skip_filter_recalc": True,
         "plateau_coords": [0, n_samples],
         "data": emg,
@@ -322,44 +388,15 @@ def _demo_session() -> DemoSession:
             }
         ],
     }
-    return DemoSession(data, sampling_rate, missed_peak, inspect_peak)
-
-
-def _decomposition_iterations(sampling_rate: int):
-    """Illustrative convergence of one source, with its true silhouette."""
-    rng = np.random.default_rng(5)
-    n_samples = int(DURATION_S * sampling_rate)
-    force = _force_profile(n_samples, sampling_rate)
-    trains = [
-        _discharge_times(force, threshold, sampling_rate, rng)
-        for threshold in THRESHOLDS
-    ]
-    start = int(FORCE_KNOTS_S[1] * sampling_rate)
-    segment = slice(start, start + 25600)
-
-    def pulses(unit: int, level: float) -> np.ndarray:
-        events = trains[unit]
-        heights = level * rng.normal(1.0, 0.04, len(events))
-        return _pulse_train(n_samples, events, heights)[segment]
-
-    target = pulses(SOURCE_UNITS[1][0], 1.4)
-    confound = pulses(SOURCE_UNITS[2][0], 1.1) + pulses(SOURCE_UNITS[3][0], 0.9)
-    noise = rng.normal(0.0, 1.0, (2, len(target)))
-    for iteration, weight in ((1, 0.3), (5, 0.55), (11, 0.8), (18, 1.0)):
-        source = (
-            weight * target
-            + (1.0 - weight) * (confound + 0.25 * noise[0])
-            + 0.035 * noise[1]
-        )
-        peaks, _ = sp_signal.find_peaks(
-            source, height=0.5 * source.max(), distance=int(0.02 * sampling_rate)
-        )
-        spike_train = np.zeros((len(source), 1), dtype=bool)
-        spike_train[peaks, 0] = True
-        silhouette = float(
-            np.ravel(tb_props.get_silhouette_measure(spike_train, source[:, None]))[0]
-        )
-        yield iteration, source, peaks, silhouette
+    return DemoSession(
+        data,
+        sampling_rate,
+        false_peak,
+        missed_peak,
+        true_peak,
+        edit_top,
+        iterations,
+    )
 
 
 # ── Capture ──────────────────────────────────────────────────────────────────
@@ -420,12 +457,43 @@ def _edition_marks(window: MainWindow) -> dict[str, tuple[float, ...]]:
         "sil": _rect(window, quality._r_sil),
         "cov": _rect(window, quality._r_cov),
         "split": _rect(window, edition.btn_split_unit),
-        "add": _rect(window, edition.btn_sel_add),
-        "unit": _rect(window, edition.mu_combo),
+        "recalc": _rect(window, edition.btn_recalc_filter),
     }
     if edition.btn_confirm_split.isVisible():
         marks["confirm"] = _rect(window, edition.btn_confirm_split)
     return marks
+
+
+def _pulse_mark(window: MainWindow, sample: int, fs: int) -> tuple[float, float]:
+    """Window position of the tip of one pulse of the current unit."""
+    edition = window.edition_tab
+    source = edition._current_mu().source
+    return _plot_point(
+        window, edition.source_plot, sample / fs, float(source[sample]) ** 2
+    )
+
+
+def _box(
+    window: MainWindow,
+    sample: int,
+    fs: int,
+    low: float,
+    high: float,
+    half_width_s: float,
+) -> tuple[tuple[float, float, float, float], dict[str, tuple[float, float]]]:
+    """Selection box around one pulse tip, in plot units and window pixels.
+
+    *low* and *high* bound the box as fractions of the pulse's squared height.
+    """
+    edition = window.edition_tab
+    height = float(edition._current_mu().source[sample]) ** 2
+    t = sample / fs
+    box = (t - half_width_s, t + half_width_s, low * height, high * height)
+    plot = edition.source_plot
+    return box, {
+        "box_start": _plot_point(window, plot, box[0], box[3]),
+        "box_end": _plot_point(window, plot, box[1], box[2]),
+    }
 
 
 def capture_shots() -> dict[str, Shot]:
@@ -461,9 +529,7 @@ def capture_shots() -> dict[str, Shot]:
     decomp_tab.start_btn.setEnabled(False)
     decomp_tab.stop_btn.setVisible(True)
     session = _demo_session()
-    for index, (iteration, source, peaks, silhouette) in enumerate(
-        _decomposition_iterations(session.sampling_rate)
-    ):
+    for index, (iteration, source, peaks, silhouette) in enumerate(session.iterations):
         decomp_tab._plot_source_realtime(source, peaks, iteration, silhouette)
         shots[f"decomp_{index}"] = Shot(_grab(window), decomp_marks)
 
@@ -474,49 +540,63 @@ def capture_shots() -> dict[str, Shot]:
     edition.file_loaded.emit()
     window.tabs.setCurrentWidget(edition)
     _set_sidebar_width(edition, 540)
-    edition.source_plot.setXRange(*SPLIT_VIEW_S, padding=0)
-    image = _grab(window)
-    shots["edit_merged"] = Shot(image, _edition_marks(window))
-
     fs = session.sampling_rate
-    source = session.data["pulse_trains"][0][0]
-    edition._inspect_spike_muap(session.inspect_peak)
     image = _grab(window)
-    marks = _edition_marks(window)
-    marks["spike"] = _plot_point(
-        window,
-        edition.source_plot,
-        session.inspect_peak / fs,
-        float(source[session.inspect_peak]) ** 2,
-    )
-    shots["edit_inspect"] = Shot(image, marks)
+    shots["edit_review"] = Shot(image, _edition_marks(window))
+
+    # Zoom the application itself from the whole contraction to the edits.
+    view = edition.source_plot.getViewBox()
+    (x0, x1), (_bottom, top) = view.viewRange()
+    centre, width = (x0 + x1) / 2, x1 - x0
+    edit_centre = sum(EDIT_VIEW_S) / 2
+    edit_width = EDIT_VIEW_S[1] - EDIT_VIEW_S[0]
+    for step in range(1, ZOOM_STEPS + 1):
+        u = step / ZOOM_STEPS
+        u = u * u * (3 - 2 * u)
+        span = width * (edit_width / width) ** u
+        middle = centre + (edit_centre - centre) * u
+        view.setRange(
+            xRange=(middle - span / 2, middle + span / 2),
+            yRange=(0.0, top + (session.edit_top - top) * u),
+            padding=0,
+        )
+        shots[f"edit_zoom_{step}"] = Shot(_grab(window), _edition_marks(window))
+
+    for name, sample in (
+        ("edit_inspect_true", session.true_peak),
+        ("edit_inspect_false", session.false_peak),
+    ):
+        edition._inspect_spike_muap(sample)
+        image = _grab(window)
+        marks = _edition_marks(window) | {"spike": _pulse_mark(window, sample, fs)}
+        shots[name] = Shot(image, marks)
     edition._handle_escape()
 
-    edition.btn_split_unit.click()
-    image = _grab(window)
-    shots["edit_split_preview"] = Shot(image, _edition_marks(window))
-    edition.btn_confirm_split.click()
-    image = _grab(window)
-    shots["edit_split_done"] = Shot(image, _edition_marks(window))
+    delete_box, marks = _box(window, session.false_peak, fs, 0.3, 1.7, 0.035)
+    edition.btn_sel_delete.setChecked(True)
+    shots["edit_delete_armed"] = Shot(_grab(window), _edition_marks(window) | marks)
+    edition._apply_selection_delete(*delete_box)
+    shots["edit_deleted"] = Shot(_grab(window), _edition_marks(window) | marks)
 
-    gap = session.missed_peak / fs
-    edition.source_plot.setXRange(
-        gap - ADD_VIEW_HALF_WIDTH_S, gap + ADD_VIEW_HALF_WIDTH_S, padding=0
-    )
-    image = _grab(window)
-    shots["edit_add_view"] = Shot(image, _edition_marks(window))
+    add_box, marks = _box(window, session.missed_peak, fs, 0.6, 1.35, 0.02)
     edition.btn_sel_add.setChecked(True)
-    image = _grab(window)
-    height = float(source[session.missed_peak]) ** 2
-    box = (gap - 0.035, gap + 0.035, 0.6 * height, 1.3 * height)
-    marks = _edition_marks(window)
-    marks["box_start"] = _plot_point(window, edition.source_plot, box[0], box[3])
-    marks["box_end"] = _plot_point(window, edition.source_plot, box[1], box[2])
-    marks["peak"] = _plot_point(window, edition.source_plot, gap, height)
-    shots["edit_add_armed"] = Shot(image, marks)
-    edition._apply_selection_add(*box)
-    image = _grab(window)
-    shots["edit_add_done"] = Shot(image, marks | _edition_marks(window))
+    shots["edit_add_armed"] = Shot(_grab(window), _edition_marks(window) | marks)
+    edition._apply_selection_add(*add_box)
+    shots["edit_added"] = Shot(_grab(window), _edition_marks(window) | marks)
+    edition.btn_sel_add.setChecked(False)
+
+    edition.btn_recalc_filter.click()
+    shots["edit_recalculated"] = Shot(_grab(window), _edition_marks(window))
+
+    edition.btn_reviewed.click()
+    edition.btn_next_unreviewed.click()
+    view.enableAutoRange(axis=view.YAxis)
+    edition.source_plot.setXRange(*SPLIT_VIEW_S, padding=0)
+    shots["edit_merged"] = Shot(_grab(window), _edition_marks(window))
+    edition.btn_split_unit.click()
+    shots["edit_split_preview"] = Shot(_grab(window), _edition_marks(window))
+    edition.btn_confirm_split.click()
+    shots["edit_split_done"] = Shot(_grab(window), _edition_marks(window))
 
     vis = window.vis_tab
     window.tabs.setCurrentWidget(vis)
