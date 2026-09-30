@@ -48,6 +48,7 @@ cuda = [
     "torch>=2.11.0",
 ]
 dev = [
+    "imageio-ffmpeg>=0.6",
     "pillow>=11.0",
     "ruff>=0.16.8",
 ]
@@ -94,6 +95,7 @@ include = ["scd_app*"]
 [tool.setuptools.package-data]
 scd_app = [
     "gui/style/fonts/*.ttf",
+    "gui/style/icons/*.svg",
     "resources/loaders_configs/*.yaml",
     "resources/examples/*.json",
     "resources/examples/*.mat",
@@ -111,6 +113,7 @@ dev = [
     "pillow>=11.0",
     "ruff>=0.16.8",
     "pytest>=8.0",
+    "imageio-ffmpeg>=0.6",
 ]
 
 [tool.ruff]

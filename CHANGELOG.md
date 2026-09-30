@@ -15,6 +15,11 @@ All notable changes to SCD Edition are documented here.
   autocorrelation whitening when the decomposition used it, centre the EMG
   before the saved whitening matrix, and fit any missing whitening on the
   plateau with the recorded method.
+- Draw combo-box arrows as chevrons instead of small squares, show metric names
+  such as "MUAP stability" in full, and show the ampersand in "Review & Apply".
+- Refresh the README demo and screenshots from a realistic synthetic
+  contraction rendered with native glyphs, and let `scripts/capture_demo.py`
+  also export square and portrait MP4 videos.
 
 ## 0.1.0 — 2026-09-19
 

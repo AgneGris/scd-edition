@@ -97,7 +97,6 @@ class _MetricRow(QWidget):
 
         self._lbl = QLabel(label + ":")
         self._lbl.setStyleSheet(self._LABEL_STYLE)
-        self._lbl.setFixedWidth(90)
 
         self._val = QLabel("—")
         self._val.setStyleSheet(self._VALUE_STYLE)
@@ -107,6 +106,13 @@ class _MetricRow(QWidget):
 
         lay.addWidget(self._lbl)
         lay.addWidget(self._val, stretch=1)
+
+    def label_width_hint(self) -> int:
+        self._lbl.ensurePolished()
+        return self._lbl.sizeHint().width()
+
+    def set_label_width(self, width: int):
+        self._lbl.setFixedWidth(width)
 
     def set_value(self, text: str, color: str | None = None):
         self._val.setText(text)
@@ -149,11 +155,19 @@ class _Section(QGroupBox):
         self._inner.setColumnStretch(0, 1)
         self._inner.setColumnStretch(1, 1)
         self._count = 0
+        self._columns: dict[int, list[_MetricRow]] = {}
 
     def add_row(self, row: _MetricRow):
         grid_row, grid_col = divmod(self._count, 2)
         self._inner.addWidget(row, grid_row, grid_col)
         self._count += 1
+        # One label width per column keeps the values aligned; sizing it to
+        # the longest label avoids truncating names such as "MUAP stability".
+        column = self._columns.setdefault(grid_col, [])
+        column.append(row)
+        width = max(r.label_width_hint() for r in column)
+        for r in column:
+            r.set_label_width(width)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

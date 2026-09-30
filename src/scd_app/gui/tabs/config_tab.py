@@ -1097,7 +1097,8 @@ class ConfigTab(QWidget):
         return group
 
     def _create_summary_section(self) -> QGroupBox:
-        group = QGroupBox("3. Review & Apply")
+        # "&&" renders a literal ampersand; a single "&" marks a mnemonic.
+        group = QGroupBox("3. Review && Apply")
         group.setStyleSheet(self._group_style())
 
         layout = QVBoxLayout(group)

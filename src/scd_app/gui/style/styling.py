@@ -219,6 +219,9 @@ def set_style_sheet(widget, font_type="Lexend"):
     Clean, professional styling optimized for data visualization applications.
     """
     font_family = load_font(font_type=font_type)
+    # Qt style sheets cannot draw CSS border triangles, so the combo-box
+    # arrow is an image; the SVG strokes match text_dim and foreground.
+    icon_dir = (Path(__file__).parent / "icons").as_posix()
 
     return widget.setStyleSheet(
         f"""
@@ -373,14 +376,13 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QComboBox::down-arrow {{
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {COLORS["text_dim"]};
-                margin-right: 8px;
+                image: url({icon_dir}/chevron-down.svg);
+                width: 12px;
+                height: 8px;
             }}
 
             QComboBox::down-arrow:hover {{
-                border-top: 6px solid {COLORS["foreground"]};
+                image: url({icon_dir}/chevron-down-hover.svg);
             }}
 
             QComboBox QAbstractItemView {{

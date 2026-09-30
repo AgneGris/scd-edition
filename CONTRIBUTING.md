@@ -59,6 +59,11 @@ uv run --extra cuda pytest tests/test_otb4_loader.py
 ```
 
 The GUI smoke tests run headlessly by setting `QT_QPA_PLATFORM=offscreen`.
+The README demo and screenshots are regenerated from the real interface with
+`uv run python scripts/capture_demo.py`; add `--video-dir export/linkedin` to
+also render the MP4 videos. Run it in a desktop session rather than offscreen,
+which draws the interface's symbol glyphs as empty boxes.
+
 Changes to loaders should include a small synthetic fixture and tests for
 malformed input. Changes to scientific calculations should include numerical
 regression tests and a clear source or rationale.
