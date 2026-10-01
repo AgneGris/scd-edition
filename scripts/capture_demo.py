@@ -35,7 +35,7 @@ import numpy as np
 import torch
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPen
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSplitter, QWidget
 from scd.models.timestamping import spike_triggered_average
@@ -105,8 +105,9 @@ SCREENSHOTS = {
     "configuration": "config",
     "decomposition": "decomp_3",
     "edition": "edit_split_preview",
-    "visualisation": "vis_idr",
+    "visualisation": "vis_idr_screenshot",
 }
+SCREENSHOT_LINE_SCALE = 3.5  # IDR and force traces in the visualisation screenshot
 
 Rect = tuple[float, float, float, float]
 
@@ -445,6 +446,14 @@ def _set_sidebar_width(tab: QWidget, width: int) -> None:
             return
 
 
+def _thicken_curves(plot, factor: float) -> None:
+    """Widen every curve of a plot, which stays so until it is re-rendered."""
+    for item in plot.listDataItems():
+        pen = QPen(item.opts["pen"])
+        pen.setWidthF(pen.widthF() * factor)
+        item.setPen(pen)
+
+
 def _edition_marks(window: MainWindow) -> dict[str, tuple[float, ...]]:
     edition = window.edition_tab
     quality = edition.quality_bar
@@ -612,6 +621,9 @@ def capture_shots() -> dict[str, Shot]:
                 "idr_tab": _tab_rect(window, tab_bar, 1),
             },
         )
+    # The README screenshot alone gets thicker traces, legible at full width.
+    _thicken_curves(vis._idr_plot, SCREENSHOT_LINE_SCALE)
+    shots["vis_idr_screenshot"] = Shot(_grab(window))
 
     edition._undo_stack.clear()
     edition._set_dirty(False)
