@@ -524,6 +524,55 @@ def test_reset_view_empty_full_source_window_uses_safe_fallback():
     app.processEvents()
 
 
+def test_plateau_only_filter_recalculation_keeps_the_plateau_window():
+    from scd_app.core.mu_model import MotorUnit
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array([10, 30], dtype=np.int64),
+        source=np.zeros(50),
+        port_name="Grid 1",
+        mu_filter=np.ones(2),
+    )
+    tab._ports = {"Grid 1": [unit]}
+    tab._current_port = "Grid 1"
+    tab._current_mu_idx = 0
+    tab._fsamp = 1000.0
+    tab._start_sample = 100
+    tab._end_sample = 150
+    tab._full_source_mode = False
+    tab._filter_recalc_available = True
+    tab._original_decomp_data = {
+        "peel_off_sequence": [
+            [{"accepted_unit_idx": 0, "timestamps": unit.timestamps.copy()}]
+        ]
+    }
+    tab._raw_port_channels["Grid 1"] = np.zeros((2, 200))
+    full_source = np.arange(200, dtype=float)
+
+    with patch(
+        "scd_app.gui.tabs.edition_tab.recalculate_unit_filter",
+        return_value=(np.ones(2), full_source, np.array([110, 130])),
+    ) as recalculate:
+        tab._recalculate_filter()
+
+    np.testing.assert_array_equal(
+        recalculate.call_args.kwargs["edited_timestamps_abs"], [110, 130]
+    )
+    np.testing.assert_array_equal(unit.source, full_source[100:150])
+    np.testing.assert_array_equal(unit.timestamps, [10, 30])
+    # The markers still sit on their spikes
+    np.testing.assert_array_equal(unit.source[unit.timestamps], [110, 130])
+
+    tab._props_timer.stop()
+    tab._set_dirty(False)
+    tab.close()
+    app.processEvents()
+
+
 def test_saved_plateau_session_reopens_with_same_muap_template():
     from scd_app.core.mu_properties import MUProperties
     from scd_app.gui.tabs.edition_tab import EditionTab

@@ -1,10 +1,15 @@
 """Characterization tests for Edition's persisted session format."""
 
 import numpy as np
+import pytest
 
 from scd_app.core.mu_model import MotorUnit
 from scd_app.core.mu_properties import MUProperties
-from scd_app.io.decomposition_loader import CURRENT_SCHEMA_VERSION, GUI_FORMAT
+from scd_app.io.decomposition_loader import (
+    CURRENT_SCHEMA_VERSION,
+    GUI_FORMAT,
+    migrate_and_validate_decomposition,
+)
 from scd_app.io.edition_session import (
     EditionSaveState,
     build_edition_save_data,
@@ -241,6 +246,57 @@ def test_stable_motor_unit_ids_survive_save_and_reload():
 
     assert saved["motor_unit_ids"] == [[0, 2]]
     assert [motor_unit.id for motor_unit in loaded.motor_units] == [0, 2]
+
+
+@pytest.mark.parametrize(
+    "timestamps",
+    [
+        [10, 60, 180],  # before and after the plateau
+        [60, 100, 130],  # after it only, like early absolute timestamps
+    ],
+)
+def test_full_source_spikes_outside_the_plateau_survive_save_and_reload(timestamps):
+    unit = MotorUnit(
+        id=0,
+        timestamps=np.array(timestamps, dtype=np.int64),
+        source=np.zeros(200),
+        port_name="Grid 1",
+    )
+    saved = build_edition_save_data(
+        EditionSaveState(
+            ports={"Grid 1": [unit]},
+            sampling_rate=1000.0,
+            start_sample=20,
+            end_sample=120,
+            full_source_mode=True,
+            edit_history=[],
+            notes=[],
+            original_decomposition={
+                "data": np.zeros((2, 200)),
+                "plateau_coords": [20, 120],
+            },
+        )
+    )
+
+    reloaded = migrate_and_validate_decomposition(saved)
+    np.testing.assert_array_equal(
+        reloaded["discharge_times"][0][0], np.array(timestamps) - 20
+    )
+
+    loaded = load_edition_port(
+        port_index=0,
+        port_name="Grid 1",
+        decomposition=reloaded,
+        emg_full=None,
+        start_sample=20,
+        end_sample=120,
+        full_port_results={},
+        channel_offset=0,
+        full_source_mode=True,
+        sampling_rate=1000.0,
+        property_computer=lambda **_kwargs: [MUProperties(n_spikes=3)],
+    )
+    np.testing.assert_array_equal(loaded.motor_units[0].timestamps, timestamps)
 
 
 def test_load_port_exposes_active_channel_grid_positions():

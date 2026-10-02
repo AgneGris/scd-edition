@@ -102,6 +102,7 @@ from scd_app.io.edition_session import (
     normalise_notes,
     notes_for_unit,
     remap_note_tags,
+    sync_peel_sequence_to_discharge_times,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class EditionTab(QWidget):
         self._end_sample: int = 0
         self._full_source_mode: bool = False
         self._redetect_timestamps: bool = True
+        self._recalculate_filters: bool = True
 
         self._undo_stack: dict[tuple, list[UndoAction]] = {}
         self._redo_stack: dict[tuple, list[UndoAction]] = {}
@@ -1618,6 +1620,7 @@ class EditionTab(QWidget):
             "_end_sample",
             "_full_source_mode",
             "_redetect_timestamps",
+            "_recalculate_filters",
             "_undo_stack",
             "_redo_stack",
             "_edit_history",
@@ -1730,31 +1733,41 @@ class EditionTab(QWidget):
             if isinstance(port_lineage, list)
             for lineage in port_lineage
         )
-        if has_split_units:
-            # Keep manually cleaned split sources authoritative on load.
-            # Individual recalculation preserves the A-then-B peel order and
-            # uses the current curated timestamp trains.
-            data["skip_filter_recalc"] = True
-            QMessageBox.information(
-                self,
-                "Filters Not Recalculated",
-                "This file contains split motor units, so filters were not "
-                "recalculated on load.\n\n"
-                "Use Recalc Filter [F] to recalculate individual units.",
-            )
-        elif data.get("skip_filter_recalc"):
-            reply = QMessageBox.question(
-                self,
-                "Recalculate Filters?",
-                "This file was previously edited.\n\nDo you want to recalculate the filters for each motor unit?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                data["skip_filter_recalc"] = False
-
         can_full, _ = supports_full_source_computation(data)
-        if can_full and not data.get("skip_filter_recalc"):
+        recalculate_filters = True
+        redetect_timestamps = True
+
+        if data.get("skip_filter_recalc") and can_full:
+            # Edited file: show the full recording with the saved spike trains.
+            data["skip_filter_recalc"] = False
+            redetect_timestamps = False
+            # Older files still have the original trains in the peel-off sequence.
+            sync_peel_sequence_to_discharge_times(data)
+
+            if has_split_units:
+                # Split units keep their saved filters.
+                recalculate_filters = False
+                QMessageBox.information(
+                    self,
+                    "Filters Not Recalculated",
+                    "This file contains split motor units, so filters were not "
+                    "recalculated on load.\n\n"
+                    "Use Recalc Filter [F] to recalculate individual units.",
+                )
+            else:
+                reply = QMessageBox.question(
+                    self,
+                    "Recalculate Filters?",
+                    "This file was previously edited.\n\n"
+                    "Do you want to recalculate the filters for each motor unit?\n\n"
+                    "Yes — recalculate the filters from your edited spike trains.\n"
+                    "No  — keep the saved filters.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                recalculate_filters = reply == QMessageBox.StandardButton.Yes
+
+        elif can_full and not data.get("skip_filter_recalc"):
             pts = data.get("plateau_coords", data.get("selected_points"))
             raw = data.get("data")
             full_len = (
@@ -1778,16 +1791,13 @@ class EditionTab(QWidget):
                     QMessageBox.StandardButton.No,
                 )
                 redetect_timestamps = reply == QMessageBox.StandardButton.Yes
-            else:
-                redetect_timestamps = True
-        else:
-            redetect_timestamps = True
 
         previous_session = self._capture_session_state()
         try:
             # Set this before loading so _refresh_aux_controls sees the correct stem.
             self._loaded_path = path
             self._redetect_timestamps = redetect_timestamps
+            self._recalculate_filters = recalculate_filters
             self._load_decomposition_data(data)
             if not self._output_path_is_fixed:
                 self._output_path = None
@@ -1903,7 +1913,9 @@ class EditionTab(QWidget):
                     end_sample,
                     err,
                 ) = compute_all_full_sources(
-                    decomp_data, redetect_timestamps=self._redetect_timestamps
+                    decomp_data,
+                    redetect_timestamps=self._redetect_timestamps,
+                    recalculate_filters=self._recalculate_filters,
                 )
                 if err:
                     logger.warning("Full source warning: %s", err)
@@ -2627,17 +2639,20 @@ class EditionTab(QWidget):
                 replay_stop_before_local_idx=replay_stop_before,
             )
 
-            new_timestamps = (
-                new_ts_abs
-                if self._full_source_mode
-                else self._ts_to_plateau_local(new_ts_abs)
-            )
+            # The new source covers the whole recording; in plateau-only mode
+            # keep just the plateau window to match the timestamps.
+            if self._full_source_mode:
+                new_source = new_source_full
+                new_timestamps = new_ts_abs
+            else:
+                new_source = new_source_full[self._start_sample : self._end_sample]
+                new_timestamps = self._ts_to_plateau_local(new_ts_abs)
 
             old_source = mu.source.copy()
             old_filter = mu.mu_filter.copy() if mu.mu_filter is not None else None
             old_timestamps = mu.timestamps.copy()
 
-            mu.source = new_source_full
+            mu.source = new_source
             mu.mu_filter = new_filter
             mu.timestamps = new_timestamps
 
@@ -2650,7 +2665,7 @@ class EditionTab(QWidget):
                     new_timestamps=new_timestamps,
                     old_source=old_source,
                     old_filter=old_filter,
-                    new_source=new_source_full,
+                    new_source=new_source,
                     new_filter=new_filter,
                 )
             )
