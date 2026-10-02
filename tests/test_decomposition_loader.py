@@ -139,6 +139,55 @@ def test_migrates_legacy_absolute_timestamps_to_plateau_local():
     np.testing.assert_array_equal(migrated["discharge_times"][0][0], [2, 6])
 
 
+def test_keeps_spikes_after_the_plateau_in_versioned_files():
+    # Without schema_version these would be shifted, as in the test above.
+    edited = _native_result()
+    edited["schema_version"] = CURRENT_SCHEMA_VERSION
+    edited["plateau_coords"] = [100, 110]
+    edited["data"] = np.zeros((2, 300))
+    edited["discharge_times"] = [[np.array([102, 106])]]
+
+    migrated = migrate_and_validate_decomposition(edited)
+
+    np.testing.assert_array_equal(migrated["discharge_times"][0][0], [102, 106])
+
+
+def test_negative_timestamps_are_not_read_as_absolute():
+    edited = _native_result()
+    edited["plateau_coords"] = [100, 110]
+    edited["data"] = np.zeros((2, 300))
+    # On its own, the second unit would be read as early absolute timestamps.
+    edited["discharge_times"] = [[np.array([-100, 5, 199]), np.array([102, 106])]]
+    edited["pulse_trains"] = [[np.arange(10, dtype=float)] * 2]
+
+    migrated = migrate_and_validate_decomposition(edited)
+
+    np.testing.assert_array_equal(migrated["discharge_times"][0][0], [-100, 5, 199])
+    np.testing.assert_array_equal(migrated["discharge_times"][0][1], [102, 106])
+
+
+@pytest.mark.parametrize("timestamps", [[-101, 5], [5, 200]])
+def test_rejects_timestamps_outside_the_recording(timestamps):
+    edited = _native_result()
+    edited["schema_version"] = CURRENT_SCHEMA_VERSION
+    edited["plateau_coords"] = [100, 110]
+    edited["data"] = np.zeros((2, 300))
+    edited["discharge_times"] = [[np.array(timestamps)]]
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="outside the recording"):
+        migrate_and_validate_decomposition(edited)
+
+
+def test_rejects_out_of_source_timestamps_without_a_recording():
+    edited = _native_result()
+    edited["schema_version"] = CURRENT_SCHEMA_VERSION
+    edited["plateau_coords"] = [100, 110]
+    edited["discharge_times"] = [[np.array([-90, 5])]]
+
+    with pytest.raises(UnsupportedDecompositionFormat, match="outside its source"):
+        migrate_and_validate_decomposition(edited)
+
+
 def test_converts_upstream_scd_output_and_preserves_provenance(tmp_path):
     source_path = tmp_path / "sub-05_task-pull10_muscle-FD_raw_run-00_scddict.pkl"
     commit = "910f36d1274f832e74992fae266cf91d46b2d94d"
@@ -286,6 +335,108 @@ def test_rejects_upstream_bad_channel_outside_signal():
 
     with pytest.raises(UnsupportedDecompositionFormat, match="outside"):
         convert_scd_output(raw)
+
+
+def _replayable_scd_result():
+    raw = _raw_scd_result_with_signal()
+    raw["preprocessing_config"]["peel_off_window_size"] = 5
+    return convert_scd_output(raw)
+
+
+@pytest.mark.parametrize(
+    ("has_split_units", "answer_yes"),
+    [(False, True), (False, False), (True, False)],
+)
+def test_edited_file_reloads_on_the_full_recording_with_the_saved_edits(
+    tmp_path, monkeypatch, has_split_units, answer_yes
+):
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    edited = _replayable_scd_result()
+    # Unit 0 edited: spike at 80 deleted, one added before the plateau (50).
+    # The peel sequence still has the original trains, as in older files.
+    edited["discharge_times"][0][0] = np.array([-30, 20, 140])
+    edited["skip_filter_recalc"] = True
+    if has_split_units:
+        edited["unit_lineage"] = [
+            [
+                {"peel_group_id": 0, "split_parent_id": 0, "split_label": "A"},
+                {"peel_group_id": 0, "split_parent_id": 0, "split_label": "B"},
+            ]
+        ]
+    path = tmp_path / "edited.pkl"
+    with path.open("wb") as handle:
+        pickle.dump(edited, handle)
+
+    asked = []
+    reply = (
+        QMessageBox.StandardButton.Yes if answer_yes else QMessageBox.StandardButton.No
+    )
+
+    def question(_parent, title, *_args):
+        asked.append(title)
+        return reply
+
+    monkeypatch.setattr(QMessageBox, "question", question)
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args: None)
+    monkeypatch.setattr(
+        QMessageBox, "critical", lambda _parent, _title, text, *_args: pytest.fail(text)
+    )
+
+    app = QApplication.instance() or QApplication([])
+    tab = EditionTab()
+    assert tab.load_from_path(path) is True
+
+    assert asked == ([] if has_split_units else ["Recalculate Filters?"])
+    assert tab._full_source_mode is True
+    units = tab._ports["SCD"]
+    np.testing.assert_array_equal(units[0].timestamps, [20, 70, 190])
+    np.testing.assert_array_equal(units[1].timestamps, [90, 150, 210])
+    keeps_saved_filters = not answer_yes
+    for unit, saved_filter in zip(units, edited["mu_filters"][0], strict=True):
+        assert np.array_equal(unit.mu_filter, saved_filter) == keeps_saved_filters
+
+    tab.close()
+    app.processEvents()
+
+
+def test_full_replay_can_keep_the_saved_filters():
+    from scd_app.core.filter_recalculation import compute_all_full_sources
+
+    def unit_0_source(saved_filter, recalculate_filters):
+        data = _replayable_scd_result()
+        data["mu_filters"][0][0] = saved_filter
+        results, _, _, err = compute_all_full_sources(
+            data,
+            device=torch.device("cpu"),
+            redetect_timestamps=False,
+            recalculate_filters=recalculate_filters,
+        )
+        assert err == ""
+        return results[0][0][0]
+
+    ones = np.ones((6, 1))
+    ramp = np.arange(6, dtype=float).reshape(6, 1)
+    # The saved filter is only used when filters are not recalculated
+    assert not np.allclose(unit_0_source(ones, False), unit_0_source(ramp, False))
+    np.testing.assert_array_equal(unit_0_source(ones, True), unit_0_source(ramp, True))
+
+
+def test_full_replay_fails_when_a_unit_has_no_peel_off_step():
+    from scd_app.core.filter_recalculation import compute_all_full_sources
+
+    data = _replayable_scd_result()
+    del data["peel_off_sequence"][0][1]
+
+    results, start, end, err = compute_all_full_sources(
+        data, device=torch.device("cpu"), redetect_timestamps=False
+    )
+
+    assert results == {}
+    assert (start, end) == (50, 250)
+    assert "unit 1" in err
 
 
 def test_redetection_ignores_filter_transient_inside_edge_mask():

@@ -65,6 +65,7 @@ def migrate_and_validate_decomposition(data: dict) -> dict:
     """Upgrade a native session to the current schema and validate its shape."""
     migrated = dict(data)
     schema_version = migrated.get("schema_version")
+    has_schema_version = schema_version is not None
     if schema_version is None:
         # Files written before a formal schema existed used the floating-point
         # ``version`` field. Their in-memory structure is the basis of schema 1.
@@ -86,10 +87,10 @@ def migrate_and_validate_decomposition(data: dict) -> dict:
 
     migrated["format"] = GUI_FORMAT
     migrated["schema_version"] = CURRENT_SCHEMA_VERSION
-    return _validate_native_decomposition(migrated)
+    return _validate_native_decomposition(migrated, has_schema_version)
 
 
-def _validate_native_decomposition(data: dict) -> dict:
+def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict:
     """Return normalized data or raise before the Edition UI changes state."""
     ports = _outer_list(data.get("ports"), "ports")
     if not ports:
@@ -149,6 +150,7 @@ def _validate_native_decomposition(data: dict) -> dict:
 
     normalized_timestamps = []
     normalized_sources = []
+    out_of_source_units = []
     for port_index, port_name in enumerate(ports):
         timestamp_items = _unit_items(
             discharge_ports[port_index],
@@ -191,31 +193,27 @@ def _validate_native_decomposition(data: dict) -> dict:
                     f"Port {port_name!r}, unit {unit_index} has non-integer timestamps."
                 )
             timestamp_array = np.rint(timestamp_values).astype(np.int64)
-            if timestamp_array.size and int(timestamp_array.min()) < 0:
-                raise UnsupportedDecompositionFormat(
-                    f"Port {port_name!r}, unit {unit_index} has negative timestamps."
-                )
-            if timestamp_array.size and int(timestamp_array.max()) >= source_array.size:
-                # Some early files stored absolute timestamps beside a
-                # plateau-local source. Migrate those coordinates explicitly.
-                local = timestamp_array - plateau_start
-                if (
-                    plateau_start > 0
-                    and int(local.min()) >= 0
-                    and int(local.max()) < source_array.size
-                ):
-                    timestamp_array = local
-                else:
-                    raise UnsupportedDecompositionFormat(
-                        f"Port {port_name!r}, unit {unit_index} has timestamps "
-                        "outside its source signal."
-                    )
+            if timestamp_array.size and (
+                int(timestamp_array.min()) < 0
+                or int(timestamp_array.max()) >= source_array.size
+            ):
+                out_of_source_units.append((port_index, unit_index))
 
             port_timestamps.append(timestamp_array)
             port_sources.append(source_array)
 
         normalized_timestamps.append(port_timestamps)
         normalized_sources.append(port_sources)
+
+    _resolve_out_of_source_timestamps(
+        normalized_timestamps,
+        normalized_sources,
+        out_of_source_units,
+        ports,
+        plateau_start,
+        _recording_samples(data.get("data")),
+        has_schema_version,
+    )
 
     raw_motor_unit_ids = data.get("motor_unit_ids")
     if raw_motor_unit_ids is None:
@@ -358,6 +356,57 @@ def _validate_native_decomposition(data: dict) -> dict:
     if not isinstance(normalized.get("edit_history", []), list):
         normalized["edit_history"] = []
     return normalized
+
+
+def _resolve_out_of_source_timestamps(
+    timestamps: list[list[np.ndarray]],
+    sources: list[list[np.ndarray]],
+    out_of_source_units: list[tuple[int, int]],
+    ports: list[str],
+    plateau_start: int,
+    recording_samples: int | None,
+    has_schema_version: bool,
+) -> None:
+    """Shift or check, in place, units with timestamps outside their source.
+
+    Spikes added outside the plateau are saved as negative or past the end of
+    the source, and are kept if they fit inside the recording. Early files
+    without schema_version stored absolute timestamps; these are shifted to
+    plateau-local when every such unit then fits the plateau.
+    """
+    if not has_schema_version and plateau_start > 0:
+        shifted = [
+            (port_index, unit_index, timestamps[port_index][unit_index] - plateau_start)
+            for port_index, unit_index in out_of_source_units
+        ]
+        if all(
+            int(local.min()) >= 0
+            and int(local.max()) < sources[port_index][unit_index].size
+            for port_index, unit_index, local in shifted
+        ):
+            for port_index, unit_index, local in shifted:
+                timestamps[port_index][unit_index] = local
+            return
+
+    for port_index, unit_index in out_of_source_units:
+        unit = f"Port {ports[port_index]!r}, unit {unit_index}"
+        if recording_samples is None:
+            raise UnsupportedDecompositionFormat(
+                f"{unit} has timestamps outside its source signal."
+            )
+        absolute = timestamps[port_index][unit_index] + plateau_start
+        if int(absolute.min()) < 0 or int(absolute.max()) >= recording_samples:
+            raise UnsupportedDecompositionFormat(
+                f"{unit} has timestamps outside the recording."
+            )
+
+
+def _recording_samples(value: Any) -> int | None:
+    """Number of samples (the longer axis) in a stored 2D recording, else None."""
+    shape = getattr(value, "shape", None)
+    if shape is None or len(shape) != 2 or min(shape) == 0:
+        return None
+    return int(max(shape))
 
 
 def _outer_list(value: Any, field_name: str) -> list:

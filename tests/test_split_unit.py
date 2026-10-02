@@ -49,6 +49,7 @@ def _tab_with_two_units():
     tab._ports = {"Grid A": [merged, later]}
     tab._current_port = "Grid A"
     tab._current_mu_idx = 0
+    tab._end_sample = 100
     tab._original_decomp_data = {
         "peel_off_sequence": [
             [
@@ -496,9 +497,37 @@ def test_deleting_one_split_child_keeps_shared_peel_step():
     app.processEvents()
 
 
-@pytest.mark.parametrize("has_split_units", [True, False])
-def test_loading_edited_file_explains_or_asks_about_filter_recalc(
-    tmp_path, has_split_units
+def _edited_file(*, has_split_units: bool, has_recording: bool = True) -> dict:
+    data = {
+        "skip_filter_recalc": True,
+        "discharge_times": [[np.array([5, 15, 25])]],
+        # Older files still have the original train here
+        "peel_off_sequence": [
+            [{"accepted_unit_idx": 0, "timestamps": np.array([5, 25])}]
+        ],
+        "preprocessing_config": [{}],
+        "mu_filters": [[np.ones(2)]],
+        "unit_lineage": [
+            [
+                {
+                    "peel_group_id": 0,
+                    "split_parent_id": 0 if has_split_units else None,
+                    "split_label": "A" if has_split_units else None,
+                }
+            ]
+        ],
+    }
+    if has_recording:
+        data["data"] = np.zeros((1, 40))
+    return data
+
+
+@pytest.mark.parametrize(
+    ("has_split_units", "answer_yes", "recalculate_filters"),
+    [(True, False, False), (False, True, True), (False, False, False)],
+)
+def test_edited_file_opens_on_the_full_recording(
+    tmp_path, has_split_units, answer_yes, recalculate_filters
 ):
     from PySide6.QtWidgets import QMessageBox
 
@@ -508,19 +537,10 @@ def test_loading_edited_file_explains_or_asks_about_filter_recalc(
     tab = EditionTab()
     path = tmp_path / "edited.pkl"
     path.write_bytes(b"placeholder")
-    split_parent_id = 0 if has_split_units else None
-    data = {
-        "skip_filter_recalc": True,
-        "unit_lineage": [
-            [
-                {
-                    "peel_group_id": 0,
-                    "split_parent_id": split_parent_id,
-                    "split_label": "A" if has_split_units else None,
-                }
-            ]
-        ],
-    }
+    data = _edited_file(has_split_units=has_split_units)
+    reply = (
+        QMessageBox.StandardButton.Yes if answer_yes else QMessageBox.StandardButton.No
+    )
 
     with (
         patch(
@@ -529,21 +549,55 @@ def test_loading_edited_file_explains_or_asks_about_filter_recalc(
         ),
         patch.object(tab, "_load_decomposition_data"),
         patch.object(QMessageBox, "information") as information,
-        patch.object(
-            QMessageBox,
-            "question",
-            return_value=QMessageBox.StandardButton.No,
-        ) as question,
+        patch.object(QMessageBox, "question", return_value=reply) as question,
     ):
         assert tab.load_from_path(path) is True
 
-    assert data["skip_filter_recalc"] is True
+    # Full recording, with the saved spike trains
+    assert data["skip_filter_recalc"] is False
+    assert tab._redetect_timestamps is False
+    assert tab._recalculate_filters is recalculate_filters
+    np.testing.assert_array_equal(
+        data["peel_off_sequence"][0][0]["timestamps"], [5, 15, 25]
+    )
     if has_split_units:
         information.assert_called_once()
         question.assert_not_called()
     else:
         information.assert_not_called()
         question.assert_called_once()
+        assert question.call_args.args[1] == "Recalculate Filters?"
+
+    tab.close()
+    app.processEvents()
+
+
+@pytest.mark.parametrize("has_split_units", [True, False])
+def test_edited_file_without_recording_opens_on_the_plateau(tmp_path, has_split_units):
+    from PySide6.QtWidgets import QMessageBox
+
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    path = tmp_path / "edited.pkl"
+    path.write_bytes(b"placeholder")
+    data = _edited_file(has_split_units=has_split_units, has_recording=False)
+
+    with (
+        patch(
+            "scd_app.gui.tabs.edition_tab.load_decomposition_file",
+            return_value=data,
+        ),
+        patch.object(tab, "_load_decomposition_data"),
+        patch.object(QMessageBox, "information") as information,
+        patch.object(QMessageBox, "question") as question,
+    ):
+        assert tab.load_from_path(path) is True
+
+    assert data["skip_filter_recalc"] is True
+    information.assert_not_called()
+    question.assert_not_called()
 
     tab.close()
     app.processEvents()

@@ -20,6 +20,11 @@ All notable changes to SCD Edition are documented here.
 - Refresh the README demo and screenshots from a realistic synthetic
   contraction rendered with native glyphs, and let `scripts/capture_demo.py`
   also export square and portrait MP4 videos.
+- Keep spikes added outside the plateau when reloading an edited session.
+- Always reopen edited files on the full recording, including files with
+  split units.
+- Fix Recalc Filter shifting every spike marker when only the plateau is
+  shown.
 
 ## 0.1.0 — 2026-09-19
 

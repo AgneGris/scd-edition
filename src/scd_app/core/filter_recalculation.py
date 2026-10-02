@@ -631,6 +631,7 @@ def compute_all_full_sources(
     decomp_data: dict,
     device: torch.device | None = None,
     redetect_timestamps: bool = True,
+    recalculate_filters: bool = True,
 ) -> tuple[dict[int, list[tuple[np.ndarray | None, np.ndarray | None]]], int, int, str]:
     """Compute full-length sources and timestamps for all MUs.
 
@@ -638,6 +639,9 @@ def compute_all_full_sources(
     full source via source_to_timestamps.  When False the stored plateau-local
     timestamps are used as-is (offset to absolute coords) — faster and avoids
     picking up artefact peaks outside the decomposition window.
+
+    recalculate_filters: when True (default) recompute each filter from its
+    spike train.  When False the saved filters are used.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -774,7 +778,7 @@ def compute_all_full_sources(
             stop_before_local_idx=None,
             square_source=square_source,
             use_saved_peel_timestamps=True,
-            recalculate_filters=True,
+            recalculate_filters=recalculate_filters,
             redetect_timestamps=redetect_timestamps,
             edge_mask=edge_mask,
         )
@@ -786,6 +790,18 @@ def compute_all_full_sources(
         logger.info("Port '%s': %d/%d full sources computed", port_name, n_ok, n_units)
 
         ch_offset += n_ch
+
+    # Every unit needs a source, otherwise the editor falls back to plateau-only.
+    for port_idx, results in port_results.items():
+        for unit_idx, result in enumerate(results):
+            if result[0] is None:
+                return (
+                    {},
+                    start_sample,
+                    end_sample,
+                    f"No full-length source for port {ports[port_idx]!r}, "
+                    f"unit {unit_idx}.",
+                )
 
     return port_results, start_sample, end_sample, ""
 

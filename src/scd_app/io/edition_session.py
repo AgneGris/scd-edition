@@ -580,6 +580,20 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
     return save_data
 
 
+def sync_peel_sequence_to_discharge_times(decomposition: dict) -> None:
+    """Copy the saved discharge trains into the peel sequence, in place.
+
+    The replay on load shows each unit at its peel sequence timestamps, and
+    older files still have the original trains there.
+    """
+    peel_sequence = decomposition.get("peel_off_sequence")
+    if peel_sequence is not None:
+        decomposition["peel_off_sequence"] = _sync_peel_sequence_timestamps(
+            peel_sequence,
+            decomposition["discharge_times"],
+        )
+
+
 def _sync_peel_sequence_timestamps(
     peel_sequence,
     discharge_times: list[list[np.ndarray]],
