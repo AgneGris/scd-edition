@@ -67,9 +67,7 @@ ACCENT = "#4a9eff"
 FONT_DIR = Path(__file__).resolve().parents[1] / "src/scd_app/gui/style/fonts"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PUBLISHED_EMG = REPOSITORY_ROOT / "examples/scd-demo/emg.mat"
-PUBLISHED_DECOMPOSITION = (
-    REPOSITORY_ROOT / "examples/scd-demo/emg_decomp_output.pkl"
-)
+PUBLISHED_DECOMPOSITION = REPOSITORY_ROOT / "examples/scd-demo/emg_decomp_output.pkl"
 
 # Synthetic recording: a 10 s trapezoidal contraction at 30 % MVC.
 DURATION_S = 10.0
@@ -706,9 +704,10 @@ def capture_overview_shots() -> dict[str, Shot]:
     fs = int(data["sampling_rate"])
     segment_start = 3 * fs
     segment_stop = min(segment_start + 3 * fs, source.size)
-    segment_peaks = timestamps[
-        (timestamps >= segment_start) & (timestamps < segment_stop)
-    ] - segment_start
+    segment_peaks = (
+        timestamps[(timestamps >= segment_start) & (timestamps < segment_stop)]
+        - segment_start
+    )
     silhouette = float(data["scd_metadata"]["silhouettes"][0])
     decomp_tab._plot_source_realtime(
         source[segment_start:segment_stop],
