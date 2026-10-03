@@ -1,7 +1,7 @@
 """Characterization tests for Edition duplicate scans."""
 
 from contextlib import ExitStack
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 from PySide6.QtWidgets import QApplication
@@ -283,3 +283,68 @@ def test_within_scan_reports_skipped_and_failed_ports():
     assert result.n_compared == 2
     assert result.skipped_ports == ["Single"]
     assert result.failed_ports == ["Pair"]
+
+
+def test_within_scan_skips_work_above_the_limit():
+    first = _motor_unit(0, sil=0.9, stability=0.8)
+    second = _motor_unit(1, sil=0.8, stability=0.7)
+    compute_agreement = Mock()
+
+    result = scan_within_port_duplicates(
+        {"Grid 1": [first, second]},
+        2048.0,
+        max_roa_work=1,
+        agreement_computer=compute_agreement,
+    )
+
+    compute_agreement.assert_not_called()
+    assert result.work_limited == {"Grid 1": 64 * 2**2}
+    assert result.pairs == []
+    assert result.failed_ports == []
+
+
+def test_cross_scan_skips_work_above_the_limit():
+    first = _motor_unit(0, sil=0.9, stability=0.8)
+    second = _motor_unit(0, sil=0.8, stability=0.7)
+    compute_agreement = Mock()
+
+    result = scan_cross_port_duplicates(
+        {"Grid A": [first], "Grid B": [second]},
+        2048.0,
+        max_roa_work=1,
+        agreement_computer=compute_agreement,
+    )
+
+    compute_agreement.assert_not_called()
+    assert result.work_limited == {"Grid A ↔ Grid B": 64}
+    assert result.pairs == []
+    assert result.failed_ports == []
+
+
+def test_spike_edit_invalidates_duplicate_scan_results():
+    app = _application()
+    tab = EditionTab()
+    edited = _motor_unit(0, sil=0.9, stability=0.8)
+    sibling = _motor_unit(1, sil=0.8, stability=0.7)
+    other = _motor_unit(0, sil=0.85, stability=0.75)
+    edited.within_duplicate_role = "keep"
+    sibling.within_duplicate_role = "delete"
+    sibling.within_duplicate_partners = [("Grid A", 0, 0.4)]
+    other.within_duplicate_role = "keep"
+    edited.cross_duplicate_role = "keep"
+    other.cross_duplicate_role = "delete"
+    other.cross_duplicate_partners = [("Grid A", 0, 0.5)]
+    tab._ports = {"Grid A": [edited, sibling], "Grid B": [other]}
+    tab._current_port = "Grid A"
+
+    assert tab._invalidate_duplicate_scans_after_edit() is True
+
+    assert edited.within_duplicate_role is None
+    assert sibling.within_duplicate_role is None
+    assert sibling.within_duplicate_partners == []
+    assert other.within_duplicate_role == "keep"
+    assert all(unit.cross_duplicate_role is None for unit in (edited, sibling, other))
+    assert other.cross_duplicate_partners == []
+
+    tab.close()
+    app.processEvents()

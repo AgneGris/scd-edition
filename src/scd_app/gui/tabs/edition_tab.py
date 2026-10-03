@@ -47,6 +47,7 @@ from scd_app.core.auto_editor import MIN_SPIKES, auto_edit
 from scd_app.core.constants import ROA_THRESHOLD
 from scd_app.core.duplicate_detection import (
     DUPLICATE_DETECTION_AVAILABLE,
+    MAX_ROA_WORK,
     clear_duplicate_roles,
     scan_cross_port_duplicates,
     scan_within_port_duplicates,
@@ -97,6 +98,7 @@ from scd_app.io.decomposition_loader import load_decomposition_file
 from scd_app.io.edition_session import (
     EditionSaveState,
     build_edition_save_data,
+    ensure_split_peel_steps,
     load_edition_port,
     normalise_aux_channels,
     normalise_notes,
@@ -630,7 +632,8 @@ class EditionTab(QWidget):
         self.btn_flag_within_dups.setToolTip(
             "Check every unit in the selected grid/probe, including flagged units,\n"
             "and suggest lower-priority duplicates for deletion.\n"
-            "Uses rate-of-agreement (threshold 0.3) to identify duplicates."
+            "Uses rate-of-agreement (threshold 0.3) to identify duplicates.\n"
+            "Very large comparisons are skipped to keep the app responsive."
         )
         self.btn_flag_within_dups.clicked.connect(self._flag_within_duplicates)
         self.btn_flag_within_dups.setEnabled(False)
@@ -641,7 +644,8 @@ class EditionTab(QWidget):
         self.btn_flag_cross_dups.setToolTip(
             "Optionally check every unit across different grids/probes, including\n"
             "flagged units, and suggest lower-priority duplicates for deletion.\n"
-            "Uses rate-of-agreement (threshold 0.3) to identify duplicates."
+            "Uses rate-of-agreement (threshold 0.3) to identify duplicates.\n"
+            "Very large comparisons are skipped to keep the app responsive."
         )
         self.btn_flag_cross_dups.clicked.connect(self._flag_cross_duplicates)
         self.btn_flag_cross_dups.setEnabled(False)
@@ -1741,31 +1745,30 @@ class EditionTab(QWidget):
             # Edited file: show the full recording with the saved spike trains.
             data["skip_filter_recalc"] = False
             redetect_timestamps = False
+            # Legacy split sessions may have only one accepted peel entry for
+            # both children. Expand it before the full A-then-B replay.
+            ensure_split_peel_steps(data)
             # Older files still have the original trains in the peel-off sequence.
             sync_peel_sequence_to_discharge_times(data)
 
-            if has_split_units:
-                # Split units keep their saved filters.
-                recalculate_filters = False
-                QMessageBox.information(
-                    self,
-                    "Filters Not Recalculated",
-                    "This file contains split motor units, so filters were not "
-                    "recalculated on load.\n\n"
-                    "Use Recalc Filter [F] to recalculate individual units.",
-                )
-            else:
-                reply = QMessageBox.question(
-                    self,
-                    "Recalculate Filters?",
-                    "This file was previously edited.\n\n"
-                    "Do you want to recalculate the filters for each motor unit?\n\n"
-                    "Yes — recalculate the filters from your edited spike trains.\n"
-                    "No  — keep the saved filters.",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                recalculate_filters = reply == QMessageBox.StandardButton.Yes
+            split_explanation = (
+                "\n\nSplit units will be processed in A-to-B peel order, using "
+                "their saved edited spike trains."
+                if has_split_units
+                else ""
+            )
+            reply = QMessageBox.question(
+                self,
+                "Recalculate Filters?",
+                "This file was previously edited.\n\n"
+                "Do you want to recalculate the filters for each motor unit?\n\n"
+                "Yes — recalculate the filters from your edited spike trains.\n"
+                "No  — keep the saved filters."
+                f"{split_explanation}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            recalculate_filters = reply == QMessageBox.StandardButton.Yes
 
         elif can_full and not data.get("skip_filter_recalc"):
             pts = data.get("plateau_coords", data.get("selected_points"))
@@ -3278,13 +3281,19 @@ class EditionTab(QWidget):
             current_port,
             -1,
             flagged_by_port=result.flagged_by_port,
+            work_limited=result.work_limited,
         )
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
         self._update_quality_panel(self._current_mu())
-        self._update_status(
-            f"{current_port}: suggested {n_flagged} duplicate MU(s) for deletion"
-        )
+        if result.failed_ports or result.work_limited:
+            self._update_status(
+                f"{current_port}: duplicate scan incomplete — see report"
+            )
+        else:
+            self._update_status(
+                f"{current_port}: suggested {n_flagged} duplicate MU(s) for deletion"
+            )
         self._show_duplicate_report(
             title=f"Duplicates in {current_port}",
             scope=f"within {current_port}",
@@ -3293,6 +3302,7 @@ class EditionTab(QWidget):
             n_compared=result.n_compared,
             skipped_ports=result.skipped_ports,
             failed_ports=result.failed_ports,
+            work_limited=result.work_limited,
             skipped_reason="fewer than 2 MUs",
         )
         self._mark_modified()
@@ -3317,13 +3327,17 @@ class EditionTab(QWidget):
             "",
             -1,
             flagged_by_port=result.flagged_by_port,
+            work_limited=result.work_limited,
         )
         self._refresh_mu_combo()
         self.mu_combo.setCurrentIndex(self._current_mu_idx)
         self._update_quality_panel(self._current_mu())
-        self._update_status(
-            f"Cross-port duplicates: flagged {n_flagged} MU(s) for deletion"
-        )
+        if result.failed_ports or result.work_limited:
+            self._update_status("Cross-port duplicate scan incomplete — see report")
+        else:
+            self._update_status(
+                f"Cross-port duplicates: flagged {n_flagged} MU(s) for deletion"
+            )
         self._show_duplicate_report(
             title="Cross-Port Duplicates",
             scope="across grids/probes",
@@ -3332,6 +3346,7 @@ class EditionTab(QWidget):
             n_compared=result.n_compared,
             skipped_ports=result.skipped_ports,
             failed_ports=result.failed_ports,
+            work_limited=result.work_limited,
             skipped_reason="",
         )
         self._mark_modified()
@@ -3346,6 +3361,7 @@ class EditionTab(QWidget):
         n_compared: int,
         skipped_ports: list,
         failed_ports: list,
+        work_limited: dict[str, int],
         skipped_reason: str,
     ):
         """Summarise a duplicate scan in a dialog so the result isn't missed.
@@ -3364,6 +3380,11 @@ class EditionTab(QWidget):
                 else "no units are loaded"
             )
             summary = f"Nothing to compare {scope} — {reason}."
+        elif n_pairs == 0 and (failed_ports or work_limited):
+            summary = (
+                f"The duplicate scan did not complete {scope}. "
+                "No duplicate pairs were found in the comparisons that finished."
+            )
         elif n_pairs == 0:
             summary = (
                 f"No duplicate pairs found {scope}.<br><br>"
@@ -3416,11 +3437,21 @@ class EditionTab(QWidget):
             detail_lines.append(
                 "Comparison failed (see log): " + ", ".join(failed_ports)
             )
+        if work_limited:
+            detail_lines.append("")
+            detail_lines.append(
+                f"Skipped because the estimated RoA work exceeded {MAX_ROA_WORK:,}:"
+            )
+            detail_lines.extend(
+                f"    {name}: {work:,}" for name, work in work_limited.items()
+            )
 
         box = QMessageBox(self)
         box.setWindowTitle(title)
         box.setIcon(
-            QMessageBox.Icon.Warning if failed_ports else QMessageBox.Icon.Information
+            QMessageBox.Icon.Warning
+            if failed_ports or work_limited
+            else QMessageBox.Icon.Information
         )
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(summary)
@@ -3546,6 +3577,7 @@ class EditionTab(QWidget):
     def _on_data_changed(self, msg: str = "Modified", source_changed: bool = False):
         """Immediate cheap updates; expensive recompute+render deferred 120 ms."""
         self._clear_spike_muap_inspection()
+        duplicate_scans_cleared = self._invalidate_duplicate_scans_after_edit()
         mu = self._current_mu()
         review_reset = False
         if mu is not None:
@@ -3576,12 +3608,33 @@ class EditionTab(QWidget):
         self._update_split_button_state()
         if review_reset:
             msg = f"{msg} — review reset"
+        if duplicate_scans_cleared:
+            msg = f"{msg} — rerun duplicate checks"
         self._update_status(msg)
         self._mark_modified()
 
         # Accumulate source_changed across rapid edits, then flush once
         self._pending_source_changed |= source_changed
         self._props_timer.start()
+
+    def _invalidate_duplicate_scans_after_edit(self) -> bool:
+        """Clear duplicate suggestions made stale by a spike/source edit."""
+        current_units = self._ports.get(self._current_port or "", [])
+        had_within = any(
+            unit.within_duplicate_role is not None
+            or bool(unit.within_duplicate_partners)
+            for unit in current_units
+        )
+        all_units = [unit for units in self._ports.values() for unit in units]
+        had_cross = any(
+            unit.cross_duplicate_role is not None or bool(unit.cross_duplicate_partners)
+            for unit in all_units
+        )
+        if current_units:
+            clear_duplicate_roles({self._current_port or "": current_units}, "within")
+        if all_units:
+            clear_duplicate_roles(self._ports, "cross")
+        return had_within or had_cross
 
     def _mark_modified(self) -> None:
         """Record a persisted state change without forcing a plot recomputation."""

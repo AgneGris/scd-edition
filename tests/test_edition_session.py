@@ -14,6 +14,7 @@ from scd_app.io.edition_session import (
     EditionSaveState,
     build_edition_save_data,
     ensure_list_of_arrays,
+    ensure_split_peel_steps,
     load_edition_port,
     normalise_aux_channels,
     note_tag,
@@ -22,10 +23,41 @@ from scd_app.io.edition_session import (
 )
 
 
+def test_legacy_split_peel_step_is_expanded_before_replay():
+    decomposition = {
+        "discharge_times": [
+            [
+                np.array([10, 30, 50]),
+                np.array([20, 40, 60]),
+                np.array([15, 35, 55]),
+            ]
+        ],
+        "unit_lineage": [
+            [
+                {"peel_group_id": 0, "split_parent_id": 0, "split_label": "A"},
+                {"peel_group_id": 0, "split_parent_id": 0, "split_label": "B"},
+                {"peel_group_id": 1, "split_parent_id": None, "split_label": None},
+            ]
+        ],
+        "peel_off_sequence": [
+            [
+                {"accepted_unit_idx": 0, "timestamps": np.array([10, 20, 30])},
+                {"accepted_unit_idx": 2, "timestamps": np.array([15, 35, 55])},
+            ]
+        ],
+    }
+
+    ensure_split_peel_steps(decomposition)
+
+    entries = decomposition["peel_off_sequence"][0]
+    assert [entry["accepted_unit_idx"] for entry in entries] == [0, 1, 2]
+    np.testing.assert_array_equal(entries[0]["timestamps"], [10, 30, 50])
+    np.testing.assert_array_equal(entries[1]["timestamps"], [20, 40, 60])
+
+
 def test_save_dict_preserves_full_source_and_provenance_contract():
     properties = MUProperties(n_spikes=2, reliability_override=False)
     properties.muap_grid = np.ones((1, 1, 3))
-    properties.duplicate_candidates = {2: 0.91}
     unit = MotorUnit(
         id=0,
         timestamps=np.array([110, 125], dtype=np.int64),
@@ -72,7 +104,6 @@ def test_save_dict_preserves_full_source_and_provenance_contract():
     assert saved["reviewed_mus"] == {"Grid 1": [0]}
     assert saved["reliability_overrides"] == {"Grid 1": {0: False}}
     assert "muap_grid" not in saved["mu_properties"][0][0]
-    assert "duplicate_candidates" not in saved["mu_properties"][0][0]
     assert saved["edit_history"] == [{"event": "delete_spike"}]
     assert saved["notes"] == ["reviewed"]
     assert saved["data"] is original_data

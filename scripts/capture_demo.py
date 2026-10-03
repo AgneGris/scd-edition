@@ -1,4 +1,4 @@
-"""Capture the real Qt interface for the README demo, screenshots and video.
+"""Capture the real Qt interface for the README assets and overview figure.
 
 The window is rendered by the platform's native Qt plugin at twice its
 logical resolution but is never shown on screen. The "offscreen" plugin must
@@ -18,7 +18,12 @@ the second merges two units to demonstrate the split preview. No
 decomposition is run: the Decomposition frames show one filter converging
 from a random start onto the first unit.
 
+The four-panel overview instead combines the two published SCD demo files in
+memory. It uses the real decomposition in every plotted panel and attaches the
+matching raw EMG so the Edition panel can display a real motor-unit waveform.
+
     uv run python scripts/capture_demo.py                  # GIF + screenshots
+    uv run python scripts/capture_demo.py --overview-only  # four-tab figure
     uv run python scripts/capture_demo.py --video-dir export/linkedin
 """
 
@@ -33,19 +38,21 @@ os.environ.setdefault("QT_SCALE_FACTOR", str(2))
 
 import numpy as np
 import torch
-from PIL import Image, ImageColor, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QPen
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSplitter, QWidget
 from scd.models.timestamping import spike_triggered_average
 from scipy import signal as sp_signal
+from scipy.io import loadmat
 
 from scd_app._vendor.motor_unit_toolbox import props as tb_props
 from scd_app.core.filter_recalculation import preprocess_emg, snap_to_local_peak
 from scd_app.examples import bundled_example_config
 from scd_app.gui.main_window import MainWindow, _configure_example_on_startup
 from scd_app.gui.style.styling import COLORS, set_style_sheet
+from scd_app.io.decomposition_loader import load_decomposition_file
 
 WINDOW_WIDTH = 1600
 WINDOW_HEIGHT = 1080
@@ -58,6 +65,11 @@ FINAL_STEP_DURATION_MS = 3400
 TRANSITION_DURATION_MS = 140
 ACCENT = "#4a9eff"
 FONT_DIR = Path(__file__).resolve().parents[1] / "src/scd_app/gui/style/fonts"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+PUBLISHED_EMG = REPOSITORY_ROOT / "examples/scd-demo/emg.mat"
+PUBLISHED_DECOMPOSITION = (
+    REPOSITORY_ROOT / "examples/scd-demo/emg_decomp_output.pkl"
+)
 
 # Synthetic recording: a 10 s trapezoidal contraction at 30 % MVC.
 DURATION_S = 10.0
@@ -108,6 +120,7 @@ SCREENSHOTS = {
     "visualisation": "vis_idr_screenshot",
 }
 SCREENSHOT_LINE_SCALE = 3.5  # IDR and force traces in the visualisation screenshot
+OVERVIEW_LINE_SCALE = 5.0
 
 Rect = tuple[float, float, float, float]
 
@@ -449,9 +462,22 @@ def _set_sidebar_width(tab: QWidget, width: int) -> None:
 def _thicken_curves(plot, factor: float) -> None:
     """Widen every curve of a plot, which stays so until it is re-rendered."""
     for item in plot.listDataItems():
-        pen = QPen(item.opts["pen"])
-        pen.setWidthF(pen.widthF() * factor)
-        item.setPen(pen)
+        pen_value = item.opts.get("pen")
+        if pen_value is not None and hasattr(item, "setPen"):
+            pen = QPen(pen_value)
+            pen.setWidthF(max(1.0, pen.widthF()) * factor)
+            item.setPen(pen)
+        if item.opts.get("symbol") is not None and hasattr(item, "setSymbolSize"):
+            size = float(item.opts.get("symbolSize", 7))
+            item.setSymbolSize(max(size, size * factor**0.5))
+
+
+def _thicken_widget_curves(widget: QWidget, factor: float) -> None:
+    """Widen curves in every pyqtgraph plot below *widget*."""
+    plots = [widget, *widget.findChildren(QWidget)]
+    for plot in plots:
+        if hasattr(plot, "listDataItems"):
+            _thicken_curves(plot, factor)
 
 
 def _edition_marks(window: MainWindow) -> dict[str, tuple[float, ...]]:
@@ -631,6 +657,98 @@ def capture_shots() -> dict[str, Shot]:
     return shots
 
 
+def _published_example_data() -> dict:
+    """Return the published decomposition with its matching EMG attached.
+
+    The tracked decomposition intentionally avoids duplicating the 17 MiB raw
+    recording. The capture combines the two published files in memory so the
+    Edition panel can also show the real motor-unit waveform.
+    """
+    data = load_decomposition_file(PUBLISHED_DECOMPOSITION)
+    emg = np.asarray(loadmat(PUBLISHED_EMG, variable_names=["emg"])["emg"])
+    if emg.shape[0] > emg.shape[1]:
+        emg = emg.T
+    data["data"] = np.ascontiguousarray(emg)
+    data["skip_filter_recalc"] = True
+    data["electrodes"] = ["GR10MM0808"]
+    return data
+
+
+def capture_overview_shots() -> dict[str, Shot]:
+    """Capture all four tabs with the real, published SCD demo data."""
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("SCD-Edition overview capture")
+    set_style_sheet(app)
+    window = MainWindow()
+    window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    window.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+    window.show()
+    shots: dict[str, Shot] = {}
+
+    _configure_example_on_startup(window)
+    config_tab = window.config_tab
+    config_tab.path_edit.setText("examples/scd-demo/emg.mat")
+    config_tab.output_dir_edit.setText("scd-edition-output")
+    window.tabs.setCurrentWidget(config_tab)
+    shots["configuration"] = Shot(_grab(window))
+
+    config_tab._apply_config()
+    data = _published_example_data()
+
+    decomp_tab = window.decomp_tab
+    window.tabs.setCurrentWidget(decomp_tab)
+    _set_sidebar_width(decomp_tab, 450)
+    decomp_tab._set_params_enabled(False)
+    decomp_tab.start_btn.setEnabled(False)
+    decomp_tab.stop_btn.setVisible(True)
+    source = np.asarray(data["pulse_trains"][0][0]).ravel()
+    timestamps = np.asarray(data["discharge_times"][0][0], dtype=np.int64)
+    fs = int(data["sampling_rate"])
+    segment_start = 3 * fs
+    segment_stop = min(segment_start + 3 * fs, source.size)
+    segment_peaks = timestamps[
+        (timestamps >= segment_start) & (timestamps < segment_stop)
+    ] - segment_start
+    silhouette = float(data["scd_metadata"]["silhouettes"][0])
+    decomp_tab._plot_source_realtime(
+        source[segment_start:segment_stop],
+        segment_peaks,
+        iteration=10,
+        silhouette=silhouette,
+    )
+    _thicken_widget_curves(decomp_tab, OVERVIEW_LINE_SCALE)
+    shots["decomposition"] = Shot(_grab(window))
+
+    edition = window.edition_tab
+    edition._loaded_path = PUBLISHED_DECOMPOSITION
+    edition._load_decomposition_data(data)
+    edition._update_file_label()
+    edition.file_loaded.emit()
+    window.tabs.setCurrentWidget(edition)
+    _set_sidebar_width(edition, 540)
+    middle_spike = int(timestamps[len(timestamps) // 2])
+    edition.source_plot.setXRange(
+        middle_spike / fs - 1.4,
+        middle_spike / fs + 1.4,
+        padding=0,
+    )
+    edition._inspect_spike_muap(middle_spike)
+    _thicken_widget_curves(edition, OVERVIEW_LINE_SCALE)
+    shots["edition"] = Shot(_grab(window))
+
+    visualisation = window.vis_tab
+    window.tabs.setCurrentWidget(visualisation)
+    visualisation._inner_tabs.setCurrentIndex(1)
+    visualisation.on_tab_activated()
+    _thicken_widget_curves(visualisation, OVERVIEW_LINE_SCALE)
+    shots["visualisation"] = Shot(_grab(window))
+
+    edition._undo_stack.clear()
+    edition._set_dirty(False)
+    window.close()
+    return shots
+
+
 # ── README GIF and screenshots ───────────────────────────────────────────────
 
 
@@ -719,6 +837,57 @@ def _gif_palette(stills: list[Image.Image]) -> Image.Image:
     return palette
 
 
+def write_overview_figure(shots: dict[str, Shot], output: Path) -> None:
+    """Compose the four real-data tab captures into one labelled figure."""
+    panel_width, panel_height = WINDOW_WIDTH, WINDOW_HEIGHT
+    margin, column_gutter, row_gutter = 76, 76, 36
+    figure = Image.new(
+        "RGB",
+        (
+            2 * panel_width + 2 * margin + column_gutter,
+            2 * panel_height + 2 * margin + row_gutter,
+        ),
+        "white",
+    )
+    draw = ImageDraw.Draw(figure)
+    first_row_top = margin
+    second_row_top = first_row_top + panel_height + row_gutter
+    panels = (
+        ("A", "configuration", margin, first_row_top),
+        (
+            "B",
+            "decomposition",
+            margin + panel_width + column_gutter,
+            first_row_top,
+        ),
+        ("C", "edition", margin, second_row_top),
+        (
+            "D",
+            "visualisation",
+            margin + panel_width + column_gutter,
+            second_row_top,
+        ),
+    )
+    for label, name, left, top in panels:
+        panel = ImageOps.fit(
+            shots[name].image,
+            (panel_width, panel_height),
+            method=Image.Resampling.LANCZOS,
+        )
+        figure.paste(panel, (left, top))
+        draw.text(
+            (left - 12, top),
+            label,
+            font=_font("Lexend-Bold.ttf", 52),
+            fill="black",
+            anchor="rt",
+        )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.save(output, format="PNG", optimize=True, compress_level=9)
+    print(f"Wrote {output} ({output.stat().st_size / 1024:.0f} KiB)", flush=True)
+
+
 def write_readme_assets(
     shots: dict[str, Shot], output: Path, screenshots_dir: Path
 ) -> None:
@@ -772,14 +941,30 @@ def main() -> None:
         help="also render the social-media videos (MP4) into this directory",
     )
     parser.add_argument(
+        "--overview",
+        type=Path,
+        default=Path("docs/figures/scd-edition-tabs.png"),
+        help="four-panel overview figure path",
+    )
+    parser.add_argument(
+        "--overview-only",
+        action="store_true",
+        help="capture only the four-panel real-data overview",
+    )
+    parser.add_argument(
         "--aspect",
         choices=("square", "portrait", "both"),
         default="both",
         help="video aspect ratio: square 1:1, portrait 4:5, or both",
     )
     args = parser.parse_args()
+    if args.overview_only:
+        write_overview_figure(capture_overview_shots(), args.overview)
+        return
+
     shots = capture_shots()
     write_readme_assets(shots, args.output, args.screenshots_dir)
+    write_overview_figure(capture_overview_shots(), args.overview)
     if args.video_dir is not None:
         from demo_video import render_video
 

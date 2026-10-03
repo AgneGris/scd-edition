@@ -532,7 +532,6 @@ def build_edition_save_data(state: EditionSaveState) -> dict:
                 continue
             properties = asdict(motor_unit.props)
             properties.pop("muap_grid", None)
-            properties.pop("duplicate_candidates", None)
             properties["is_reliable"] = motor_unit.props.is_reliable
             properties["auto_reliable"] = motor_unit.props.auto_reliable
             port_properties.append(properties)
@@ -592,6 +591,157 @@ def sync_peel_sequence_to_discharge_times(decomposition: dict) -> None:
             peel_sequence,
             decomposition["discharge_times"],
         )
+
+
+def ensure_split_peel_steps(decomposition: dict) -> None:
+    """Expand legacy one-step split groups before a full replay.
+
+    Current Edition files store split A and B as consecutive accepted peel
+    entries. Early split sessions could retain only one entry for the shared
+    parent stage. Full-source replay needs one entry per child so A can be
+    peeled before B is estimated.
+    """
+    peel_sequence = decomposition.get("peel_off_sequence")
+    discharge_times = decomposition.get("discharge_times")
+    unit_lineage = decomposition.get("unit_lineage")
+    if not all(
+        isinstance(value, list)
+        for value in (peel_sequence, discharge_times, unit_lineage)
+    ):
+        return
+
+    per_port = bool(peel_sequence) and isinstance(peel_sequence[0], list)
+    if per_port:
+        rebuilt = []
+        for port_index, entries in enumerate(peel_sequence):
+            timestamps = (
+                discharge_times[port_index]
+                if port_index < len(discharge_times)
+                and isinstance(discharge_times[port_index], list)
+                else []
+            )
+            lineage = (
+                unit_lineage[port_index]
+                if port_index < len(unit_lineage)
+                and isinstance(unit_lineage[port_index], list)
+                else []
+            )
+            units = _split_replay_units(
+                port_index,
+                timestamps,
+                lineage,
+                accepted_offset=0,
+            )
+            rebuilt.append(_expand_split_peel_entries(entries, units))
+        decomposition["peel_off_sequence"] = rebuilt
+        return
+
+    units = []
+    accepted_offset = 0
+    for port_index, timestamps in enumerate(discharge_times):
+        port_timestamps = timestamps if isinstance(timestamps, list) else []
+        lineage = (
+            unit_lineage[port_index]
+            if port_index < len(unit_lineage)
+            and isinstance(unit_lineage[port_index], list)
+            else []
+        )
+        units.extend(
+            _split_replay_units(
+                port_index,
+                port_timestamps,
+                lineage,
+                accepted_offset=accepted_offset,
+            )
+        )
+        accepted_offset += len(port_timestamps)
+    decomposition["peel_off_sequence"] = _expand_split_peel_entries(
+        peel_sequence,
+        units,
+    )
+
+
+def _split_replay_units(
+    port_index: int,
+    timestamps: list,
+    lineage: list,
+    *,
+    accepted_offset: int,
+) -> list[dict]:
+    """Describe persisted split children in peel-replay coordinates."""
+    units = []
+    for local_index, unit_timestamps in enumerate(timestamps):
+        item = lineage[local_index] if local_index < len(lineage) else None
+        if not isinstance(item, Mapping) or item.get("split_parent_id") is None:
+            continue
+        label = item.get("split_label")
+        if label not in ("A", "B"):
+            continue
+        units.append(
+            {
+                "accepted_unit_idx": accepted_offset + local_index,
+                "group": (
+                    port_index,
+                    item.get("peel_group_id", local_index),
+                    item["split_parent_id"],
+                ),
+                "label": label,
+                "timestamps": np.asarray(unit_timestamps, dtype=np.int64).copy(),
+            }
+        )
+    return units
+
+
+def _expand_split_peel_entries(entries: list, units: list[dict]) -> list:
+    """Return ``entries`` with every legacy split group expanded A then B."""
+    groups: dict[tuple, list[dict]] = {}
+    for unit in units:
+        groups.setdefault(unit["group"], []).append(unit)
+
+    replacements: dict[int, list[dict]] = {}
+    replaced_positions: set[int] = set()
+    for children in groups.values():
+        if len(children) < 2:
+            continue
+        ordered = sorted(
+            children,
+            key=lambda child: (child["label"] not in ("A", "B"), child["label"]),
+        )
+        child_indices = {child["accepted_unit_idx"] for child in ordered}
+        positions = [
+            position
+            for position, entry in enumerate(entries)
+            if isinstance(entry, Mapping)
+            and entry.get("accepted_unit_idx") in child_indices
+        ]
+        present_indices = {
+            int(entries[position]["accepted_unit_idx"]) for position in positions
+        }
+        if child_indices <= present_indices or not positions:
+            continue
+
+        insert_at = min(positions)
+        template = dict(entries[insert_at])
+        replacements[insert_at] = [
+            {
+                **template,
+                "accepted_unit_idx": child["accepted_unit_idx"],
+                "timestamps": child["timestamps"],
+            }
+            for child in ordered
+        ]
+        replaced_positions.update(positions)
+
+    if not replacements:
+        return entries
+
+    rebuilt = []
+    for position, entry in enumerate(entries):
+        if position in replacements:
+            rebuilt.extend(replacements[position])
+        elif position not in replaced_positions:
+            rebuilt.append(entry)
+    return rebuilt
 
 
 def _sync_peel_sequence_timestamps(

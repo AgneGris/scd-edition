@@ -326,15 +326,6 @@ class MUPropertiesPanel(QFrame):
             )
             self._within_dup_label.setText(f"⚠ Within: {parts}")
             self._within_dup_label.setVisible(True)
-        elif props.duplicate_candidates:
-            ids = ", ".join(
-                f"MU{k} ({v:.0%})"
-                for k, v in sorted(
-                    props.duplicate_candidates.items(), key=lambda x: -x[1]
-                )
-            )
-            self._within_dup_label.setText(f"⚠ Dups: {ids}")
-            self._within_dup_label.setVisible(True)
         else:
             self._within_dup_label.setVisible(False)
 

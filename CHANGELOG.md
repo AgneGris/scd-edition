@@ -23,6 +23,10 @@ All notable changes to SCD Edition are documented here.
 - Keep spikes added outside the plateau when reloading an edited session.
 - Always reopen edited files on the full recording, including files with
   split units.
+- Offer filter recalculation when reopening edited files with split units,
+  preserving their sequential A-to-B peel order.
+- Run rate-of-agreement duplicate detection only when requested, skip scans
+  above a safe workload limit, and invalidate scan results after spike edits.
 - Fix Recalc Filter shifting every spike marker when only the plateau is
   shown.
 

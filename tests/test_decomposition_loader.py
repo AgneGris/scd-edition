@@ -345,7 +345,7 @@ def _replayable_scd_result():
 
 @pytest.mark.parametrize(
     ("has_split_units", "answer_yes"),
-    [(False, True), (False, False), (True, False)],
+    [(False, True), (False, False), (True, True), (True, False)],
 )
 def test_edited_file_reloads_on_the_full_recording_with_the_saved_edits(
     tmp_path, monkeypatch, has_split_units, answer_yes
@@ -389,7 +389,7 @@ def test_edited_file_reloads_on_the_full_recording_with_the_saved_edits(
     tab = EditionTab()
     assert tab.load_from_path(path) is True
 
-    assert asked == ([] if has_split_units else ["Recalculate Filters?"])
+    assert asked == ["Recalculate Filters?"]
     assert tab._full_source_mode is True
     units = tab._ports["SCD"]
     np.testing.assert_array_equal(units[0].timestamps, [20, 70, 190])

@@ -54,6 +54,13 @@ resources/loaders_configs/loader_dynamic.yaml
 # The redistributable example is intentionally packaged with the application.
 !src/scd_app/resources/examples/*.mat
 
+# The matching SCD demo decomposition is intentionally published with the repo.
+!examples/scd-demo/emg.mat
+!examples/scd-demo/emg_decomp_output.pkl
+
+# Generated documentation figure; rebuild with scripts/capture_demo.py.
+docs/figures/scd-edition-tabs.png
+
 # Output created by `scd-edition --example`.
 scd-edition-output/
 

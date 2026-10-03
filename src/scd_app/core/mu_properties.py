@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from scd_app._vendor.motor_unit_toolbox import props as tb_props
-from scd_app._vendor.motor_unit_toolbox import spike_comp as tb_spike
 from scd_app.core.constants import (
     COV_THRESHOLD_PCT,
     DR_MAX_HZ,
@@ -43,7 +42,6 @@ from scd_app.core.constants import (
     MIN_PEAK_SEP,
     MUAP_WIN_MS,
     RELIABILITY_CRITERIA,
-    ROA_THRESHOLD,
     SIL_THRESHOLD,
 )
 from scd_app.core.utils import to_numpy  # noqa: F401 — re-exported for callers
@@ -118,9 +116,6 @@ class MUProperties:
     # ── full MUAP array in grid layout  (rows × cols × win_samples) ───────
     #    stored here so the GUI can render it without re-computation
     muap_grid: np.ndarray | None = field(default=None, repr=False)
-
-    # ── RoA duplicate candidates  {other_mu_idx: roa_score} ────────────────
-    duplicate_candidates: dict[int, float] = field(default_factory=dict)
 
     @property
     def quality_flags(self) -> dict[str, bool]:
@@ -541,7 +536,6 @@ def compute_port_properties(
     grid_shape: tuple[int, int] | None,
     fsamp: float,
     win_ms: int = MUAP_WIN_MS,
-    roa_threshold: float = ROA_THRESHOLD,
 ) -> list[MUProperties]:
     """Compute all properties for every motor unit in a port.
 
@@ -553,7 +547,6 @@ def compute_port_properties(
         grid_shape:      (rows, cols), or None for stacked layout
         fsamp:           Sampling frequency in Hz
         win_ms:          MUAP window half-width in ms
-        roa_threshold:   Rate-of-agreement threshold for flagging duplicates
 
     Returns:
         List[MUProperties], one per MU in the same order as inputs.
@@ -628,20 +621,6 @@ def compute_port_properties(
             win_ms=win_ms,
         )
         results.append(p)
-
-    if _TOOLBOX_AVAILABLE and n_units > 1:
-        try:
-            roa, _ = tb_spike.rate_of_agreement_full(
-                spike_trains_ref=spike_mat,
-                spike_trains_test=spike_mat,
-                fs=fsamp_int,
-            )
-            for i in range(n_units):
-                for j in range(n_units):
-                    if i != j and roa[i, j] >= roa_threshold:
-                        results[i].duplicate_candidates[j] = float(roa[i, j])
-        except Exception as e:
-            logger.debug("Within-port RoA computation failed: %s", e)
 
     return results
 

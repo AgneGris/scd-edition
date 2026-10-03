@@ -90,3 +90,22 @@ def test_port_properties_populates_stability_without_toolbox(monkeypatch):
     )
 
     np.testing.assert_allclose(props[0].muap_template_stability, 1.0)
+
+
+def test_port_properties_do_not_run_or_store_duplicate_detection(monkeypatch):
+    timestamps = np.array([10, 30], dtype=np.int64)
+    source = np.zeros(64)
+    source[timestamps] = 1.0
+    monkeypatch.setattr(mu_properties, "_TOOLBOX_AVAILABLE", False)
+
+    props = mu_properties.compute_port_properties(
+        all_timestamps=[timestamps, timestamps.copy()],
+        all_sources=[source, source.copy()],
+        emg_port=None,
+        grid_positions=None,
+        grid_shape=None,
+        fsamp=1000.0,
+    )
+
+    assert len(props) == 2
+    assert all(not hasattr(unit_props, "duplicate_candidates") for unit_props in props)

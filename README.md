@@ -132,9 +132,9 @@ pip install -e .
 
 ## Two-minute example
 
-SCD Edition includes the 64-channel, 10-second example recording used by the
-SCD algorithm repository. Open it with its loader, sampling rate and electrode
-layout already filled in:
+SCD Edition includes a 64-channel, 10-second surface EMG example. Open the raw
+recording with its loader, sampling rate and electrode layout already filled
+in:
 
 ```bash
 scd-edition --example
@@ -150,6 +150,20 @@ Then:
 The example is for learning the workflow, not for benchmarking decomposition
 accuracy. See the [illustrated quick-start](docs/quickstart.md) or the executable
 [tutorial notebook](docs/tutorial.ipynb) for more detail.
+
+The raw recording and matching ten-unit demo decomposition are tracked together
+as [`examples/scd-demo/emg.mat`](examples/scd-demo/emg.mat) and
+[`examples/scd-demo/emg_decomp_output.pkl`](examples/scd-demo/emg_decomp_output.pkl).
+See the [example-data notes](examples/scd-demo/README.md) for the file contents
+and instructions for opening either the raw recording or completed
+decomposition.
+
+To explore Edition without running a new decomposition, open the completed
+`.pkl` from the **Edition** tab. This compact example stores the ten source
+signals and spike trains but does not embed another copy of the raw EMG, so
+MUAP display and filter recalculation are unavailable when it is opened by
+itself. The same example data are also used by the Swarm-Contrastive
+Decomposition project.
 
 ## Choosing a tool
 
@@ -371,7 +385,9 @@ This is the main editing environment. It shows one motor unit at a time.
     `✓*` / `✗*` in the unit dropdown. Right-click (or press `Shift+T`) to go
     back to the automatic verdict. Manual verdicts are saved with the session.
   - **MUAP amplitude, waveform length, peak and median frequency**
-  - **Duplicate warning** — if the current unit is very similar to another unit in the same port
+  - **Duplicate warning** — after an explicit duplicate scan, shows the
+    current unit's matched partners and whether it is suggested for keeping or
+    deletion
 
 MUAP template stability is the normalized correlation (0–1) between two
 spike-triggered average templates made from alternating discharges. It is
@@ -464,8 +480,28 @@ Shows the spike-triggered average for every EMG channel. Toggle between **stacke
 | **Mark Reviewed** | `M` | Marks or unmarks the current unit as manually reviewed. |
 | **Next Unreviewed** | `N` | Moves to the next unreviewed unit, including across ports. |
 | **Delete All Flagged Units** | — | Permanently removes flagged units from every port and clears undo/redo history. A confirmation lists the count for each affected port. |
-| **Check Duplicates in Current Port** | — | Compares every unit in the selected port, including flagged units, and suggests the lower-priority member of duplicate pairs for deletion. An existing flag cannot cause an unflagged partner to be suggested. |
-| **Check Duplicates Across Ports** | — | Optionally performs the same comparison across grids/probes. Use this only when ports may record overlapping motor-unit populations. |
+| **Check Duplicates in Current Port** | — | Runs rate-of-agreement on demand for every unit in the selected port, including flagged units, and suggests the lower-priority member of duplicate pairs for deletion. An existing flag cannot cause an unflagged partner to be suggested. Excessively large comparisons are skipped. |
+| **Check Duplicates Across Ports** | — | Optionally performs the same on-demand comparison across grids/probes. Use this only when ports may record overlapping motor-unit populations. Excessively large comparisons are skipped. |
+
+#### Duplicate detection
+
+Rate-of-agreement (RoA) is not calculated while a decomposition is loading or
+during ordinary MU-property updates. It runs only when you click one of the two
+duplicate-check buttons, using a 30% agreement threshold. This avoids making
+every load and spike edit pay the cost of a potentially large all-pairs
+comparison.
+
+Within one port, the estimated workload is the source length multiplied by the
+square of the unit count. Across ports, it is the source length multiplied by
+the two ports' unit counts. A comparison is skipped if that estimate exceeds
+1,000,000,000; the results dialog identifies every skipped or failed port or
+port pair instead of presenting an incomplete scan as a clean result.
+
+A scan only suggests and flags the lower-priority members of duplicate pairs;
+review the marked units before using **Delete All Flagged Units**. Changing a
+source or any spike timestamps makes previous agreement scores stale, so the
+app clears the current port's within-port results and all cross-port results.
+The status bar then asks you to rerun the duplicate checks.
 
 #### Saving
 
@@ -530,7 +566,19 @@ To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select
 
 SCD Edition files that contain the original EMG can replay peel-off and recalculate filters. Raw `swarm-contrastive-decomposition` output contains it too when saved with the package's default `save_data=True` (version 0.2.3 or later), so it gets the same treatment; output saved without the signal remains editable and can be saved from Edition, but filter/MUAP recalculation is unavailable. See [Decomposing with the SCD package, editing here](#decomposing-with-the-scd-package-editing-here).
 
-For compatible SCD Edition files, the app may ask whether to re-run peel-off replay on the full signal (recommended for the first load) or to use the stored timestamps as-is (faster; appropriate when reloading a previously edited file).
+When a previously edited file contains the original EMG, the app reopens it on
+the full recording, preserving saved spike edits even outside the original
+decomposition window, and asks whether to recalculate every motor-unit filter
+from the saved edited spike trains. Choose **No** (the default) to retain the
+saved filters, or **Yes** to re-estimate them during peel-off replay. The same
+choice is now offered when the edition contains split units: split A is
+processed before split B so B is estimated from the residual after A has been
+peeled at its curated timestamps. Legacy split sessions are upgraded to this
+two-step A-to-B replay when loaded.
+
+For an unedited decomposition that covered only part of the recording, a
+separate prompt asks whether to re-detect timestamps over the full signal or
+keep the timestamps from the original decomposition window.
 
 Saved Edition files can be reloaded in any order and remain fully editable.
 
@@ -741,6 +789,16 @@ public issue.
 Bug reports, format requests and code contributions are welcome. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development setup, test commands
 and the information to include in a useful report.
+
+The optional paper-style four-panel figure is generated from the real files in
+`examples/scd-demo`:
+
+```bash
+uv run python scripts/capture_demo.py --overview-only
+```
+
+It writes `docs/figures/scd-edition-tabs.png`. The PNG is intentionally
+gitignored; the capture code and example data are its reproducible source.
 
 ## License
 

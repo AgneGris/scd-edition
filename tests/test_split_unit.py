@@ -524,7 +524,12 @@ def _edited_file(*, has_split_units: bool, has_recording: bool = True) -> dict:
 
 @pytest.mark.parametrize(
     ("has_split_units", "answer_yes", "recalculate_filters"),
-    [(True, False, False), (False, True, True), (False, False, False)],
+    [
+        (True, True, True),
+        (True, False, False),
+        (False, True, True),
+        (False, False, False),
+    ],
 )
 def test_edited_file_opens_on_the_full_recording(
     tmp_path, has_split_units, answer_yes, recalculate_filters
@@ -560,13 +565,11 @@ def test_edited_file_opens_on_the_full_recording(
     np.testing.assert_array_equal(
         data["peel_off_sequence"][0][0]["timestamps"], [5, 15, 25]
     )
-    if has_split_units:
-        information.assert_called_once()
-        question.assert_not_called()
-    else:
-        information.assert_not_called()
-        question.assert_called_once()
-        assert question.call_args.args[1] == "Recalculate Filters?"
+    information.assert_not_called()
+    question.assert_called_once()
+    assert question.call_args.args[1] == "Recalculate Filters?"
+    message = question.call_args.args[2]
+    assert ("A-to-B peel order" in message) is has_split_units
 
     tab.close()
     app.processEvents()

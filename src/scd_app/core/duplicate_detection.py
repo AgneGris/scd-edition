@@ -22,6 +22,7 @@ from scd_app.core.mu_properties import build_spike_train_matrix
 logger = logging.getLogger(__name__)
 
 DUPLICATE_DETECTION_AVAILABLE = True
+MAX_ROA_WORK = 1_000_000_000
 
 DuplicateKind = Literal["within", "cross"]
 DuplicatePair = tuple[str, int, str, int, float]
@@ -37,6 +38,7 @@ class DuplicateScanResult:
     n_compared: int = 0
     skipped_ports: list[str] = field(default_factory=list)
     failed_ports: list[str] = field(default_factory=list)
+    work_limited: dict[str, int] = field(default_factory=dict)
 
     @property
     def n_flagged(self) -> int:
@@ -92,6 +94,7 @@ def scan_within_port_duplicates(
     sampling_rate: float,
     *,
     threshold: float = ROA_THRESHOLD,
+    max_roa_work: int = MAX_ROA_WORK,
     agreement_computer: AgreementComputer | None = None,
 ) -> DuplicateScanResult:
     """Find duplicate pairs within each port and flag lower-quality units."""
@@ -102,6 +105,7 @@ def scan_within_port_duplicates(
     pairs: list[DuplicatePair] = []
     skipped_ports = []
     failed_ports = []
+    work_limited = {}
     n_compared = 0
 
     for port_name, motor_units in ports.items():
@@ -112,6 +116,16 @@ def scan_within_port_duplicates(
         n_compared += len(motor_units)
 
         n_samples = max(len(motor_unit.source) for motor_unit in motor_units)
+        estimated_work = n_samples * len(motor_units) ** 2
+        if estimated_work > max_roa_work:
+            logger.warning(
+                "Within-port RoA skipped for %s: estimated work %d exceeds %d",
+                port_name,
+                estimated_work,
+                max_roa_work,
+            )
+            work_limited[port_name] = estimated_work
+            continue
         spike_matrix = build_spike_train_matrix(
             [motor_unit.timestamps for motor_unit in motor_units], n_samples
         )
@@ -172,6 +186,7 @@ def scan_within_port_duplicates(
         n_compared=n_compared,
         skipped_ports=skipped_ports,
         failed_ports=failed_ports,
+        work_limited=work_limited,
     )
 
 
@@ -180,6 +195,7 @@ def scan_cross_port_duplicates(
     sampling_rate: float,
     *,
     threshold: float = ROA_THRESHOLD,
+    max_roa_work: int = MAX_ROA_WORK,
     agreement_computer: AgreementComputer | None = None,
 ) -> DuplicateScanResult:
     """Find duplicate pairs across ports and flag lower-quality units."""
@@ -190,6 +206,7 @@ def scan_cross_port_duplicates(
     port_names = list(ports)
     pairs: list[DuplicatePair] = []
     failed_ports = []
+    work_limited = {}
     n_compared = sum(len(ports[port_name]) for port_name in port_names)
 
     for first_port_index in range(len(port_names)):
@@ -205,6 +222,17 @@ def scan_cross_port_duplicates(
                 max(len(motor_unit.source) for motor_unit in first_units),
                 max(len(motor_unit.source) for motor_unit in second_units),
             )
+            comparison_name = f"{first_port} ↔ {second_port}"
+            estimated_work = n_samples * len(first_units) * len(second_units)
+            if estimated_work > max_roa_work:
+                logger.warning(
+                    "Cross-port RoA skipped for %s: estimated work %d exceeds %d",
+                    comparison_name,
+                    estimated_work,
+                    max_roa_work,
+                )
+                work_limited[comparison_name] = estimated_work
+                continue
             first_spike_matrix = build_spike_train_matrix(
                 [motor_unit.timestamps for motor_unit in first_units], n_samples
             )
@@ -224,7 +252,7 @@ def scan_cross_port_duplicates(
                     second_port,
                     exc,
                 )
-                failed_ports.append(f"{first_port} ↔ {second_port}")
+                failed_ports.append(comparison_name)
                 continue
 
             first_count, second_count = agreement.shape[:2]
@@ -275,4 +303,5 @@ def scan_cross_port_duplicates(
         flagged_by_port=flagged_by_port,
         n_compared=n_compared,
         failed_ports=failed_ports,
+        work_limited=work_limited,
     )
