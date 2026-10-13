@@ -16,6 +16,56 @@ def _application():
     return QApplication.instance() or QApplication([])
 
 
+def _synthetic_data(n_sources: int = 2, h0: float = 0.75, h1: float = 1.25):
+    """Initialize data w/ sources containing two classes of peaks (high and low)."""
+    fs = 10240
+    start_sample = 0
+    source_length = 10000
+    n_channels = 5
+    rng = np.random.default_rng(1)
+
+    def _spike_train(fr, isi_min=0.005, cv=0.15):
+        mean_isi = fs / fr
+        isi = rng.normal(mean_isi, cv * mean_isi, size=int(source_length / fs * fr))
+        isi = isi[isi > (isi_min * fs)]
+        spikes = np.cumsum(isi).astype(np.int64)
+        return spikes[spikes < source_length]
+
+    timestamps, sources = [None] * n_sources, [None] * n_sources
+    for i_source in np.arange(n_sources):
+        spike_merge = _spike_train(12), _spike_train(10)
+        sources[i_source] = np.zeros(source_length)
+        sources[i_source][spike_merge[0]] = h0
+        sources[i_source][spike_merge[1]] = h1
+        timestamps[i_source] = np.sort(np.concatenate(spike_merge))
+
+    decomp_data = {
+        "format": "synthetic",
+        "schema_version": 2,
+        "version": 1.1,
+        "ports": ["Grid 1"],
+        "sampling_rate": fs,
+        "discharge_times": [timestamps],
+        "pulse_trains": [sources],
+        "mu_filters": [None],
+        "w_mat": [None],
+        "peel_off_sequence": [[]],
+        "preprocessing_config": [{}],
+        "plateau_coords": [start_sample, start_sample + source_length],
+        "chans_per_electrode": [n_channels],
+        "channel_indices": [list(range(n_channels))],
+        "emg_mask": [None],
+        "electrodes": [None],
+        "aux_channels": [],
+        "aux_configs": [],
+        "decomposition_params": [{}],
+        "acquisition_metadata": {"format": "scd-output"},
+        "import_provenance": None,
+        "scd_metadata": None,
+    }
+    return decomp_data
+
+
 def test_visualisation_offsets_plateau_local_timestamps():
     from scd_app.core.mu_model import MotorUnit
     from scd_app.gui.tabs.visualisation_tab import VisualisationTab
@@ -718,6 +768,93 @@ def test_debounced_properties_update_the_edited_unit_after_selection_changes():
     recompute.assert_called_once()
     assert units[0].props is recomputed
     assert units[1].props is None
+
+    tab.close()
+    app.processEvents()
+
+
+def test_edition_undo_redo_actions_stack_after_spike_add_del_and_split_start_cancel_esc_toggle():
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+
+    tab._load_decomposition_data(_synthetic_data(n_sources=2, h0=0.75, h1=1.25))
+    key = (tab._current_port, tab._current_mu_idx)
+    n_undo_redo = np.empty((1 + 9 * 3, 2))  # init and do/undo/redo 9 actions
+    n_undo_redo[0, :] = (
+        len(tab._undo_stack.get(key, [])),
+        len(tab._redo_stack.get(key, [])),
+    )
+
+    def _count_actions_in_undo_redo_stacks():
+        return len(tab._undo_stack.get(key, [])), len(tab._redo_stack.get(key, []))
+
+    # 1) DO: UNDO stack appends the action, REDO stack remains unchanged
+    tab.btn_sel_delete.click()
+    tab._on_region_selected(
+        tab._start_sample / tab._fsamp, tab._end_sample / tab._fsamp, 0.5, 1.0
+    )  # squared height in sources
+    n_undo_redo[1, :] = _count_actions_in_undo_redo_stacks()  # del spikes (1+)
+
+    tab.btn_sel_add.click()
+    tab._on_region_selected(
+        tab._start_sample / tab._fsamp, tab._end_sample / tab._fsamp, 0.5, 1.0
+    )  # squared height in sources
+    n_undo_redo[2, :] = _count_actions_in_undo_redo_stacks()  # add spikes (1+)
+
+    tab.btn_split_unit.click()
+    n_undo_redo[3, :] = _count_actions_in_undo_redo_stacks()  # split preview on click
+
+    tab.btn_split_unit.click()
+    n_undo_redo[4, :] = _count_actions_in_undo_redo_stacks()  # cancel preview on click
+
+    tab.btn_split_unit.click()
+    n_undo_redo[5, :] = _count_actions_in_undo_redo_stacks()  # split preview on click
+
+    tab._handle_escape()
+    n_undo_redo[6, :] = _count_actions_in_undo_redo_stacks()  # cancel preview on Esc
+
+    tab.btn_split_unit.click()
+    n_undo_redo[7, :] = _count_actions_in_undo_redo_stacks()  # split preview on click
+
+    sample = next(iter(tab._split_group_b))
+    tab._toggle_split_spike(sample)
+    n_undo_redo[8, :] = _count_actions_in_undo_redo_stacks()  # toggle split spike (1)
+
+    tab._on_region_selected(
+        tab._start_sample / tab._fsamp, tab._end_sample / tab._fsamp, 0.5, 1.0
+    )
+    n_undo_redo[9, :] = _count_actions_in_undo_redo_stacks()  # toggle split spike (1+)
+
+    assert np.array_equal(n_undo_redo[:10, 0], np.arange(10)), (
+        "Every action should append one element to the undo stack."
+    )
+    assert np.all(n_undo_redo[:10, 1] == 0), (
+        "New actions should leave redo stack unchanged."
+    )
+
+    # 2) UNDO: UNDO stack drops the action, REDO stack appends the action (no new actions added)
+    for i_action in np.arange(9):
+        tab.action_undo.trigger()
+        n_undo_redo[10 + i_action, :] = _count_actions_in_undo_redo_stacks()
+    assert np.array_equal(n_undo_redo[9 : 9 + 10, 0], np.arange(9, -1, -1)), (
+        "Every undone action should remove one element from the undo stack."
+    )
+    assert np.array_equal(n_undo_redo[9 : 9 + 10, 1], np.arange(10)), (
+        "Every undone action should append one element to the redo stack."
+    )
+
+    # 3) REDO: REDO stack drops the action, UNDO stack appends the action (no new actions added)
+    for i_action in np.arange(9):
+        tab.action_redo.trigger()
+        n_undo_redo[19 + i_action, :] = _count_actions_in_undo_redo_stacks()
+    assert np.array_equal(n_undo_redo[18:, 0], np.arange(10)), (
+        "Every redone action should append one element to the undo stack."
+    )
+    assert np.array_equal(n_undo_redo[18:, 1], np.arange(9, -1, -1)), (
+        "Every redone action should remove one element from the redo stack."
+    )
 
     tab.close()
     app.processEvents()
