@@ -399,8 +399,8 @@ def inspect_spike_muap(
     peak_sample = int(np.nanargmax(np.abs(dominant_waveform)))
     center_shift = reference.shape[1] // 2 - peak_sample
     reference_shift = center_shift
-    selected_shift = center_shift
-    raw_selected_shift = center_shift
+    selected_shift = center_shift  # does not include further shifts
+    raw_selected_shift = center_shift  # does not include further shifts
     display_padding = max(
         abs(reference_shift), abs(selected_shift), abs(raw_selected_shift)
     )
