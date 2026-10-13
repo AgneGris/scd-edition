@@ -778,7 +778,6 @@ def test_edition_undo_redo_actions_stack_after_spike_add_del_and_split_start_can
 
     app = _application()
     tab = EditionTab()
-
     tab._load_decomposition_data(_synthetic_data(n_sources=2, h0=0.75, h1=1.25))
     key = (tab._current_port, tab._current_mu_idx)
     n_undo_redo = np.empty((1 + 9 * 3, 2))  # init and do/undo/redo 9 actions
@@ -856,5 +855,62 @@ def test_edition_undo_redo_actions_stack_after_spike_add_del_and_split_start_can
         "Every redone action should remove one element from the redo stack."
     )
 
+    tab.close()
+    app.processEvents()
+
+
+def test_edition_undo_redo_split_preview_recovers_previous_split_state():
+    from scd_app.gui.tabs.edition_tab import EditionTab
+
+    app = _application()
+    tab = EditionTab()
+    tab._load_decomposition_data(_synthetic_data(n_sources=2, h0=0.75, h1=1.25))
+    assert tab._sel_arm == "none"
+
+    # 1) A manual change in split preview is recovered if cancel preview undo:
+    # Initialize split:
+    tab.btn_split_unit.click()
+    assert tab._sel_arm == "split"
+    assert not tab._split_preview_manually_adjusted
+    split_group_b_0 = tab._split_group_b.copy()
+
+    # Make a manual change in split:
+    sample = next(iter(tab._split_group_b))
+    tab._toggle_split_spike(sample)
+    split_group_b_1 = tab._split_group_b.copy()
+    assert tab._sel_arm == "split"
+    assert tab._split_preview_manually_adjusted
+    assert split_group_b_0 != split_group_b_1, (
+        "A manual change in split preview should be reflected on the split group b."
+    )
+    # Cancel split preview:
+    tab._handle_escape()
+    assert tab._sel_arm == "none"
+
+    # Undo cancel and recover previous split preview:
+    tab.action_undo.trigger()
+    assert tab._sel_arm == "split"
+    split_group_b_2 = tab._split_group_b.copy()
+    assert tab._split_preview_manually_adjusted
+    assert split_group_b_2 == split_group_b_1, (
+        "Undo of split preview cancellation should restore the previous preview (including any manual changes)."
+    )
+    # 2) An automatic split preview is still recalculated on split start (despite previous changes):
+    tab._handle_escape()
+    tab.btn_split_unit.click()
+    split_group_b_3 = tab._split_group_b.copy()
+    assert not tab._split_preview_manually_adjusted
+    assert split_group_b_3 == split_group_b_0, (
+        "Split start should bypass manual changes and recalculate automatic split."
+    )
+    # 3) A split preview without manual changes is recovered as is if cancel preview undo:
+    tab._handle_escape()
+    tab.action_undo.trigger()
+    assert tab._sel_arm == "split"
+    split_group_b_4 = tab._split_group_b.copy()
+    assert not tab._split_preview_manually_adjusted
+    assert split_group_b_4 == split_group_b_3, (
+        "Undo of split preview cancellation should restore the previous preview (also if no manual changes included)."
+    )
     tab.close()
     app.processEvents()
