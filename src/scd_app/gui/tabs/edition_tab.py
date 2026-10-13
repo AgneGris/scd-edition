@@ -975,28 +975,16 @@ class EditionTab(QWidget):
     def _toggle_split_preview(self):
         """Start a split preview, or discard the active preview unchanged."""
         if self._split_preview_active():
-            self._push_undo(
-                UndoAction(
-                    "Cancel split preview",
-                    self._current_port or "",
-                    self._current_mu_idx,
-                    new_split_suggestion=self._current_split_suggestion(),
-                    data_changed=False,
-                )
-            )
             self._cancel_split_preview()
         else:
             self._start_split_preview()
-            self._push_undo(
-                UndoAction(
-                    "Start split preview",
-                    self._current_port or "",
-                    self._current_mu_idx,
-                    data_changed=False,
-                )
-            )
 
-    def _start_split_preview(self, suggestion: SplitSuggestion | None = None):
+    def _start_split_preview(
+        self,
+        suggestion: SplitSuggestion | None = None,
+        is_undo: bool = False,
+        is_redo: bool = False,
+    ):
         mu = self._current_mu()
         if mu is None:
             self._update_status("Select a motor unit first")
@@ -1033,6 +1021,15 @@ class EditionTab(QWidget):
         self._set_split_preview_controls(True)
         self._render_split_preview()
         self._refresh_split_muap_preview()
+        if not is_undo and not is_redo:
+            self._push_undo(
+                UndoAction(
+                    "Start split preview",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                    data_changed=False,
+                )
+            )
 
     def _split_preview_groups(self) -> tuple[np.ndarray, np.ndarray]:
         preview_key = self._split_preview_key
@@ -1196,9 +1193,21 @@ class EditionTab(QWidget):
                 )
             )
 
-    def _cancel_split_preview(self, *, announce: bool = True):
+    def _cancel_split_preview(
+        self, *, announce: bool = True, is_undo: bool = False, is_redo: bool = False
+    ):
         if not self._split_preview_active():
             return
+        if not is_undo and not is_redo:
+            self._push_undo(
+                UndoAction(
+                    "Cancel split preview",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                    new_split_suggestion=self._current_split_suggestion(),
+                    data_changed=False,
+                )
+            )
         self._split_preview_key = None
         self._split_group_b.clear()
         self._split_suggestion_score = None
@@ -2647,11 +2656,13 @@ class EditionTab(QWidget):
             if (
                 action.description == "Start split preview"
             ):  # -> discard split preview unchanged
-                self._cancel_split_preview()
+                self._cancel_split_preview(is_undo=True)
             elif (
                 action.description == "Cancel split preview"
             ):  # -> recover previous split preview
-                self._start_split_preview(suggestion=action.new_split_suggestion)
+                self._start_split_preview(
+                    suggestion=action.new_split_suggestion, is_undo=True
+                )
             elif action.description == "Toggle split spike":
                 self._toggle_split_spike(action.new_split_sample, is_undo=True)
             elif action.description == "Toggle split selection":
@@ -2666,11 +2677,13 @@ class EditionTab(QWidget):
             if (
                 action.description == "Start split preview"
             ):  # -> recover previous split preview
-                self._start_split_preview(suggestion=action.new_split_suggestion)
+                self._start_split_preview(
+                    suggestion=action.new_split_suggestion, is_redo=True
+                )
             elif (
                 action.description == "Cancel split preview"
             ):  # -> discard split preview unchanged
-                self._cancel_split_preview()
+                self._cancel_split_preview(is_redo=True)
             elif action.description == "Toggle split spike":
                 self._toggle_split_spike(action.new_split_sample, is_redo=True)
             elif action.description == "Toggle split selection":
