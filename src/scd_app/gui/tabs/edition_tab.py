@@ -1008,6 +1008,7 @@ class EditionTab(QWidget):
             self._split_suggestion_score = suggestion.separation_score
             self._split_suggestion_threshold = suggestion.threshold
             self._split_suggestion_error = None
+            self._split_preview_manually_adjusted = suggestion.method == "manual"
         except ValueError as exc:
             # Keep the preview useful even when the distribution is flat or
             # invalid: the user may still assign the second group manually.
@@ -1015,7 +1016,7 @@ class EditionTab(QWidget):
             self._split_suggestion_score = None
             self._split_suggestion_threshold = None
             self._split_suggestion_error = str(exc)
-        self._split_preview_manually_adjusted = False
+            self._split_preview_manually_adjusted = False
         self._sel_arm = SelectionArm.SPLIT
         self.source_plot.set_selection_arm(SelectionArm.SPLIT)
         self._set_split_preview_controls(True)
