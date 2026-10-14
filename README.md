@@ -622,6 +622,7 @@ Edition shortcuts (after a decomposition is loaded):
 | `Scroll` | Zoom time axis |
 | `Shift+Scroll` | Pan horizontally |
 | `Ctrl+Scroll` | Zoom both axes |
+| `P` |  Open file notes to add post-its |
 
 ---
 

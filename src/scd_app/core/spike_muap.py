@@ -309,9 +309,8 @@ def inspect_spike_muap(
 
     Correlation is calculated after temporal demeaning on channels whose
     reference energy is at least ``informative_fraction`` of the strongest
-    channel.  The selected waveform may move by at most ``max_lag_ms`` to
-    accommodate small timestamp jitter.  ``lag_ms`` reports the selected
-    waveform's latency relative to the reference (positive means later).
+    channel. ``lag_ms`` reports the selected waveform's latency relative to the
+    reference (positive means later), but waveforms are shown using original timestamps.
     """
     try:
         emg = np.asarray(emg_port, dtype=np.float64)
@@ -400,8 +399,8 @@ def inspect_spike_muap(
     peak_sample = int(np.nanargmax(np.abs(dominant_waveform)))
     center_shift = reference.shape[1] // 2 - peak_sample
     reference_shift = center_shift
-    selected_shift = center_shift + best_shift
-    raw_selected_shift = center_shift + raw_best_shift
+    selected_shift = center_shift  # does not include further shifts
+    raw_selected_shift = center_shift  # does not include further shifts
     display_padding = max(
         abs(reference_shift), abs(selected_shift), abs(raw_selected_shift)
     )

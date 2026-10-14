@@ -445,9 +445,13 @@ def decompose_concatenated(
         stems = [fp.stem for fp in file_paths]
         # Find common prefix, then append only the unique suffixes of each stem
         # e.g. ["base_run-01", "base_run-02"] → "base_run-01_run-02_concat"
-        from os.path import commonprefix
-
-        prefix = commonprefix(stems).rstrip("_")
+        # Compare filename stems character-by-character. ``commonpath`` is not
+        # appropriate here because these are names rather than filesystem paths.
+        prefix = stems[0] if stems else ""
+        for stem in stems[1:]:
+            while prefix and not stem.startswith(prefix):
+                prefix = prefix[:-1]
+        prefix = prefix.rstrip("_")
         suffixes = [s[len(prefix) :].lstrip("_") for s in stems]
         suffixes = [s for s in suffixes if s]  # drop empty
         if suffixes:

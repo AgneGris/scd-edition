@@ -71,7 +71,10 @@ from scd_app.core.spike_muap import (
     inspect_spike_muap,
     split_preview_muaps,
 )
-from scd_app.core.unit_splitting import suggest_split_by_peak_height
+from scd_app.core.unit_splitting import (
+    SplitSuggestion,
+    suggest_split_by_peak_height,
+)
 from scd_app.core.utils import to_numpy
 from scd_app.gui.style.styling import (
     COLORS,
@@ -503,7 +506,7 @@ class EditionTab(QWidget):
 
         self.btn_notes = QPushButton("📝 Notes")
         self.btn_notes.setToolTip(
-            "Open file notes; new entries are tagged with the current port and unit"
+            "Open file notes to add post-its [P]; new entries are tagged with the current port and unit"
         )
         self.btn_notes.clicked.connect(self._open_notes_dialog)
         self.btn_notes.setEnabled(False)
@@ -789,6 +792,7 @@ class EditionTab(QWidget):
         QShortcut(QKeySequence("Shift+T"), self, self._reset_reliability)
         QShortcut(QKeySequence("["), self, lambda: self._navigate_inspected_spike(-1))
         QShortcut(QKeySequence("]"), self, lambda: self._navigate_inspected_spike(1))
+        QShortcut(QKeySequence("P"), self, self.btn_notes.click)
 
     def _pan_source(self, fraction: float):
         """Pan the source plot by `fraction` of the current visible width."""
@@ -909,6 +913,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
                 old_ts,
                 new_ts,
+                data_changed=True,
             )
         )
         mu.timestamps = new_ts
@@ -944,6 +949,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
                 old_ts,
                 new_ts,
+                data_changed=True,
             )
         )
         mu.timestamps = new_ts
@@ -956,6 +962,16 @@ class EditionTab(QWidget):
     def _split_preview_active(self) -> bool:
         return self._split_preview_key is not None
 
+    def _current_split_suggestion(self) -> SplitSuggestion:
+        suggestion = SplitSuggestion(
+            group_a=None,
+            group_b=np.array(list(self._split_group_b)),
+            threshold=self._split_suggestion_threshold,
+            separation_score=self._split_suggestion_score,
+            method="manual" if self._split_preview_manually_adjusted else "",
+        )
+        return suggestion
+
     def _toggle_split_preview(self):
         """Start a split preview, or discard the active preview unchanged."""
         if self._split_preview_active():
@@ -963,7 +979,12 @@ class EditionTab(QWidget):
         else:
             self._start_split_preview()
 
-    def _start_split_preview(self):
+    def _start_split_preview(
+        self,
+        suggestion: SplitSuggestion | None = None,
+        is_undo: bool = False,
+        is_redo: bool = False,
+    ):
         mu = self._current_mu()
         if mu is None:
             self._update_status("Select a motor unit first")
@@ -980,11 +1001,14 @@ class EditionTab(QWidget):
         self._set_mode(EditMode.VIEW)
         self._split_preview_key = (self._current_port or "", self._current_mu_idx)
         try:
-            suggestion = suggest_split_by_peak_height(timestamps, mu.source)
+            suggestion = suggestion or suggest_split_by_peak_height(
+                timestamps, mu.source
+            )
             self._split_group_b = set(suggestion.group_b.tolist())
             self._split_suggestion_score = suggestion.separation_score
             self._split_suggestion_threshold = suggestion.threshold
             self._split_suggestion_error = None
+            self._split_preview_manually_adjusted = suggestion.method == "manual"
         except ValueError as exc:
             # Keep the preview useful even when the distribution is flat or
             # invalid: the user may still assign the second group manually.
@@ -992,12 +1016,21 @@ class EditionTab(QWidget):
             self._split_suggestion_score = None
             self._split_suggestion_threshold = None
             self._split_suggestion_error = str(exc)
-        self._split_preview_manually_adjusted = False
+            self._split_preview_manually_adjusted = False
         self._sel_arm = SelectionArm.SPLIT
         self.source_plot.set_selection_arm(SelectionArm.SPLIT)
         self._set_split_preview_controls(True)
         self._render_split_preview()
         self._refresh_split_muap_preview()
+        if not is_undo and not is_redo:
+            self._push_undo(
+                UndoAction(
+                    "Start split preview",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                    data_changed=False,
+                )
+            )
 
     def _split_preview_groups(self) -> tuple[np.ndarray, np.ndarray]:
         preview_key = self._split_preview_key
@@ -1090,12 +1123,14 @@ class EditionTab(QWidget):
                 logger.debug("Split MUAP preview unavailable: %s", exc)
         self._plot_muap()
 
-    def _toggle_split_spike(self, sample: int):
+    def _toggle_split_spike(
+        self, sample: int | None, is_undo: bool = False, is_redo: bool = False
+    ):
         preview_key = self._split_preview_key
         if preview_key is None:
             return
         mu = self._get_mu(*preview_key)
-        if mu is None or int(sample) not in mu.timestamps:
+        if mu is None or sample is None or int(sample) not in mu.timestamps:
             return
         sample = int(sample)
         if sample in self._split_group_b:
@@ -1104,6 +1139,16 @@ class EditionTab(QWidget):
             self._split_group_b.add(sample)
         self._split_preview_manually_adjusted = True
         self._render_split_preview()
+        if not is_undo and not is_redo:
+            self._push_undo(
+                UndoAction(
+                    "Toggle split spike",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                    new_split_sample=sample,
+                    data_changed=False,
+                )
+            )
 
     def _apply_selection_split(self, x1: float, x2: float, y1: float, y2: float):
         preview_key = self._split_preview_key
@@ -1124,6 +1169,13 @@ class EditionTab(QWidget):
         if not selected:
             self._update_status("No spike markers in split selection")
             return
+        self._toggle_split_selection(selected)
+
+    def _toggle_split_selection(
+        self, selected: list[int] | None, is_undo: bool = False, is_redo: bool = False
+    ):
+        if selected is None:
+            return
         for timestamp in selected:
             if timestamp in self._split_group_b:
                 self._split_group_b.remove(timestamp)
@@ -1131,10 +1183,32 @@ class EditionTab(QWidget):
                 self._split_group_b.add(timestamp)
         self._split_preview_manually_adjusted = True
         self._render_split_preview()
+        if not is_undo and not is_redo:
+            self._push_undo(
+                UndoAction(
+                    "Toggle split selection",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                    new_split_selection=selected,
+                    data_changed=False,
+                )
+            )
 
-    def _cancel_split_preview(self, *, announce: bool = True):
+    def _cancel_split_preview(
+        self, *, announce: bool = True, is_undo: bool = False, is_redo: bool = False
+    ):
         if not self._split_preview_active():
             return
+        if not is_undo and not is_redo:
+            self._push_undo(
+                UndoAction(
+                    "Cancel split preview",
+                    self._current_port or "",
+                    self._current_mu_idx,
+                    new_split_suggestion=self._current_split_suggestion(),
+                    data_changed=False,
+                )
+            )
         self._split_preview_key = None
         self._split_group_b.clear()
         self._split_suggestion_score = None
@@ -2391,6 +2465,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
                 old_ts,
                 new_ts,
+                data_changed=True,
             )
         )
         mu.timestamps = new_ts
@@ -2422,6 +2497,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
                 old_ts,
                 new_ts,
+                data_changed=True,
             )
         )
         mu.timestamps = new_ts
@@ -2537,10 +2613,13 @@ class EditionTab(QWidget):
         self._redo_stack.setdefault(key, []).append(action)
         self._log_edit("undo", action)
         self._apply_undo_redo(action, is_undo=True)
-        self._on_data_changed(
-            f"Undo: {action.description}",
-            source_changed=action.old_source is not None,
-        )
+        if action.data_changed:
+            self._on_data_changed(
+                f"Undo: {action.description}",
+                source_changed=action.old_source is not None,
+            )
+        else:
+            self._update_status(f"Undo: {action.description}")
 
     def _redo(self):
         key = (self._current_port or "", self._current_mu_idx)
@@ -2552,10 +2631,13 @@ class EditionTab(QWidget):
         self._undo_stack.setdefault(key, []).append(action)
         self._log_edit("redo", action)
         self._apply_undo_redo(action, is_undo=False)
-        self._on_data_changed(
-            f"Redo: {action.description}",
-            source_changed=action.new_source is not None,
-        )
+        if action.data_changed:
+            self._on_data_changed(
+                f"Redo: {action.description}",
+                source_changed=action.new_source is not None,
+            )
+        else:
+            self._update_status(f"Redo: {action.description}")
 
     def _apply_undo_redo(self, action: UndoAction, is_undo: bool):
         if self._current_port != action.port_name:
@@ -2572,6 +2654,20 @@ class EditionTab(QWidget):
                 mu.source = action.old_source
             if action.old_filter is not None:
                 mu.mu_filter = action.old_filter
+            if (
+                action.description == "Start split preview"
+            ):  # -> discard split preview unchanged
+                self._cancel_split_preview(is_undo=True)
+            elif (
+                action.description == "Cancel split preview"
+            ):  # -> recover previous split preview
+                self._start_split_preview(
+                    suggestion=action.new_split_suggestion, is_undo=True
+                )
+            elif action.description == "Toggle split spike":
+                self._toggle_split_spike(action.new_split_sample, is_undo=True)
+            elif action.description == "Toggle split selection":
+                self._toggle_split_selection(action.new_split_selection, is_undo=True)
         else:
             if action.new_timestamps is not None:
                 mu.timestamps = action.new_timestamps
@@ -2579,6 +2675,20 @@ class EditionTab(QWidget):
                 mu.source = action.new_source
             if action.new_filter is not None:
                 mu.mu_filter = action.new_filter
+            if (
+                action.description == "Start split preview"
+            ):  # -> recover previous split preview
+                self._start_split_preview(
+                    suggestion=action.new_split_suggestion, is_redo=True
+                )
+            elif (
+                action.description == "Cancel split preview"
+            ):  # -> discard split preview unchanged
+                self._cancel_split_preview(is_redo=True)
+            elif action.description == "Toggle split spike":
+                self._toggle_split_spike(action.new_split_sample, is_redo=True)
+            elif action.description == "Toggle split selection":
+                self._toggle_split_selection(action.new_split_selection, is_redo=True)
 
     # ------------------------------------------------------------------
     # Filter recalculation
@@ -2670,6 +2780,7 @@ class EditionTab(QWidget):
                     old_filter=old_filter,
                     new_source=new_source,
                     new_filter=new_filter,
+                    data_changed=True,
                 )
             )
             self._on_data_changed(
@@ -3158,6 +3269,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
                 old_ts,
                 new_ts,
+                data_changed=True,
             )
         )
         mu.timestamps = new_ts
@@ -3202,6 +3314,7 @@ class EditionTab(QWidget):
                 self._current_mu_idx,
                 old_ts,
                 result.new_timestamps,
+                data_changed=True,
             )
         )
         mu.timestamps = result.new_timestamps
@@ -3703,7 +3816,7 @@ class EditionTab(QWidget):
         else:
             self.btn_notes.setText("📝 Notes")
             self.btn_notes.setToolTip(
-                "Open file notes; new entries are tagged with the current port and unit"
+                "Open file notes to add post-its [P]; new entries are tagged with the current port and unit"
             )
         self.btn_notes.setStyleSheet(self._notes_btn_style(bool(unit_notes)))
 

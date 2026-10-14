@@ -368,6 +368,7 @@ class DataHandler:
             mu_id=mu_id,
             old_timestamps=old_ts,
             new_timestamps=new_ts,
+            data_changed=True,
         )
         self._save_undo(action)
         mu.timestamps = new_ts
@@ -393,6 +394,7 @@ class DataHandler:
             mu_id=mu_id,
             old_timestamps=old_ts,
             new_timestamps=new_ts,
+            data_changed=True,
         )
         self._save_undo(action)
         mu.timestamps = new_ts
@@ -445,6 +447,7 @@ class DataHandler:
             mu_id=mu_id,
             old_timestamps=old_ts,
             new_timestamps=new_ts,
+            data_changed=True,
         )
         self._save_undo(action)
         mu.timestamps = new_ts
@@ -483,6 +486,7 @@ class DataHandler:
             mu_id=mu_id,
             old_timestamps=old_ts,
             new_timestamps=new_ts,
+            data_changed=True,
         )
         self._save_undo(action)
         mu.timestamps = new_ts

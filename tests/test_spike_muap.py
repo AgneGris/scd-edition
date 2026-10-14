@@ -84,7 +84,7 @@ def test_selected_discharge_is_excluded_from_reference_template():
     np.testing.assert_allclose(selected[finite], -reference[finite])
 
 
-def test_small_timing_jitter_is_aligned_and_reported():
+def test_small_timing_jitter_is_estimated_and_reported():
     template = np.array([[0.0, 0.0, -1.0, 0.5, 3.0, -1.0, 0.0, 0.0, 0.0, 0.0]])
     delayed = np.zeros_like(template)
     delayed[:, 2:] = template[:, :-2]
@@ -120,6 +120,37 @@ def test_small_timing_jitter_is_aligned_and_reported():
     np.testing.assert_allclose(
         raw_selected_display[np.isfinite(raw_selected_display)],
         expected_selected.ravel(),
+    )
+
+
+def test_muaps_are_compared_based_on_timestamp_and_not_shifted():
+    template = np.array([[0.0, 0.0, -1.0, 0.5, 3.0, -1.0, 0.0, 0.0, 0.0, 0.0]])
+    delayed = np.zeros_like(template)
+    delayed[:, 2:] = template[:, :-2]
+    timestamps = np.array([20, 40, 60])
+    emg = _emg_with_events(timestamps.tolist(), template, selected=delayed)
+
+    result = inspect_spike_muap(
+        emg,
+        timestamps,
+        selected_sample=60,
+        fsamp=1000.0,
+        win_ms=10,
+        max_lag_ms=2,
+    )
+
+    def count_nan_at_edges(grid):
+        is_muap = ~np.isnan(grid)
+        n_nan_start = np.unique(np.argmax(is_muap, axis=-1))
+        n_nan_end = np.unique(np.argmax(is_muap[..., ::-1], axis=-1))
+        return np.array([n_nan_start, n_nan_end]).T
+
+    nan_in_grids = np.empty((3, 2))
+    nan_in_grids[0, :] = count_nan_at_edges(result.reference_grid)
+    nan_in_grids[1, :] = count_nan_at_edges(result.selected_grid)
+    nan_in_grids[2, :] = count_nan_at_edges(result.raw_selected_grid)
+    assert np.all(nan_in_grids == nan_in_grids[0, :]), (
+        "MUAPs should be aligned to timestamp, not shifted differently."
     )
 
 
