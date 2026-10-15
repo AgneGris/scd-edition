@@ -229,14 +229,14 @@ def set_style_sheet(widget, font_type="Lexend"):
             QWidget {{
                 background-color: {COLORS["background"]};
                 color: {COLORS["foreground"]};
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 font-size: {FONT_SIZES["medium"]};
                 font-weight: 400;
             }}
 
             /* ========== LABELS ========== */
             QLabel {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 color: {COLORS["foreground"]};
                 background-color: transparent;
                 padding: 2px;
@@ -263,11 +263,11 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QTabBar {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
             }}
 
             QTabBar::tab {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background: transparent;
                 color: {COLORS["text_dim"]};
                 border: none;
@@ -294,7 +294,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== BUTTONS ========== */
             QPushButton {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: qlineargradient(
                     x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COLORS["accent_hover"]},
@@ -328,7 +328,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== INPUT FIELDS ========== */
             QLineEdit {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 color: {COLORS["foreground"]};
                 font-size: {FONT_SIZES["normal"]};
@@ -350,7 +350,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== COMBO BOX ========== */
             QComboBox {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 color: {COLORS["foreground"]};
                 font-size: {FONT_SIZES["normal"]};
@@ -386,7 +386,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QComboBox QAbstractItemView {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 border: 2px solid {COLORS["accent"]};
                 background-color: {COLORS["background_light"]};
                 selection-background-color: {COLORS["accent"]};
@@ -403,7 +403,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== SPIN BOX ========== */
             QSpinBox, QDoubleSpinBox {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 color: {COLORS["foreground"]};
                 font-size: {FONT_SIZES["normal"]};
@@ -420,7 +420,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== CHECKBOX ========== */
             QCheckBox {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 spacing: 10px;
                 font-size: {FONT_SIZES["normal"]};
             }}
@@ -453,7 +453,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== RADIO BUTTON ========== */
             QRadioButton {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 spacing: 10px;
                 font-size: {FONT_SIZES["normal"]};
             }}
@@ -525,7 +525,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== GROUP BOX ========== */
             QGroupBox {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 border: 2px solid {COLORS["border"]};
                 border-radius: 8px;
                 margin-top: 24px;
@@ -547,7 +547,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== PROGRESS BAR ========== */
             QProgressBar {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 border: none;
                 border-radius: 6px;
                 background-color: {COLORS["background_hover"]};
@@ -594,7 +594,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== TOOLTIP ========== */
             QToolTip {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background_hover"]};
                 color: #ffffff;
                 border: 1px solid {COLORS["accent"]};
@@ -616,7 +616,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== TABLE VIEW ========== */
             QTableView, QTableWidget {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 alternate-background-color: {COLORS["background_light"]};
                 border: 1px solid {COLORS["border"]};
@@ -631,7 +631,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QHeaderView::section {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background_hover"]};
                 color: {COLORS["foreground"]};
                 padding: 10px;
@@ -643,7 +643,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== LIST VIEW ========== */
             QListView, QListWidget {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
@@ -666,7 +666,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== MENU ========== */
             QMenuBar {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 color: {COLORS["foreground"]};
                 border-bottom: 1px solid {COLORS["border"]};
@@ -683,7 +683,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QMenu {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background_light"]};
                 border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
@@ -708,17 +708,17 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== DIALOG ========== */
             QDialog {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
             }}
 
             QMessageBox {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
             }}
 
             QMessageBox QLabel {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 color: {COLORS["foreground"]};
                 font-size: {FONT_SIZES["normal"]};
             }}
@@ -741,7 +741,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== STATUS BAR ========== */
             QStatusBar {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background_light"]};
                 color: {COLORS["text_dim"]};
                 border-top: 1px solid {COLORS["border"]};
@@ -750,7 +750,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== TOOL BAR ========== */
             QToolBar {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background_light"]};
                 border: none;
                 spacing: 4px;
@@ -758,7 +758,7 @@ def set_style_sheet(widget, font_type="Lexend"):
             }}
 
             QToolButton {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: transparent;
                 border: none;
                 border-radius: 4px;
@@ -775,7 +775,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== TREE WIDGET ========== */
             QTreeWidget, QTreeView {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
                 background-color: {COLORS["background"]};
                 border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
@@ -797,7 +797,7 @@ def set_style_sheet(widget, font_type="Lexend"):
 
             /* ========== FRAME ========== */
             QFrame {{
-                font-family: '{font_family}', 'Segoe UI', sans-serif;
+                font-family: '{font_family}';
             }}
 
             QFrame[frameShape="4"] {{ /* HLine */
