@@ -1,4 +1,4 @@
-# SCD Edition quick-start
+# SCD Studio quick-start
 
 This walkthrough uses the example recording bundled with every installation.
 It contains 64 channels and ten seconds of EMG sampled at 10,240 Hz.
@@ -6,13 +6,13 @@ It contains 64 channels and ten seconds of EMG sampled at 10,240 Hz.
 ## 1. Install and open the example
 
 ```bash
-pip install scd-edition
-scd-edition --example
+pip install scd-studio
+scd-studio --example
 ```
 
 The Configuration tab opens with the MATLAB loader, `emg` variable, sampling
 rate and a 64-channel surface grid already selected. The output directory is
-`scd-edition-output` under the directory from which you launched the app.
+`scd-studio-output` under the directory from which you launched the app.
 
 ## 2. Apply the configuration
 

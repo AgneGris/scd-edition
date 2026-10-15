@@ -1,13 +1,13 @@
-# Contributing to SCD Edition
+# Contributing to SCD Studio
 
-Thank you for helping improve SCD Edition. Bug reports, loader requests,
+Thank you for helping improve SCD Studio. Bug reports, loader requests,
 documentation improvements and focused pull requests are welcome.
 
 ## Report a problem
 
 Use the appropriate GitHub issue form. Include:
 
-- SCD Edition version or commit;
+- SCD Studio version or commit;
 - installation method, operating system and Python version;
 - CPU or GPU model and, for CUDA problems, driver information;
 - acquisition system and file format;
@@ -90,7 +90,7 @@ the previous version.
 1. Update the version in `pyproject.toml`, `CITATION.cff` and `CHANGELOG.md`.
 2. Run the full test suite and `python -m build` from a clean checkout.
 3. Run `python scripts/check_distribution.py`.
-4. Push a matching tag such as `v0.1.0`.
+4. Push a matching tag such as `v0.2.0`.
 5. Approve the protected `pypi` environment when the release workflow asks.
 6. After Zenodo archives the GitHub release, add its concept DOI to the README
    and `CITATION.cff`.

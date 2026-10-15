@@ -1,1 +1,1 @@
-"""Third-party source distributed inside SCD Edition."""
+"""Third-party source distributed inside SCD Studio."""

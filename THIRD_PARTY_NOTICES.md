@@ -2,7 +2,7 @@
 
 ## Motor Unit Toolbox
 
-SCD Edition contains selected source files from
+SCD Studio contains selected source files from
 [Motor Unit Toolbox](https://github.com/imendezguerra/motor_unit_toolbox),
 version 1.0, commit `d84dc6c943daa5d686b2911b48b13bf718628130`.
 The vendored routines are used to calculate motor-unit properties and spike-train

@@ -1,5 +1,5 @@
 """
-Data handler for SCD-Edition.
+Data handler for SCD Studio.
 Manages EMG data, decomposition results, and motor unit editing.
 """
 

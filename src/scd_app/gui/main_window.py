@@ -1,6 +1,4 @@
-"""
-Main application window for SCD-edition.
-"""
+"""Main application window for SCD Studio."""
 
 import logging
 import os
@@ -43,7 +41,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SCD - EMG Decomposition & Edition")
+        self.setWindowTitle("SCD Studio - EMG Decomposition, Edition & Visualisation")
 
         # Dynamically size to screen
         screen = QApplication.primaryScreen().availableGeometry()
@@ -242,8 +240,8 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         QMessageBox.about(
             self,
-            "About SCD Edition",
-            "SCD Edition\nEMG Decomposition & Edition\n\n"
+            "About SCD Studio",
+            "SCD Studio\nEMG Decomposition, Edition & Visualisation\n\n"
             "Motor unit decomposition, review and spike editing\n\n"
             "Licensed under the BSD 3-Clause License.",
         )
@@ -295,8 +293,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="scd-edition",
-        description="SCD EMG Decomposition & Edition GUI",
+        prog="scd-studio",
+        description="SCD Studio EMG decomposition, edition, and visualisation GUI",
     )
     startup = parser.add_mutually_exclusive_group()
     startup.add_argument(
@@ -330,7 +328,7 @@ def main():
     log_startup_diagnostics(log_path)
 
     app = QApplication([sys.argv[0], *qt_argv])
-    app.setApplicationName("SCD-Edition")
+    app.setApplicationName("SCD Studio")
 
     cuda_available = torch.cuda.is_available()
     cuda_required = (
@@ -340,7 +338,7 @@ def main():
     )
     if cuda_required and not cuda_available:
         message = (
-            "CUDA is required for this SCD Edition environment, but PyTorch "
+            "CUDA is required for this SCD Studio environment, but PyTorch "
             f"cannot use it (PyTorch {torch.__version__}, CUDA build "
             f"{torch.version.cuda or 'none'}).\n\n"
             "For this source checkout, run:\n"
@@ -348,19 +346,19 @@ def main():
             "For later uv commands, include --extra cuda or --no-sync; "
             "a bare uv run may reinstall CPU-only PyTorch."
         )
-        logger.error("SCD Edition startup error: %s", message)
+        logger.error("SCD Studio startup error: %s", message)
         QMessageBox.critical(None, "CUDA Required", message)
         return 1
 
     if cuda_available:
         logger.info(
-            "SCD Edition device: CUDA (%s) because PyTorch detected a "
+            "SCD Studio device: CUDA (%s) because PyTorch detected a "
             "working CUDA device.",
             torch.cuda.get_device_name(0),
         )
     else:
         logger.info(
-            "SCD Edition device: CPU because PyTorch did not detect a working "
+            "SCD Studio device: CPU because PyTorch did not detect a working "
             "CUDA device."
         )
 
@@ -409,7 +407,7 @@ def _configure_example_on_startup(window: "MainWindow"):
         sample_path = bundled_example_path()
         config = bundled_example_config()
         config["file_path"] = str(sample_path)
-        config["output_dir"] = str(Path.cwd() / "scd-edition-output")
+        config["output_dir"] = str(Path.cwd() / "scd-studio-output")
         window.config_tab._config_from_dict(config)
         window.tabs.setCurrentWidget(window.config_tab)
         window.status_bar.showMessage(

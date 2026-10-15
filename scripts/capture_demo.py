@@ -531,7 +531,7 @@ def _box(
 
 def capture_shots() -> dict[str, Shot]:
     app = QApplication.instance() or QApplication([])
-    app.setApplicationName("SCD-Edition demo capture")
+    app.setApplicationName("SCD Studio demo capture")
     set_style_sheet(app)
     window = MainWindow()
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
@@ -542,7 +542,7 @@ def capture_shots() -> dict[str, Shot]:
     _configure_example_on_startup(window)
     config_tab = window.config_tab
     config_tab.path_edit.setText("examples/emg.mat")
-    config_tab.output_dir_edit.setText("scd-edition-output")
+    config_tab.output_dir_edit.setText("scd-studio-output")
     window.tabs.setCurrentWidget(config_tab)
     image = _grab(window)
     shots["config"] = Shot(image, {"apply": _rect(window, config_tab.apply_btn)})
@@ -675,7 +675,7 @@ def _published_example_data() -> dict:
 def capture_overview_shots() -> dict[str, Shot]:
     """Capture all four tabs with the real, published SCD demo data."""
     app = QApplication.instance() or QApplication([])
-    app.setApplicationName("SCD-Edition overview capture")
+    app.setApplicationName("SCD Studio overview capture")
     set_style_sheet(app)
     window = MainWindow()
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
@@ -686,7 +686,7 @@ def capture_overview_shots() -> dict[str, Shot]:
     _configure_example_on_startup(window)
     config_tab = window.config_tab
     config_tab.path_edit.setText("examples/scd-demo/emg.mat")
-    config_tab.output_dir_edit.setText("scd-edition-output")
+    config_tab.output_dir_edit.setText("scd-studio-output")
     window.tabs.setCurrentWidget(config_tab)
     shots["configuration"] = Shot(_grab(window))
 
@@ -942,7 +942,7 @@ def main() -> None:
     parser.add_argument(
         "--overview",
         type=Path,
-        default=Path("docs/figures/scd-edition-tabs.png"),
+        default=Path("docs/figures/scd-studio-tabs.png"),
         help="four-panel overview figure path",
     )
     parser.add_argument(
@@ -971,7 +971,7 @@ def main() -> None:
         for aspect in aspects:
             render_video(
                 shots,
-                args.video_dir / f"scd-edition-{aspect}.mp4",
+                args.video_dir / f"scd-studio-{aspect}.mp4",
                 aspect,
                 RENDER_SCALE,
             )

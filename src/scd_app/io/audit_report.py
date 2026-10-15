@@ -16,6 +16,8 @@ from typing import Any
 
 import torch
 
+from scd_app.core.package_metadata import installed_app_version
+
 AUDIT_FORMAT = "scd-edition-audit"
 AUDIT_SCHEMA_VERSION = 1
 
@@ -38,7 +40,8 @@ def _basename(value: Any) -> str:
 
 def _software_versions() -> dict[str, str]:
     return {
-        "scd_edition": _distribution_version("scd-edition"),
+        # Retain the original key so existing audit consumers keep working.
+        "scd_edition": installed_app_version(),
         "swarm_contrastive_decomposition": _distribution_version(
             "swarm-contrastive-decomposition"
         ),

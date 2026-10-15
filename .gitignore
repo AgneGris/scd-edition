@@ -59,9 +59,12 @@ resources/loaders_configs/loader_dynamic.yaml
 !examples/scd-demo/emg_decomp_output.pkl
 
 # Generated documentation figure; rebuild with scripts/capture_demo.py.
+docs/figures/scd-studio-tabs.png
+# Retain ignores for artifacts created by SCD Edition 0.1.x.
 docs/figures/scd-edition-tabs.png
 
-# Output created by `scd-edition --example`.
+# Output created by `scd-studio --example`.
+scd-studio-output/
 scd-edition-output/
 
 # Lab-specific HPC jobs and local dependency checkout

@@ -4,7 +4,7 @@
   "sampling_rate": 10240,
   "decimate": 1,
   "file_path": null,
-  "output_dir": "scd-edition-output",
+  "output_dir": "scd-studio-output",
   "skip_quaternions": false,
   "emg_path": "emg",
   "emg_orientation": "samples_first",

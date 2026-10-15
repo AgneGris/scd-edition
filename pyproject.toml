@@ -3,9 +3,9 @@ requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "scd-edition"
-version = "0.1.0"
-description = "GUI for editing and visualizing SCD decomposition results"
+name = "scd-studio"
+version = "0.2.0"
+description = "Desktop application for SCD decomposition, editing, and visualisation"
 readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
@@ -54,12 +54,13 @@ dev = [
 ]
 
 [project.scripts]
+scd-studio = "scd_app.gui.main_window:main"
 scd-edition = "scd_app.gui.main_window:main"
 
 [project.urls]
-Homepage = "https://github.com/AgneGris/scd-edition"
-Repository = "https://github.com/AgneGris/scd-edition"
-Issues = "https://github.com/AgneGris/scd-edition/issues"
+Homepage = "https://github.com/AgneGris/scd-studio"
+Repository = "https://github.com/AgneGris/scd-studio"
+Issues = "https://github.com/AgneGris/scd-studio/issues"
 
 [tool.uv]
 required-environments = [

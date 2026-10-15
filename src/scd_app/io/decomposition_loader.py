@@ -22,7 +22,7 @@ _SCD_METRIC_KEYS = ("silhouettes", "RoA", "fr", "cov", "best_exp")
 
 
 class UnsupportedDecompositionFormat(ValueError):
-    """Raised when a pickle is neither an SCD Edition file nor raw SCD output."""
+    """Raised when a pickle is neither an SCD Studio file nor raw SCD output."""
 
 
 def detect_decomposition_format(data: Any) -> str:
@@ -39,13 +39,13 @@ def detect_decomposition_format(data: Any) -> str:
         return UPSTREAM_SCD_FORMAT
     keys = ", ".join(sorted(str(key) for key in data)) or "<none>"
     raise UnsupportedDecompositionFormat(
-        "The pickle is not a supported SCD Edition or raw "
+        "The pickle is not a supported SCD Studio or raw "
         f"swarm-contrastive-decomposition result. Found keys: {keys}"
     )
 
 
 def load_decomposition_file(path: Path) -> dict:
-    """Load a trusted pickle and return a validated SCD Edition structure.
+    """Load a trusted pickle and return a validated SCD Studio structure.
 
     Pickle files can execute code while loading. This function is intended only
     for decomposition files created by the user or another trusted source.
@@ -72,17 +72,17 @@ def migrate_and_validate_decomposition(data: dict) -> dict:
         schema_version = CURRENT_SCHEMA_VERSION
     if isinstance(schema_version, bool) or not isinstance(schema_version, int):
         raise UnsupportedDecompositionFormat(
-            "SCD Edition schema_version must be an integer."
+            "SCD Studio schema_version must be an integer."
         )
     if schema_version < 1:
         raise UnsupportedDecompositionFormat(
-            f"Unsupported SCD Edition schema version {schema_version}."
+            f"Unsupported SCD Studio schema version {schema_version}."
         )
     if schema_version > CURRENT_SCHEMA_VERSION:
         raise UnsupportedDecompositionFormat(
-            "This file uses SCD Edition schema version "
+            "This file uses SCD Studio schema version "
             f"{schema_version}, but this application supports up to "
-            f"version {CURRENT_SCHEMA_VERSION}. Please update SCD Edition."
+            f"version {CURRENT_SCHEMA_VERSION}. Please update SCD Studio."
         )
 
     migrated["format"] = GUI_FORMAT
@@ -94,13 +94,13 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
     """Return normalized data or raise before the Edition UI changes state."""
     ports = _outer_list(data.get("ports"), "ports")
     if not ports:
-        raise UnsupportedDecompositionFormat("SCD Edition file contains no ports.")
+        raise UnsupportedDecompositionFormat("SCD Studio file contains no ports.")
     if any(not isinstance(port, str) or not port.strip() for port in ports):
         raise UnsupportedDecompositionFormat(
-            "SCD Edition ports must be non-empty strings."
+            "SCD Studio ports must be non-empty strings."
         )
     if len(set(ports)) != len(ports):
-        raise UnsupportedDecompositionFormat("SCD Edition port names must be unique.")
+        raise UnsupportedDecompositionFormat("SCD Studio port names must be unique.")
 
     discharge_ports = _outer_list(data.get("discharge_times"), "discharge_times")
     source_ports = _outer_list(data.get("pulse_trains"), "pulse_trains")
@@ -110,7 +110,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
     ):
         if len(values) != len(ports):
             raise UnsupportedDecompositionFormat(
-                f"SCD Edition {field_name} has {len(values)} port entries, "
+                f"SCD Studio {field_name} has {len(values)} port entries, "
                 f"but ports has {len(ports)}."
             )
 
@@ -119,11 +119,11 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
         sampling_rate = float(sampling_rate)
     except (TypeError, ValueError) as exc:
         raise UnsupportedDecompositionFormat(
-            "SCD Edition file does not contain a valid sampling rate."
+            "SCD Studio file does not contain a valid sampling rate."
         ) from exc
     if not np.isfinite(sampling_rate) or sampling_rate <= 0:
         raise UnsupportedDecompositionFormat(
-            "SCD Edition sampling rate must be a positive finite number."
+            "SCD Studio sampling rate must be a positive finite number."
         )
 
     plateau_start = 0
@@ -133,7 +133,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
             plateau = np.asarray(plateau_coords, dtype=float).flatten()
         except (TypeError, ValueError) as exc:
             raise UnsupportedDecompositionFormat(
-                "SCD Edition plateau coordinates must be numeric."
+                "SCD Studio plateau coordinates must be numeric."
             ) from exc
         if (
             plateau.size != 2
@@ -142,7 +142,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
             or plateau[1] <= plateau[0]
         ):
             raise UnsupportedDecompositionFormat(
-                "SCD Edition plateau coordinates must be [start, end] with "
+                "SCD Studio plateau coordinates must be [start, end] with "
                 "0 <= start < end."
             )
         plateau_start = int(plateau[0])
@@ -225,7 +225,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
         motor_unit_id_ports = _outer_list(raw_motor_unit_ids, "motor_unit_ids")
         if len(motor_unit_id_ports) != len(ports):
             raise UnsupportedDecompositionFormat(
-                "SCD Edition motor_unit_ids has "
+                "SCD Studio motor_unit_ids has "
                 f"{len(motor_unit_id_ports)} port entries, but ports has "
                 f"{len(ports)}."
             )
@@ -249,14 +249,14 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
                     unit_id, (int, np.integer)
                 ):
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition "
+                        "SCD Studio "
                         f"motor_unit_ids[{port_index}][{unit_index}] must be "
                         "a non-negative integer."
                     )
                 normalized_id = int(unit_id)
                 if normalized_id < 0:
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition "
+                        "SCD Studio "
                         f"motor_unit_ids[{port_index}][{unit_index}] must be "
                         "a non-negative integer."
                     )
@@ -264,7 +264,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
 
             if len(set(normalized_port_ids)) != len(normalized_port_ids):
                 raise UnsupportedDecompositionFormat(
-                    f"SCD Edition motor_unit_ids for port {port_name!r} must be unique."
+                    f"SCD Studio motor_unit_ids for port {port_name!r} must be unique."
                 )
             normalized_motor_unit_ids.append(normalized_port_ids)
 
@@ -285,7 +285,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
         lineage_ports = _outer_list(raw_unit_lineage, "unit_lineage")
         if len(lineage_ports) != len(ports):
             raise UnsupportedDecompositionFormat(
-                "SCD Edition unit_lineage must contain one entry per port."
+                "SCD Studio unit_lineage must contain one entry per port."
             )
         normalized_unit_lineage = []
         for port_index, port_name in enumerate(ports):
@@ -302,7 +302,7 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
             for unit_index, item in enumerate(lineage_items):
                 if not isinstance(item, dict):
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition "
+                        "SCD Studio "
                         f"unit_lineage[{port_index}][{unit_index}] must be a dictionary."
                     )
                 peel_group_id = item.get("peel_group_id", unit_index)
@@ -312,11 +312,11 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
                     peel_group_id, (int, np.integer)
                 ):
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition peel_group_id values must be non-negative integers."
+                        "SCD Studio peel_group_id values must be non-negative integers."
                     )
                 if int(peel_group_id) < 0:
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition peel_group_id values must be non-negative integers."
+                        "SCD Studio peel_group_id values must be non-negative integers."
                     )
                 if split_parent_id is not None and (
                     isinstance(split_parent_id, (bool, np.bool_))
@@ -324,12 +324,12 @@ def _validate_native_decomposition(data: dict, has_schema_version: bool) -> dict
                     or int(split_parent_id) < 0
                 ):
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition split_parent_id values must be non-negative "
+                        "SCD Studio split_parent_id values must be non-negative "
                         "integers or null."
                     )
                 if split_label not in (None, "A", "B"):
                     raise UnsupportedDecompositionFormat(
-                        "SCD Edition split_label values must be 'A', 'B', or null."
+                        "SCD Studio split_label values must be 'A', 'B', or null."
                     )
                 normalized_port_lineage.append(
                     {
@@ -414,7 +414,7 @@ def _outer_list(value: Any, field_name: str) -> list:
         return list(value)
     if isinstance(value, np.ndarray) and value.ndim >= 1:
         return list(value)
-    raise UnsupportedDecompositionFormat(f"SCD Edition {field_name} must be a list.")
+    raise UnsupportedDecompositionFormat(f"SCD Studio {field_name} must be a list.")
 
 
 def _unit_items(value: Any, field_name: str) -> list:
@@ -428,7 +428,7 @@ def _unit_items(value: Any, field_name: str) -> list:
         array = to_numpy(value)
     except Exception as exc:
         raise UnsupportedDecompositionFormat(
-            f"SCD Edition {field_name} is not an array or list."
+            f"SCD Studio {field_name} is not an array or list."
         ) from exc
     if array.ndim == 0 or array.size == 0:
         return []
@@ -442,11 +442,11 @@ def _numeric_array(value: Any, field_name: str) -> np.ndarray:
         array = to_numpy(value)
     except Exception as exc:
         raise UnsupportedDecompositionFormat(
-            f"SCD Edition {field_name} is not an array."
+            f"SCD Studio {field_name} is not an array."
         ) from exc
     if not np.issubdtype(array.dtype, np.number):
         raise UnsupportedDecompositionFormat(
-            f"SCD Edition {field_name} must contain numeric values."
+            f"SCD Studio {field_name} must contain numeric values."
         )
     return array
 
