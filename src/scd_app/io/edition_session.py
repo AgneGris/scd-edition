@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 
+from scd_app.core.constants import MUAP_WIN_MS
 from scd_app.core.electrode_layouts import get_grid_config
 from scd_app.core.mu_model import MotorUnit
 from scd_app.core.mu_properties import compute_port_properties
@@ -72,6 +73,28 @@ class LoadedEditionPort:
     active_grid_positions: dict[int, tuple[int, int]] | None
     rejected_channel_positions: set[tuple[int, int]]
     migrated_notes: list[str]
+
+
+def resolve_muap_window_ms(
+    decomposition: Mapping[str, Any],
+    port_index: int,
+    default: float = MUAP_WIN_MS,
+) -> float:
+    """Return a port's saved MUAP duration, with a legacy-safe fallback."""
+    all_params = decomposition.get("decomposition_params")
+    if isinstance(all_params, Mapping):
+        params = all_params if port_index == 0 else None
+    elif isinstance(all_params, (list, tuple)) and 0 <= port_index < len(all_params):
+        params = all_params[port_index]
+    else:
+        params = None
+
+    value = params.get("muap_window_ms") if isinstance(params, Mapping) else None
+    try:
+        window_ms = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return window_ms if np.isfinite(window_ms) and window_ms > 0 else float(default)
 
 
 def normalise_notes(notes: object) -> list[str]:
@@ -405,6 +428,7 @@ def load_edition_port(
             ),
             grid_shape=grid_config["grid_shape"] if grid_config else None,
             fsamp=sampling_rate,
+            win_ms=resolve_muap_window_ms(decomposition, port_index),
         )
         for motor_unit, unit_properties in zip(motor_units, properties, strict=True):
             motor_unit.props = unit_properties

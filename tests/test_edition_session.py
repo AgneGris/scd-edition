@@ -20,6 +20,7 @@ from scd_app.io.edition_session import (
     note_tag,
     notes_for_unit,
     remap_note_tags,
+    resolve_muap_window_ms,
 )
 
 
@@ -163,8 +164,33 @@ def test_aux_channel_mvc_in_native_volts_is_not_rescaled():
     assert channels[0]["mvc"] == 0.125
 
 
+@pytest.mark.parametrize("value", [None, "bad", 0, -5, np.nan, np.inf])
+def test_muap_window_resolver_uses_legacy_fallback_for_invalid_values(value):
+    decomposition = {"decomposition_params": [{"muap_window_ms": value}]}
+
+    assert resolve_muap_window_ms(decomposition, 0) == 25.0
+
+
+def test_muap_window_resolver_reads_the_per_array_setting():
+    decomposition = {
+        "decomposition_params": [
+            {"muap_window_ms": 20},
+            {"muap_window_ms": 31.5},
+        ]
+    }
+
+    assert resolve_muap_window_ms(decomposition, 1) == 31.5
+    assert resolve_muap_window_ms({}, 0) == 25.0
+
+
 def test_load_port_restores_channels_quality_flags_and_legacy_notes():
     emg = np.arange(60, dtype=float).reshape(3, 20)
+    property_kwargs = {}
+
+    def property_computer(**kwargs):
+        property_kwargs.update(kwargs)
+        return [MUProperties(n_spikes=2)]
+
     decomposition = {
         "chans_per_electrode": [3],
         "channel_indices": [np.array([0, 1, 2])],
@@ -177,6 +203,7 @@ def test_load_port_restores_channels_quality_flags_and_legacy_notes():
         "reviewed_mus": {"Grid 1": [0]},
         "reliability_overrides": {"Grid 1": {0: False}},
         "mu_notes": [["legacy\nnote"]],
+        "decomposition_params": [{"muap_window_ms": 32}],
     }
 
     loaded = load_edition_port(
@@ -190,7 +217,7 @@ def test_load_port_restores_channels_quality_flags_and_legacy_notes():
         channel_offset=0,
         full_source_mode=False,
         sampling_rate=1000.0,
-        property_computer=lambda **_kwargs: [MUProperties(n_spikes=2)],
+        property_computer=property_computer,
     )
 
     assert loaded.channel_count == 3
@@ -206,6 +233,7 @@ def test_load_port_restores_channels_quality_flags_and_legacy_notes():
     assert motor_unit.flagged_duplicate is True
     assert motor_unit.reviewed is True
     assert motor_unit.props.reliability_override is False
+    assert property_kwargs["win_ms"] == 32.0
     assert loaded.migrated_notes == ["0000-00-00 00:00:00 (Grid 1, MU 0): legacy note"]
 
 

@@ -546,7 +546,7 @@ def compute_port_properties(
         grid_positions:  channel-index → (row, col) mapping, or None
         grid_shape:      (rows, cols), or None for stacked layout
         fsamp:           Sampling frequency in Hz
-        win_ms:          MUAP window half-width in ms
+        win_ms:          Total MUAP window duration in ms
 
     Returns:
         List[MUProperties], one per MU in the same order as inputs.

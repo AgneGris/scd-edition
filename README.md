@@ -316,7 +316,7 @@ These apply to all grids:
 |-----------|--------------|
 | **SIL Threshold** | Minimum silhouette score for a source to be accepted as a motor unit. Higher = stricter (fewer but more reliable MUs). Default 0.9. This is the decomposition algorithm's own silhouette, computed differently from the SIL shown in the Quality chart — see [The silhouette is not the same number in the two tools](#the-silhouette-sil-is-not-the-same-number-in-the-two-tools). |
 | **Iterations** | Maximum number of optimisation steps per source. More iterations → longer runtime but potentially more MUs found. |
-| **MUAP Window (ms)** | Duration of the spike-triggered average window used for peel-off. |
+| **MUAP Window (ms)** | Duration of the spike-triggered-average window used for peel-off and for MUAP displays in the Edition tab. |
 | **Fitness** | Optimisation criterion: `SIL` (silhouette) or `CoV` (coefficient of variation of ISI). |
 | **Peel-off** | Whether to subtract each found motor unit from the signal before searching for the next. Recommended: on. |
 | **Swarm mode** | Enables the particle swarm optimiser. Recommended: on. |

@@ -5,7 +5,7 @@ ROA_THRESHOLD: float = 0.3  # rate-of-agreement threshold for flagging duplicate
 
 # Spike detection / MUAP computation
 MIN_PEAK_SEP: int = 30  # minimum sample separation between detected spikes
-MUAP_WIN_MS: int = 25  # total MUAP window duration in milliseconds
+MUAP_WIN_MS: int = 25  # legacy/import fallback total duration in milliseconds
 
 # ── Reliability thresholds ────────────────────────────────────────────────────
 # These are the single source of truth for both the per-metric colouring in the

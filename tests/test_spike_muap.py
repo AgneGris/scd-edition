@@ -405,6 +405,10 @@ def test_edition_inspection_does_not_modify_the_motor_unit():
     )
     tab._ports = {"Grid 1": [unit, other_unit]}
     tab._emg_data = {"Grid 1": np.zeros((1, 100))}
+    tab._original_decomp_data = {
+        "ports": ["Grid 1"],
+        "decomposition_params": [{"muap_window_ms": 18}],
+    }
     tab._current_port = "Grid 1"
     tab._current_mu_idx = 0
 
@@ -422,6 +426,7 @@ def test_edition_inspection_does_not_modify_the_motor_unit():
     assert tab._spike_muap_inspection_key == ("Grid 1", 0)
     passed_other_units = inspect.call_args.kwargs["other_unit_timestamps"]
     assert passed_other_units == []
+    assert inspect.call_args.kwargs["win_ms"] == 18.0
     plot_muap.assert_called_once_with()
 
     # The next unit sees MU 0's current timestamps, matching accepted-unit
@@ -439,6 +444,7 @@ def test_edition_inspection_does_not_modify_the_motor_unit():
     passed_other_units = inspect.call_args.kwargs["other_unit_timestamps"]
     assert len(passed_other_units) == 1
     np.testing.assert_array_equal(passed_other_units[0], timestamps)
+    assert inspect.call_args.kwargs["win_ms"] == 18.0
 
     tab.close()
     app.processEvents()

@@ -51,12 +51,14 @@ def _tab_with_two_units():
     tab._current_mu_idx = 0
     tab._end_sample = 100
     tab._original_decomp_data = {
+        "ports": ["Grid A"],
+        "decomposition_params": [{"muap_window_ms": 10}],
         "peel_off_sequence": [
             [
                 {"accepted_unit_idx": 0, "timestamps": merged.timestamps.copy()},
                 {"accepted_unit_idx": 1, "timestamps": later.timestamps.copy()},
             ]
-        ]
+        ],
     }
     tab._filter_recalc_available = True
     tab._refresh_port_combo()
@@ -103,6 +105,26 @@ def test_peak_height_suggestion_rejects_a_flat_distribution():
 
     with pytest.raises(ValueError, match="two separable levels"):
         suggest_split_by_peak_height(timestamps, source)
+
+
+def test_split_property_recomputation_uses_the_per_array_muap_window():
+    from scd_app.core.mu_properties import MUProperties
+
+    app = _application()
+    tab, merged, _later = _tab_with_two_units()
+    recomputed = MUProperties(n_spikes=len(merged.timestamps))
+
+    with patch(
+        "scd_app.gui.tabs.edition_tab.recompute_unit_properties",
+        return_value=recomputed,
+    ) as recompute:
+        result = tab._recompute_split_properties("Grid A", merged)
+
+    assert result is recomputed
+    assert recompute.call_args.kwargs["win_ms"] == 10.0
+
+    tab.close()
+    app.processEvents()
 
 
 def test_split_preview_is_non_destructive_and_cancelable():
@@ -156,7 +178,7 @@ def test_split_preview_overlays_group_muaps_until_canceled():
     tab.btn_split_unit.click()
 
     group_a, group_b = tab._split_preview_groups()
-    expected = split_preview_muaps(emg, group_a, group_b, tab._fsamp)
+    expected = split_preview_muaps(emg, group_a, group_b, tab._fsamp, win_ms=10)
     preview = tab._current_split_muap_preview()
     assert preview is not None
     assert (preview.n_group_a, preview.n_group_b) == (
@@ -176,7 +198,11 @@ def test_split_preview_overlays_group_muaps_until_canceled():
     assert tab._split_muap_timer.isActive()
     tab._refresh_split_muap_preview()
     expected = split_preview_muaps(
-        emg, np.array([10, 30, 50, 60]), np.array([20, 40]), tab._fsamp
+        emg,
+        np.array([10, 30, 50, 60]),
+        np.array([20, 40]),
+        tab._fsamp,
+        win_ms=10,
     )
     preview = tab._current_split_muap_preview()
     np.testing.assert_allclose(

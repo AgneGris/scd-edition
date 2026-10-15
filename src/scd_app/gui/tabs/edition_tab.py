@@ -107,6 +107,7 @@ from scd_app.io.edition_session import (
     normalise_notes,
     notes_for_unit,
     remap_note_tags,
+    resolve_muap_window_ms,
     sync_peel_sequence_to_discharge_times,
 )
 
@@ -1117,6 +1118,7 @@ class EditionTab(QWidget):
                     self._fsamp,
                     grid_positions=self._active_grid_positions.get(port_name),
                     grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
+                    win_ms=self._muap_window_for_port(port_name),
                 )
             except SpikeMUAPUnavailable as exc:
                 # Fall back to the parent unit's MUAP.
@@ -1418,6 +1420,7 @@ class EditionTab(QWidget):
             grid_positions=self._active_grid_positions.get(port_name),
             grid_shape=grid_config["grid_shape"] if grid_config else None,
             fsamp=self._fsamp,
+            win_ms=self._muap_window_for_port(port_name),
         )
 
     def _ensure_peel_group_ids(self) -> None:
@@ -2423,6 +2426,7 @@ class EditionTab(QWidget):
                 grid_positions=self._active_grid_positions.get(port_name),
                 grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
                 other_unit_timestamps=other_unit_timestamps,
+                win_ms=self._muap_window_for_port(port_name),
             )
         except SpikeMUAPUnavailable as exc:
             if had_inspection:
@@ -2871,6 +2875,21 @@ class EditionTab(QWidget):
             return None
         mus = self._ports.get(port, [])
         return mus[idx] if 0 <= idx < len(mus) else None
+
+    def _muap_window_for_port(self, port_name: str) -> float:
+        """Return the per-array MUAP duration saved by decomposition."""
+        decomposition = self._original_decomp_data or {}
+        saved_ports = decomposition.get("ports")
+        port_names = (
+            list(saved_ports)
+            if isinstance(saved_ports, (list, tuple))
+            else list(self._ports)
+        )
+        try:
+            port_index = port_names.index(port_name)
+        except ValueError:
+            return resolve_muap_window_ms({}, 0)
+        return resolve_muap_window_ms(decomposition, port_index)
 
     # ------------------------------------------------------------------
     # UI callbacks — port / MU selection
@@ -3779,6 +3798,7 @@ class EditionTab(QWidget):
             grid_positions=self._active_grid_positions.get(port_name),
             grid_shape=grid_cfg["grid_shape"] if grid_cfg else None,
             fsamp=self._fsamp,
+            win_ms=self._muap_window_for_port(port_name),
         )
         self._pending_source_changed = False
         if (self._current_port, self._current_mu_idx) == key:

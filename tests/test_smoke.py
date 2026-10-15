@@ -160,3 +160,28 @@ def test_copy_decomposition_configuration_confirms_updated_grids():
 
     tab.close()
     app.processEvents()
+
+
+def test_decomposition_plot_shows_squared_source_and_markers():
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
+
+    from scd_app.gui.tabs.decomposition_tab import DecompositionTab
+
+    app = QApplication.instance() or QApplication([])
+    tab = DecompositionTab()
+
+    tab._plot_source_realtime(
+        np.array([-2.0, 0.0, 3.0]),
+        np.array([0, 2]),
+        iteration=4,
+        silhouette=0.95,
+    )
+
+    source_line, marker_line = tab.figure.axes[0].lines
+    np.testing.assert_array_equal(source_line.get_ydata(), [4.0, 0.0, 9.0])
+    np.testing.assert_array_equal(marker_line.get_ydata(), [4.0, 9.0])
+    assert tab.figure.axes[0].get_ylabel() == "Squared amplitude"
+
+    tab.close()
+    app.processEvents()

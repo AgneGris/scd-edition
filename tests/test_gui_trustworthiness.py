@@ -754,6 +754,10 @@ def test_debounced_properties_update_the_edited_unit_after_selection_changes():
     tab._ports = {"Grid 1": units}
     tab._emg_data = {"Grid 1": np.zeros((2, 100))}
     tab._grid_info = {"Grid 1": None}
+    tab._original_decomp_data = {
+        "ports": ["Grid 1"],
+        "decomposition_params": [{"muap_window_ms": 36}],
+    }
     tab._pending_props_key = ("Grid 1", 0)
     tab._current_port = "Grid 1"
     tab._current_mu_idx = 1
@@ -766,6 +770,7 @@ def test_debounced_properties_update_the_edited_unit_after_selection_changes():
         tab._flush_props_update()
 
     recompute.assert_called_once()
+    assert recompute.call_args.kwargs["win_ms"] == 36.0
     assert units[0].props is recomputed
     assert units[1].props is None
 

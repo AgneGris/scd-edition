@@ -648,6 +648,10 @@ class DecompositionTab(QWidget):
         muap_win.setSingleStep(1)
         muap_win.setValue(defaults.get("muap_window_ms", 20.0))
         muap_win.setSuffix(" ms")
+        muap_win.setToolTip(
+            "Total spike-triggered-average duration used for peel-off and "
+            "Edition-tab MUAP displays."
+        )
         widgets["muap_window_ms"] = add_row("MUAP Window:", muap_win)
 
         self.param_widgets[port_name] = widgets
@@ -2379,6 +2383,11 @@ class DecompositionTab(QWidget):
         ax.set_facecolor(COLORS["background"])
 
         source_np = source.detach().cpu().numpy() if torch.is_tensor(source) else source
+        # SCD returns the signed spatial-filter output through its live callback,
+        # while timestamp detection uses the squared source.  Plot that same
+        # detection signal so the marked peaks and reported silhouette refer to
+        # the quantity visible to the user.
+        source_np = np.square(np.asarray(source_np))
         timestamps_np = (
             timestamps.detach().cpu().numpy()
             if torch.is_tensor(timestamps)
@@ -2405,7 +2414,7 @@ class DecompositionTab(QWidget):
             weight="bold",
         )
         ax.set_xlabel("Sample", color=COLORS["foreground"])
-        ax.set_ylabel("Amplitude", color=COLORS["foreground"])
+        ax.set_ylabel("Squared amplitude", color=COLORS["foreground"])
         ax.tick_params(colors=COLORS["foreground"])
 
         ax.spines["top"].set_visible(False)
