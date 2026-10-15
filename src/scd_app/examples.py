@@ -1,4 +1,4 @@
-"""Access to the example recording distributed with SCD Edition."""
+"""Access to the example recording distributed with SCD Studio."""
 
 from __future__ import annotations
 

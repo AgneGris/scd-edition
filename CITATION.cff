@@ -1,18 +1,18 @@
 cff-version: 1.2.0
 type: software
-message: "If you use SCD Edition, please cite this software and the relevant method papers."
+message: "If you use SCD Studio, please cite this software and the relevant method papers."
 authors:
   - family-names: "Grison"
     given-names: "Agnese"
     orcid: "https://orcid.org/0009-0001-5981-3589"
     email: "agnese.grison@outlook.it"
     affiliation: "Imperial College London"
-title: "SCD Edition"
-version: "0.1.0"
-date-released: "2026-09-19"
+title: "SCD Studio"
+version: "0.2.0"
+date-released: "2026-10-15"
 license: BSD-3-Clause
-repository-code: "https://github.com/AgneGris/scd-edition"
-url: "https://github.com/AgneGris/scd-edition"
+repository-code: "https://github.com/AgneGris/scd-studio"
+url: "https://github.com/AgneGris/scd-studio"
 keywords:
   - electromyography
   - motor units

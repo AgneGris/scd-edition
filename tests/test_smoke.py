@@ -14,7 +14,10 @@ def test_main_window_constructs_headlessly():
     window = MainWindow()
 
     assert scd_app is not None
-    assert window.windowTitle() == "SCD - EMG Decomposition & Edition"
+    assert (
+        window.windowTitle()
+        == "SCD Studio - EMG Decomposition, Edition & Visualisation"
+    )
     assert window.tabs.count() == 4
 
     window.close()
@@ -38,7 +41,7 @@ def test_help_menu_exposes_support_diagnostics(tmp_path):
     assert "Open &Log Folder" in [action.text() for action in help_menu.actions()]
     assert "&Copy Diagnostics" in [action.text() for action in help_menu.actions()]
 
-    log_path = tmp_path / "scd-edition.log"
+    log_path = tmp_path / "scd-studio.log"
     with (
         patch("scd_app.gui.main_window.configure_logging", return_value=log_path),
         patch(

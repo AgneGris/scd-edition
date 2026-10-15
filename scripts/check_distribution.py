@@ -22,6 +22,7 @@ REQUIRED_WHEEL_SUFFIXES = {
     "scd_app/_vendor/motor_unit_toolbox/spike_comp.py",
 }
 PROJECT = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+DIST_BASENAME = PROJECT["name"].replace("-", "_")
 
 
 def _only(pattern: str) -> Path:
@@ -42,6 +43,13 @@ def check_wheel(path: Path) -> None:
             name for name in names if name.endswith(".dist-info/METADATA")
         )
         metadata = email.message_from_bytes(archive.read(metadata_name))
+        entry_points_name = next(
+            name for name in names if name.endswith(".dist-info/entry_points.txt")
+        )
+        entry_points = archive.read(entry_points_name).decode("utf-8")
+        for command in ("scd-studio", "scd-edition"):
+            if f"{command} = scd_app.gui.main_window:main" not in entry_points:
+                raise AssertionError(f"Wheel is missing the {command!r} command")
         requirements = metadata.get_all("Requires-Dist", [])
         if any("git+" in requirement for requirement in requirements):
             raise AssertionError("Wheel metadata contains a direct Git dependency")
@@ -75,8 +83,8 @@ def check_sdist(path: Path) -> None:
 
 
 def main() -> int:
-    check_wheel(_only("*.whl"))
-    check_sdist(_only("*.tar.gz"))
+    check_wheel(_only(f"{DIST_BASENAME}-*.whl"))
+    check_sdist(_only(f"{DIST_BASENAME}-*.tar.gz"))
     print("Distribution contents and metadata are valid.")
     return 0
 

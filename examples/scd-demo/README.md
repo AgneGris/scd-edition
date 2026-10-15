@@ -1,6 +1,6 @@
 # Example dataset
 
-This folder contains a small, self-contained dataset for exploring SCD Edition
+This folder contains a small, self-contained dataset for exploring SCD Studio
 without using your own recording.
 
 ## Files
@@ -14,7 +14,7 @@ without using your own recording.
 
 ## Using the example
 
-To inspect the completed decomposition, launch SCD Edition, open the
+To inspect the completed decomposition, launch SCD Studio, open the
 **Edition** tab, click **Load**, and select `emg_decomp_output.pkl`. You can
 review and edit its source signals and spike trains immediately.
 
@@ -26,7 +26,7 @@ for workflows that need the original recording.
 To start from the raw recording instead, run:
 
 ```bash
-scd-edition --example
+scd-studio --example
 ```
 
 This opens the application with the same recording's sampling rate, channel

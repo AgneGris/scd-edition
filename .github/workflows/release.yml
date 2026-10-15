@@ -67,13 +67,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build/pyinstaller | Out-Null
-          python -m PyInstaller --name SCD-Edition --onedir --windowed --clean --noconfirm --specpath build/pyinstaller --collect-data scd_app --collect-data scd --exclude-module IPython --exclude-module jedi --exclude-module jupyter --exclude-module notebook --exclude-module pandas --exclude-module pytest --exclude-module tkinter --exclude-module zmq src/scd_app/__main__.py
-          $process = Start-Process -FilePath "dist/SCD-Edition/SCD-Edition.exe" -ArgumentList "--help" -WindowStyle Hidden -Wait -PassThru
+          python -m PyInstaller --name SCD-Studio --onedir --windowed --clean --noconfirm --specpath build/pyinstaller --collect-data scd_app --collect-data scd --exclude-module IPython --exclude-module jedi --exclude-module jupyter --exclude-module notebook --exclude-module pandas --exclude-module pytest --exclude-module tkinter --exclude-module zmq src/scd_app/__main__.py
+          $process = Start-Process -FilePath "dist/SCD-Studio/SCD-Studio.exe" -ArgumentList "--help" -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Packaged application smoke test failed with exit code $($process.ExitCode)" }
-          Copy-Item LICENSE, README.md, THIRD_PARTY_NOTICES.md -Destination dist/SCD-Edition
+          Copy-Item LICENSE, README.md, THIRD_PARTY_NOTICES.md -Destination dist/SCD-Studio
           $version = $env:GITHUB_REF_NAME.TrimStart("v")
           New-Item -ItemType Directory -Path release | Out-Null
-          Compress-Archive -Path dist/SCD-Edition/* -DestinationPath "release/scd-edition-$version-windows-x86_64.zip"
+          Compress-Archive -Path dist/SCD-Studio/* -DestinationPath "release/scd-studio-$version-windows-x86_64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-application
@@ -104,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/scd-edition/
+      url: https://pypi.org/project/scd-studio/
     permissions:
       id-token: write
     steps:

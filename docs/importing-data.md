@@ -1,7 +1,7 @@
 # Importing recordings without a built-in loader
 
 Use the simplest route that preserves the original signal values and sampling
-rate. SCD Edition never needs arbitrary Python embedded in a loader profile.
+rate. SCD Studio never needs arbitrary Python embedded in a loader profile.
 
 ## MATLAB, HDF5, NumPy, CSV, or text
 

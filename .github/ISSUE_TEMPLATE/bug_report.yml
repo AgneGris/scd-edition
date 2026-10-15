@@ -10,9 +10,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: SCD Edition version
+      label: SCD Studio version
       description: Release number or commit hash.
-      placeholder: "0.1.0"
+      placeholder: "0.2.0"
     validations:
       required: true
   - type: dropdown

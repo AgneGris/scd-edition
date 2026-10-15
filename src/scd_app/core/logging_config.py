@@ -7,20 +7,21 @@ import os
 import platform
 import sys
 import tempfile
-from importlib.metadata import PackageNotFoundError, version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from types import TracebackType
 
 import torch
 
+from scd_app.core.package_metadata import installed_app_version
+
 APP_LOGGER_NAME = "scd_app"
-LOG_FILE_NAME = "scd-edition.log"
-_HANDLER_MARKER = "_scd_edition_handler"
+LOG_FILE_NAME = "scd-studio.log"
+_HANDLER_MARKER = "_scd_studio_handler"
 
 
 def get_log_directory() -> Path:
-    """Return the platform-appropriate directory for SCD Edition logs."""
+    """Return the platform-appropriate directory for SCD Studio logs."""
     override = os.environ.get("SCD_LOG_DIR")
     if override:
         return Path(override).expanduser()
@@ -28,12 +29,12 @@ def get_log_directory() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA")
         return (
-            Path(base) / "SCD Edition" / "logs"
+            Path(base) / "SCD Studio" / "logs"
             if base
-            else Path.home() / "AppData" / "Local" / "SCD Edition" / "logs"
+            else Path.home() / "AppData" / "Local" / "SCD Studio" / "logs"
         )
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Logs" / "SCD Edition"
+        return Path.home() / "Library" / "Logs" / "SCD Studio"
 
     state_home = os.environ.get("XDG_STATE_HOME")
     base = (
@@ -41,7 +42,7 @@ def get_log_directory() -> Path:
         if state_home
         else Path.home() / ".local" / "state"
     )
-    return base / "scd-edition" / "logs"
+    return base / "scd-studio" / "logs"
 
 
 def _create_log_directory(log_directory: Path | None = None) -> Path:
@@ -52,7 +53,7 @@ def _create_log_directory(log_directory: Path | None = None) -> Path:
         directory.mkdir(parents=True, exist_ok=True)
         return directory
     except OSError:
-        fallback = Path(tempfile.gettempdir()) / "scd-edition" / "logs"
+        fallback = Path(tempfile.gettempdir()) / "scd-studio" / "logs"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
 
@@ -104,14 +105,11 @@ def shutdown_logging() -> None:
 
 def runtime_diagnostics(log_path: Path | None = None) -> str:
     """Return non-recording-specific runtime information for support reports."""
-    try:
-        app_version = version("scd-edition")
-    except PackageNotFoundError:
-        app_version = "development checkout"
+    app_version = installed_app_version()
 
     cuda_available = torch.cuda.is_available()
     lines = [
-        f"SCD Edition: {app_version}",
+        f"SCD Studio: {app_version}",
         f"Python: {platform.python_version()}",
         f"Operating system: {platform.platform()}",
         f"Architecture: {platform.machine()}",
@@ -137,7 +135,7 @@ def log_startup_diagnostics(log_path: Path) -> None:
 
 def install_exception_hook() -> None:
     """Log otherwise-uncaught Python exceptions before normal handling."""
-    if getattr(sys.excepthook, "_scd_edition_hook", False):
+    if getattr(sys.excepthook, "_scd_studio_hook", False):
         return
 
     previous_hook = sys.excepthook
@@ -157,5 +155,5 @@ def install_exception_hook() -> None:
         if sys.stderr is not None:
             previous_hook(exc_type, exc_value, traceback)
 
-    log_exception._scd_edition_hook = True
+    log_exception._scd_studio_hook = True
     sys.excepthook = log_exception

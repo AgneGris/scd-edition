@@ -1,5 +1,5 @@
 """
-Configuration management for SCD-Edition.
+Configuration management for SCD Studio.
 Handles session settings, electrode presets, and serialization.
 """
 

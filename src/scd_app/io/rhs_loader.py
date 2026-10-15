@@ -5,7 +5,7 @@ header describing the amplifier settings and every signal channel, followed by
 fixed-size blocks of 128 samples. Within a block each stream is stored
 channel-major, i.e. all 128 samples of channel 0, then channel 1, and so on.
 
-Only the streams SCD Edition needs are decoded:
+Only the streams SCD Studio needs are decoded:
 
     emg        → enabled amplifier channels, converted to mV
     aux        → enabled board ADC inputs, converted to V

@@ -2,7 +2,7 @@
 
 The upstream file is a pickle and must only be supplied from a trusted source.
 Its numerical decomposition content is preserved; only the missing run metadata
-is added before conversion to the native SCD Edition schema.
+is added before conversion to the native SCD Studio session schema.
 """
 
 from __future__ import annotations

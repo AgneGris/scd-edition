@@ -10,4 +10,4 @@ copied from commit `8cd6153788b730383d6d6a1833ee99899ee5bcfb`.
 - SHA-256: `ef0283ca7e541268c929d943e3a23df630fa9fb9566a714f82c80b36e615f17a`
 - License: BSD-3-Clause
 
-Run `scd-edition --example` to open it with the matching configuration.
+Run `scd-studio --example` to open it with the matching configuration.

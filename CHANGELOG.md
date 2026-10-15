@@ -1,9 +1,13 @@
 # Changelog
 
-All notable changes to SCD Edition are documented here.
+All notable changes to SCD Studio are documented here.
 
 ## Unreleased
 
+- Rename the public application, distribution, repository references, command,
+  Windows executable and release artifacts from SCD Edition to SCD Studio.
+  Retain `scd-edition` as a command alias and preserve existing Python imports,
+  session files and audit schema identifiers.
 - Add an editable automatic preview for splitting merged motor units into
   high-amplitude A and low-amplitude B children, with persistent lineage and
   split-aware filter recalculation through sequential peel-off replay.

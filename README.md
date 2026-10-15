@@ -1,7 +1,7 @@
-# SCD Edition
+# SCD Studio
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![PyPI](https://img.shields.io/pypi/v/scd-edition.svg)](https://pypi.org/project/scd-edition/)
+[![PyPI](https://img.shields.io/pypi/v/scd-studio.svg)](https://pypi.org/project/scd-studio/)
 [![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)
 
 A graphical application for researchers and engineers to decompose high-density surface or intramuscular EMG recordings into individual motor unit spike trains, edit them manually, and visualise population-level discharge behaviour.
@@ -9,7 +9,7 @@ A graphical application for researchers and engineers to decompose high-density 
 Supports OT Bioelettronica `.otb+`/`.otb4`, Intan `.rhs`, MATLAB, HDF5,
 NumPy and CSV recordings on Windows, Linux and macOS.
 
-![SCD Edition demo](docs/demo.gif)
+![SCD Studio demo](docs/demo.gif)
 
 ### Interface at a glance
 
@@ -54,18 +54,28 @@ The desktop interface uses the official [Qt for Python (PySide6)](https://doc.qt
 ### From PyPI (recommended)
 
 ```bash
-pip install scd-edition
+pip install scd-studio
 ```
 
 Windows users who do not want to manage Python can instead download the
 `windows-x86_64.zip` archive from the latest GitHub Release, extract it and run
-`SCD-Edition.exe`. This standalone build is CPU-only; use a source installation
+`SCD-Studio.exe`. This standalone build is CPU-only; use a source installation
 with the `cuda` extra for NVIDIA GPU acceleration.
+
+If SCD Edition 0.1.x is already installed, replace the old distribution once:
+
+```bash
+pip uninstall scd-edition
+pip install scd-studio
+```
+
+The `scd-edition` command remains available as a compatibility alias, and
+existing decomposition files continue to open without conversion.
 
 ### Latest development version
 
 ```bash
-pip install git+https://github.com/AgneGris/scd-edition.git
+pip install git+https://github.com/AgneGris/scd-studio.git
 ```
 
 All dependencies install automatically.
@@ -79,8 +89,8 @@ On Windows, this route may install a CPU-only PyTorch build. Use the CUDA-enable
 Clone the repository, then choose the command for your platform:
 
 ```bash
-git clone https://github.com/AgneGris/scd-edition
-cd scd-edition
+git clone https://github.com/AgneGris/scd-studio
+cd scd-studio
 ```
 
 On Windows, install and require a uv-managed Python to avoid DLL conflicts with Conda or Anaconda:
@@ -119,25 +129,25 @@ uv sync --python 3.13 --managed-python --extra cpu
 The `cpu` and `cuda` extras are mutually exclusive, and `uv` does not remember
 which one was used by an earlier sync. When running project commands through
 `uv run`, repeat the selected extra. For CUDA, use
-`uv run --extra cuda scd-edition`. Alternatively, use `uv run --no-sync` after
+`uv run --extra cuda scd-studio`. Alternatively, use `uv run --no-sync` after
 a successful sync. A bare `uv run` may replace the installed PyTorch variant.
 
 ### From source with pip
 
 ```bash
-git clone https://github.com/AgneGris/scd-edition
-cd scd-edition
+git clone https://github.com/AgneGris/scd-studio
+cd scd-studio
 pip install -e .
 ```
 
 ## Two-minute example
 
-SCD Edition includes a 64-channel, 10-second surface EMG example. Open the raw
+SCD Studio includes a 64-channel, 10-second surface EMG example. Open the raw
 recording with its loader, sampling rate and electrode layout already filled
 in:
 
 ```bash
-scd-edition --example
+scd-studio --example
 ```
 
 Then:
@@ -167,13 +177,13 @@ Decomposition project.
 
 ## Choosing a tool
 
-SCD Edition is one of several strong tools for motor-unit decomposition. The
+SCD Studio is one of several strong tools for motor-unit decomposition. The
 right choice depends on the algorithm, acquisition system and analysis workflow;
 this table describes scope rather than ranking performance.
 
 | Tool | Decomposition and scope | Environment and access | Particularly useful when |
 |---|---|---|---|
-| **SCD Edition** | Swarm Contrastive Decomposition; surface and intramuscular EMG; integrated review, spike editing and population plots | Open-source BSD Python/Qt app; PyPI and a standalone Windows release | You want the SCD method and a reproducible path from raw recording to edited units |
+| **SCD Studio** | Swarm Contrastive Decomposition; surface and intramuscular EMG; integrated review, spike editing and population plots | Open-source BSD Python/Qt app; PyPI and a standalone Windows release | You want the SCD method and a reproducible path from raw recording to edited units |
 | [DEMUSE](https://demuse.feri.um.si/) | CKC decomposition, accuracy assessment and manual editing for multichannel surface EMG | Commercially available MATLAB program | You want the established CKC/DEMUSE workflow |
 | [OTBioLab+](https://otbioelettronica.it/en/software/) | Manufacturer acquisition and processing suite with motor-unit decomposition | Vendor-distributed desktop software | You acquire with OT Bioelettronica hardware and want its native workflow |
 | [openhdemg](https://github.com/GiacomoValliPhD/openhdemg) | Convolutive BSS plus broad import, analysis, tracking and editing functionality for HD-sEMG | Open-source BSD Python framework with graphical software | You need a broad motor-unit analysis library or interoperability with several decomposition formats |
@@ -188,7 +198,7 @@ interchangeable.
 ## Launching the app
 
 ```bash
-scd-edition
+scd-studio
 ```
 
 Or, if the entry point is not on your PATH:
@@ -226,7 +236,7 @@ What differs from an in-app decomposition:
 
 The package accepts sources using a silhouette it computes during decomposition; this app computes its own SIL for the Quality chart and the reliability flag. They are different quantities and should not be compared or thresholded interchangeably. This also applies to decompositions run in the Decomposition tab, whose *SIL Threshold* is the package's acceptance silhouette.
 
-| | `swarm-contrastive-decomposition` (`dictionary["silhouettes"]`) | SCD Edition (MU properties, Quality chart) |
+| | `swarm-contrastive-decomposition` (`dictionary["silhouettes"]`) | SCD Studio (MU properties, Quality chart) |
 |---|---|---|
 | When | During decomposition, at the iteration that accepted the unit; frozen in the output | After loading and after every edit, from the unit's current spikes |
 | Source | The source of that iteration: computed from the peeled EMG (earlier units removed), restricted to the decomposition window, edge-masked, clamped, squared | The full-length source recomputed on load (spike-triggered-average filter on the whole recording, z-scored on the decomposition window), squared; not clamped or edge-masked |
@@ -562,9 +572,9 @@ not contain signal samples, spike timestamps, note text, or absolute paths.
 Input and output filenames can still contain participant identifiers, so
 review an audit report before sharing it publicly.
 
-To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select the `.pkl` file. The app automatically recognises both SCD Edition files and raw `*_scddict.pkl` output from `swarm-contrastive-decomposition`. Raw SCD output is converted into a one-grid Edition session; the muscle label in the filename is used as the grid name, and any companion `*_scdcommit.txt` is retained as provenance.
+To **reload** a decomposition: in Tab 3, click **Load Decomposition** and select the `.pkl` file. The app automatically recognises both SCD Studio files (including files created by SCD Edition 0.1.x) and raw `*_scddict.pkl` output from `swarm-contrastive-decomposition`. Raw SCD output is converted into a one-grid Edition session; the muscle label in the filename is used as the grid name, and any companion `*_scdcommit.txt` is retained as provenance.
 
-SCD Edition files that contain the original EMG can replay peel-off and recalculate filters. Raw `swarm-contrastive-decomposition` output contains it too when saved with the package's default `save_data=True` (version 0.2.3 or later), so it gets the same treatment; output saved without the signal remains editable and can be saved from Edition, but filter/MUAP recalculation is unavailable. See [Decomposing with the SCD package, editing here](#decomposing-with-the-scd-package-editing-here).
+SCD Studio files that contain the original EMG can replay peel-off and recalculate filters. Raw `swarm-contrastive-decomposition` output contains it too when saved with the package's default `save_data=True` (version 0.2.3 or later), so it gets the same treatment; output saved without the signal remains editable and can be saved from Edition, but filter/MUAP recalculation is unavailable. See [Decomposing with the SCD package, editing here](#decomposing-with-the-scd-package-editing-here).
 
 When a previously edited file contains the original EMG, the app reopens it on
 the full recording, preserving saved spike edits even outside the original
@@ -639,7 +649,7 @@ Edition shortcuts (after a decomposition is loaded):
 | `.h5`, `.hdf5` | HDF5. Numeric datasets can be selected with **Inspect arrays…**; portable SCD HDF5 files are recognised automatically. |
 | `.npy` | NumPy array, shape `(channels, samples)` or `(samples, channels)` — the longer axis is assumed to be time. |
 | `.csv`, `.txt` | Numeric samples × channels table. CSV accepts one header row; text is whitespace-delimited. |
-| `.pkl` (Edition tab) | SCD Edition files, and raw output of the [`swarm-contrastive-decomposition`](https://github.com/AgneGris/swarm-contrastive-decomposition) package (`scd.save_results`), which is converted on load. |
+| `.pkl` (Edition tab) | SCD Studio files, including SCD Edition 0.1.x files, and raw output of the [`swarm-contrastive-decomposition`](https://github.com/AgneGris/swarm-contrastive-decomposition) package (`scd.save_results`), which is converted on load. |
 
 ## Importing an unfamiliar format
 
@@ -730,16 +740,16 @@ After running decomposition, switch to Tab 4 and open the **DR vs Force** sub-ta
 
 ## Citation
 
-If you use SCD Edition, please cite the software itself. The DOI will be added
+If you use SCD Studio, please cite the software itself. The DOI will be added
 here after the first archived release; until then, use:
 
 ```bibtex
-@software{grison_scd_edition_2026,
+@software{grison_scd_studio_2026,
   author = {Grison, Agnese},
-  title = {SCD Edition},
-  version = {0.1.0},
+  title = {SCD Studio},
+  version = {0.2.0},
   year = {2026},
-  url = {https://github.com/AgneGris/scd-edition}
+  url = {https://github.com/AgneGris/scd-studio}
 }
 ```
 
@@ -775,7 +785,7 @@ Machine-readable citation metadata are available in [`CITATION.cff`](CITATION.cf
 
 ## Diagnostics and logs
 
-SCD Edition keeps a small set of rotating diagnostic logs on your computer.
+SCD Studio keeps a small set of rotating diagnostic logs on your computer.
 Use **Help > Open Log Folder** to find them, or **Help > Copy Diagnostics** to
 copy the software, Python, operating-system and compute-backend details needed
 for a useful bug report. Logs are limited to five 2 MB backups plus the active
@@ -798,12 +808,12 @@ The optional paper-style four-panel figure is generated from the real files in
 uv run python scripts/capture_demo.py --overview-only
 ```
 
-It writes `docs/figures/scd-edition-tabs.png`. The PNG is intentionally
+It writes `docs/figures/scd-studio-tabs.png`. The PNG is intentionally
 gitignored; the capture code and example data are its reproducible source.
 
 ## License
 
-SCD Edition is open-source software licensed under the [BSD 3-Clause License](LICENSE).
+SCD Studio is open-source software licensed under the [BSD 3-Clause License](LICENSE).
 
 Third-party packages, including PySide6 and Qt, retain their own licences.
 Vendored code and example-data provenance are listed in

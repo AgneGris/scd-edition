@@ -1,4 +1,4 @@
-"""Vendored Motor Unit Toolbox routines used by SCD Edition.
+"""Vendored Motor Unit Toolbox routines used by SCD Studio.
 
 Upstream: https://github.com/imendezguerra/motor_unit_toolbox
 Version: 1.0, commit d84dc6c943daa5d686b2911b48b13bf718628130

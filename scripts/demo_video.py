@@ -670,7 +670,7 @@ class _Renderer:
         draw = ImageDraw.Draw(canvas)
         y = layout.height - layout.footer / 2
         draw.text(
-            (MARGIN, y), "SCD-Edition", font=self.wordmark_font, fill=TEXT, anchor="lm"
+            (MARGIN, y), "SCD Studio", font=self.wordmark_font, fill=TEXT, anchor="lm"
         )
         previous, current, progress = self.tl.stages.at(time)
         gap = 30
@@ -729,15 +729,15 @@ class _Renderer:
         canvas = canvas.convert("RGBA")
         width, height = self.layout.width, self.layout.height
         items = [
-            ("SCD-Edition", _font("Bold", 96), TEXT),
+            ("SCD Studio", _font("Bold", 96), TEXT),
             (
                 "Open-source GUI for HD-EMG decomposition",
                 _font("Regular", 32),
                 TEXT_DIM,
             ),
             ("and motor-unit editing", _font("Regular", 32), TEXT_DIM),
-            ("pip install scd-edition", _font("Medium", 32), TEXT),
-            ("github.com/AgneGris/scd-edition", _font("Medium", 30), ACCENT),
+            ("pip install scd-studio", _font("Medium", 32), TEXT),
+            ("github.com/AgneGris/scd-studio", _font("Medium", 30), ACCENT),
         ]
         offsets = [0, 128, 172, 262, 352]
         top = height / 2 - 210
